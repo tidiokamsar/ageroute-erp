@@ -29,6 +29,17 @@ import { receptionsRouter } from "./modules/receptions/receptions.routes";
 import { bpmnRouter } from "./modules/bpmn/bpmn.routes";
 import { requireAuth } from "./middleware/auth.middleware";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
+import { checkModuleAccess } from "./middleware/moduleAccess.middleware";
+// Modules livrés dans le binaire qui tourne en production mais absents de ce
+// fichier : sans ces montages, un rebuild retire 7 routes de l'API sans la
+// moindre erreur — les écrans correspondants cessent simplement de répondre.
+import { delegationsRouter } from "./modules/delegations/delegations.routes";
+import { revisionRouter } from "./modules/revision/revision.routes";
+import { searchRouter } from "./modules/search/search.routes";
+import { portailRouter } from "./modules/portail/portail.routes";
+import { exportRouter } from "./modules/export/export.routes";
+import { signatureAuditRouter } from "./modules/signature-audit/signature-audit.routes";
+import { fundingRouter } from "./modules/funding/funding.routes";
 import { prisma } from "./lib/prisma";
 import { logAudit } from "./lib/audit";
 
@@ -90,6 +101,12 @@ export function createApp() {
   app.use("/api/circuit-financier", circuitFinancierRouter);
   // §22 CDC — paramétrage métier
   app.use("/api/parametrage", parametrageRouter);
+  // Délégation d'intérim (suppléants workflow)
+  app.use("/api/delegations", requireAuth, checkModuleAccess("delegations"), delegationsRouter);
+  // Révision de prix (FIDIC)
+  app.use("/api/revision", requireAuth, checkModuleAccess("revision"), revisionRouter);
+  // Recherche globale (respecte le périmètre d'affectation)
+  app.use("/api/search", requireAuth, searchRouter);
   // §CDC — Conformité entreprise (score, blocage, historique)
   app.use("/api/conformite", conformiteRouter);
   // Gestion des Garanties marchés
@@ -98,8 +115,18 @@ export function createApp() {
   app.use("/api/receptions", receptionsRouter);
   // Moteur BPMN générique — 5 modules (Projet/Marché/Attachement/Décompte/Conformité)
   app.use("/api/bpmn", bpmnRouter);
-  // Résumé public agrégé pour l'intégration SharePoint (SIGTIR) — lecture seule, sans auth.
-  // N'expose que des agrégats et quelques décomptes récents (déjà consultable via /api/public/marche/:numContrat).
+  app.use("/api/portail", portailRouter);
+  app.use("/api/export", exportRouter);
+  app.use("/api/signature-audit", signatureAuditRouter);
+  // Monté à la racine /api : doit rester APRÈS toutes les routes spécifiques,
+  // sinon il les masque.
+  app.use("/api", fundingRouter);
+
+  // Résumé public agrégé pour l'intégration SharePoint (SIGTIR) — lecture seule, SANS authentification.
+  // Publie le budget total et les derniers décomptes : le binaire en production ne l'expose PAS.
+  // Le déployer tel quel ouvrirait cet accès sans décision explicite, d'où ce garde-fou :
+  // activer en posant SIGTIR_PUBLIC_SUMMARY=true.
+  if (process.env.SIGTIR_PUBLIC_SUMMARY === "true") {
   app.get("/api/public/sigtir-summary", async (_req, res, next) => {
     try {
       const [
@@ -153,6 +180,7 @@ export function createApp() {
       });
     } catch (err) { next(err); }
   });
+  }
 
   // Vérification publique par token (sans auth) — même handler que /api/signature/verifier/:token
   app.get("/api/public/verifier/:token", async (req, res, next) => {
