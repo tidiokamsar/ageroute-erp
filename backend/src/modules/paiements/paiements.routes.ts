@@ -1,0 +1,55 @@
+import { Router, type Request, type Response, type NextFunction } from "express";
+import { requireAuth } from "../../middleware/auth.middleware";
+import { requireRole } from "../../middleware/rbac.middleware";
+import { prisma } from "../../lib/prisma";
+import { logAudit } from "../../lib/audit";
+import { ApiError } from "../../middleware/error.middleware";
+import { z } from "zod";
+
+export const paiementsRouter = Router();
+paiementsRouter.use(requireAuth);
+
+const schema = z.object({
+  decompteId: z.string().uuid(),
+  montantGnf: z.number().positive().transform((v) => BigInt(Math.round(v))),
+  dateOrdre: z.coerce.date().optional(),
+  dateExecution: z.coerce.date().optional(),
+  reference: z.string().optional(),
+  banque: z.string().optional(),
+  observations: z.string().optional(),
+});
+
+paiementsRouter.get("/decompte/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const paiements = await prisma.paiement.findMany({
+      where: { decompteId: req.params.decompteId },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(paiements);
+  } catch (err) { next(err); }
+});
+
+paiementsRouter.post("/", requireRole("ADMIN", "DAF"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentification requise");
+    const data = schema.parse(req.body);
+    const decompte = await prisma.decompte.findFirst({ where: { id: data.decompteId, deletedAt: null } });
+    if (!decompte) throw new ApiError(404, "Décompte introuvable");
+    if (!["VALIDE", "PAYE"].includes(decompte.statut)) throw new ApiError(400, "Le décompte doit être validé avant paiement");
+
+    const p = await prisma.paiement.create({ data });
+    // Marquer décompte PAYE
+    await prisma.decompte.update({ where: { id: data.decompteId }, data: { statut: "PAYE", datePaiement: data.dateExecution ?? new Date() } });
+    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "Paiement", entityId: p.id, after: { montant: data.montantGnf.toString() } });
+    res.status(201).json(p);
+  } catch (err) { next(err); }
+});
+
+paiementsRouter.delete("/:id", requireRole("ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentification requise");
+    await prisma.paiement.delete({ where: { id: req.params.id } });
+    await logAudit({ userId: req.user.id, action: "DELETE", entityType: "Paiement", entityId: req.params.id });
+    res.status(204).send();
+  } catch (err) { next(err); }
+});

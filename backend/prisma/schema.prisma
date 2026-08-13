@@ -1,0 +1,1602 @@
+generator client {
+  provider      = "prisma-client-js"
+  // Debian slim (node:20-slim) + OpenSSL 3.0 : moteur natif debian-openssl-3.0.x
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===================== ENUMS =====================
+
+enum Role {
+  ADMIN
+  DG
+  DAF
+  DMC
+  UGP
+  MISSION
+  TECHNIQUE
+  ENTREPRISE
+  AUDITEUR
+  BAILLEUR   // représentant bailleur externe (BM, BAD, UE, BOAD, BID)
+  BUDGET     // Direction du Budget / MEF — §16.1
+  TRESOR     // Direction Générale du Trésor / DNTCP
+  FER_AGT    // Fonds d'Entretien Routier — §16.1
+  BCRG       // Banque Centrale de la République de Guinée — §16.1
+}
+
+enum StatutEntreprise {
+  EN_ATTENTE          // pending — vient d'être créée
+  A_REGULARISER       // warning — documents à compléter
+  CONFORME            // verified — tous critères OK
+  AUTORISE            // authorized — autorisée à contracter
+  ALERTE              // alerte active (document expirant)
+  BLOQUE              // blocked — bloquée par décision admin
+  SUSPENDU            // suspended — suspension temporaire
+  ARCHIVE             // archived — plus active
+}
+
+enum TypeDocument {
+  REGISTRE_COMMERCE
+  STATUTS_SOCIETE
+  NIF_DOCUMENT
+  TVA_DOCUMENT
+  ATTESTATION_FISCALE
+  ATTESTATION_SOCIALE
+  PIECE_REPRESENTANT
+  AGREMENT_TECHNIQUE
+  AUTORISATION_SPECIFIQUE
+  RELEVE_BANCAIRE
+  BILAN_COMPTABLE
+  AUTRE
+}
+
+enum TypeMarche {
+  TRAVAUX
+  SERVICES
+  FOURNITURES
+  ETUDES
+}
+
+enum ProcedurePassation {
+  APPEL_OFFRES_OUVERT
+  APPEL_OFFRES_RESTREINT
+  GRES_A_GRES
+  CONSULTATION
+}
+
+enum StatutMarche {
+  BROUILLON
+  EN_PREPARATION
+  SIGNE
+  NOTIFIE
+  EN_EXECUTION
+  ACTIF           // alias rétrocompat
+  SUSPENDU
+  EN_AVENANT
+  EN_RECEPTION_PROVISOIRE
+  EN_RECEPTION_DEFINITIVE
+  RESILIE
+  SOLDE
+  CLOTURE
+}
+
+enum TypeFinancement {
+  BANQUE_MONDIALE
+  BAD
+  BUDGET_NATIONAL
+  FER
+  BOAD
+  BID
+  UE
+  BADEA
+  AFD
+  KFW
+  AUTRE
+}
+
+enum TypeDecompte {
+  AVANCE
+  PROVISOIRE
+  PARTIEL
+  INTERMEDIAIRE
+  FINAL
+  CLOTURE
+  APRES_AVENANT
+}
+
+// §17 CDC — suivi statut complet visible entreprise + services internes
+enum StatutDecompte {
+  BROUILLON           // créé, non soumis
+  SOUMIS              // soumis par l'entreprise (alias BPMN)
+  DEPOSE              // soumis par l'entreprise (§7 CDC)
+  EN_CONTROLE         // vérification Mission / Direction Technique (§12 CDC)
+  EN_CORRECTION       // correction demandée (§10 CDC)
+  EN_VALIDATION       // en cours de validation DMC
+  VISA_DAF            // visa Direction Administrative et Financière
+  VISA_DG             // visa Directeur Général (§15 CDC)
+  VALIDE_DG           // approuvé par la DG (rétrocompat)
+  EN_CIRCUIT_FINANCIER // transmis au circuit de paiement (§16 CDC)
+  ORDONNANCE          // ordonnancé
+  VALIDE              // validé générique (rétrocompat)
+  REJETE
+  PAYE
+}
+
+enum StatutWorkflow {
+  EN_ATTENTE
+  EN_COURS
+  APPROUVE
+  REJETE
+  EXPIRE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  SIGN
+  LOGIN
+  LOGIN_FAILED
+}
+
+// ===================== §9 CDC — ATTACHEMENTS BPMN =====================
+
+enum StatutAttachement {
+  BROUILLON              // Saisie en cours
+  SOUMIS                 // Soumis pour contrôle mission
+  EN_CONTROLE_MISSION    // En cours de vérification Mission
+  EN_CONTROLE_TECHNIQUE  // Transmis au contrôle technique Direction
+  DEMANDE_CORRECTION     // Correction demandée (retour entreprise)
+  VALIDE                 // Validé — transmis au module Décomptes
+  REJETE                 // Rejeté définitif
+}
+
+enum TypeAttachement {
+  MENSUEL    // Attachement mensuel standard
+  PARTIEL    // Attachement partiel (en cours de période)
+  FINAL      // Attachement final de solde
+  AVENANT    // Lié à un avenant (travaux supplémentaires)
+  RECEPTION  // Lié à une réception (OPR/provisoire/définitive)
+}
+
+// ===================== UTILISATEURS =====================
+
+model User {
+  id               String    @id @default(uuid())
+  email            String    @unique
+  nomComplet       String
+  passwordHash     String
+  role             Role      @default(MISSION)
+  actif            Boolean   @default(true)
+  derniereConnexion DateTime?
+  entrepriseId     String?
+  entreprise       Entreprise? @relation(fields: [entrepriseId], references: [id])
+  refreshTokens    RefreshToken[]
+  auditLogs        AuditLog[]
+  approbations     WorkflowAction[]
+  companyUsers     CompanyUser[]
+  delegationsTitulaire Delegation[] @relation("DelegationTitulaire")
+  delegationsSuppleant Delegation[] @relation("DelegationSuppleant")
+  moduleAccess         UserModuleAccess[]
+  affectationsMarches  MarcheAffectation[]
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("refresh_tokens")
+  @@index([userId])
+}
+
+// ===================== §6 REFERENTIEL — PROJETS =====================
+
+enum StatutProjet {
+  PREPARATION           // Projet en cours de préparation
+  EN_VALIDATION         // Dossier soumis pour validation
+  APPROUVE              // Projet approuvé, prêt à démarrer
+  EN_EXECUTION          // Travaux en cours
+  SUSPENDU              // Projet suspendu temporairement
+  EN_RETARD             // Dérive calendaire détectée
+  EN_AVENANT            // Avenant en cours d'instruction
+  RECEPTION_PARTIELLE   // Réception partielle effectuée
+  RECEPTION_DEFINITIVE  // Réception définitive effectuée
+  CLOS                  // Projet clôturé
+  ANNULE                // Projet annulé
+}
+
+enum TypeProjet {
+  TRAVAUX_ROUTIERS
+  PONT_OUVRAGE_ART
+  PISTE_RURALE
+  BITUMAGE
+  REHABILITATION
+  ENTRETIEN_COURANT
+  ENTRETIEN_PERIODIQUE
+  ETUDE_TECHNIQUE
+  SUPERVISION
+  AUTRE
+}
+
+model Projet {
+  id                   String       @id @default(uuid())
+  code                 String       @unique  // PRJ-2026-001
+  intitule             String
+  description          String?
+  type                 TypeProjet   @default(TRAVAUX_ROUTIERS)
+  categorie            String?
+  programme            String?
+  axeStrategique       String?
+
+  // Localisation
+  region               String?
+  prefecture           String?
+  commune              String?
+  troncon              String?
+  pkDebut              Float?
+  pkFin               Float?
+  latGps               Float?
+  lonGps               Float?
+
+  // Gouvernance
+  directionPorteuse    String?
+  responsableNom       String?
+  chefProjetNom        String?
+  missionControle      String?
+  ugp                  String?
+
+  // Calendrier
+  dateOs               DateTime?   // Ordre de service
+  dateDemarrage        DateTime?
+  datePrevFinTravaux   DateTime?
+  dateReceptionProv    DateTime?
+  dateReceptionDef     DateTime?
+  dateCloture          DateTime?
+  delaiMois            Int?
+
+  // Financement
+  sourceFinancement    String?
+  bailleurPrincipal    String?
+  bailleurSecondaire   String?
+  budgetInitialGnf     BigInt       @default(0)
+  budgetReviseGnf      BigInt       @default(0)
+  montantEngageGnf     BigInt       @default(0)
+  montantOrdonnanceGnf BigInt       @default(0)
+  montantPayeGnf       BigInt       @default(0)
+  montantRestantGnf    BigInt       @default(0)
+  tauxDecaissement     Float        @default(0)  // % payé / budget révisé
+
+  // Performance (calculés)
+  avancementPhysique   Float        @default(0)  // 0–100%
+  avancementFinancier  Float        @default(0)  // 0–100%
+  scoreDelai           Float?       // 0–1 (SPI)
+  scoreCout            Float?       // 0–1 (CPI)
+  scoreRisque          Float?
+  niveauConfiance      String       @default("MOYEN")  // FAIBLE | MOYEN | ELEVE
+
+  statut               StatutProjet @default(PREPARATION)
+  observations         String?
+  motifStatut          String?
+
+  // Rétrocompat ancien schéma
+  nom                  String?      // alias intitule (migré)
+  bailleur             String?      // alias bailleurPrincipal (migré)
+  budgetGnf            BigInt?      // alias budgetInitialGnf (migré)
+  dateDebut            DateTime?    // alias dateDemarrage (migré)
+  dateFin              DateTime?    // alias datePrevFinTravaux (migré)
+
+  // Relations
+  marches              Marche[]
+  attachements         Attachement[]
+  decomptes            Decompte[]
+  historique           ProjetStatusHistory[]
+  fundingAllocations   FundingAllocation[]
+
+  deletedAt            DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  @@map("projets")
+  @@index([statut])
+  @@index([region])
+  @@index([bailleurPrincipal])
+}
+
+model ProjetStatusHistory {
+  id             String       @id @default(uuid())
+  projetId       String
+  projet         Projet       @relation(fields: [projetId], references: [id], onDelete: Cascade)
+  ancienStatut   String?
+  nouveauStatut  String
+  motif          String?
+  changedByEmail String?
+  changedAt      DateTime     @default(now())
+
+  @@map("projet_status_history")
+  @@index([projetId])
+}
+
+// ===================== §6 REFERENTIEL — BUDGET =====================
+
+model LigneBudgetaire {
+  id              String   @id @default(uuid())
+  code            String   @unique
+  libelle         String
+  exercice        Int      // année budgétaire
+  montantDoteGnf  BigInt   @default(0)
+  montantEngageGnf BigInt  @default(0)
+  montantPayeGnf  BigInt   @default(0)
+  marches         Marche[]
+  deletedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("lignes_budgetaires")
+}
+
+// ===================== REFERENTIEL ENTREPRISES =====================
+
+model Entreprise {
+  id               String           @id @default(uuid())
+  raisonSociale    String
+  sigle            String?
+  formeJuridique   String?          // SARL | SA | GIE | ETS | ASSOCIATION | AUTRE
+  nif              String           @unique
+  numerotva        String?
+  rccm             String?
+  dateCreation     DateTime?
+  adresse          String?
+  ville            String?
+  commune          String?
+  telephone        String?
+  email            String?
+  siteWeb          String?
+  // Représentant légal (rétrocompat: conserver dirigeant + ajouter representantLegal)
+  dirigeant        String?
+  representantLegal String?
+  qualiteRepresentant String?       // DG | PDG | GERANT | MANDATAIRE
+  // Données administratives
+  agrement         String?
+  categorieAgrement String?         // 1ERE | 2EME | 3EME | 4EME | 5EME
+  classement       String?          // A | B | C | D
+  domainesCompetence String[]       // TRAVAUX | BATIMENT | GENIE_CIVIL | ETUDES | IT
+  // Bancaire
+  iban             String?
+  nomBanque        String?
+  codeBanque       String?
+  // Statut & score conformité (calculé automatiquement — moteur 10 critères 100 pts)
+  statut           StatutEntreprise @default(A_REGULARISER)
+  scoreConformite  Int              @default(0)  // 0-100 : ≥70 VERT, 40-69 ORANGE, <40 ROUGE
+  niveauRisque     String           @default("FAIBLE") // FAIBLE | MOYEN | ELEVE | CRITIQUE
+  motifBlocage     String?
+  // §CDC Conformité fiscale et sociale
+  regimeFiscal     String?          // REEL | SIMPLIFIE | FORFAIT | MICROENTREPRISE
+  assujettTVA      Boolean          @default(false)
+  regulariteFiscale Boolean         @default(false)
+  attestationFiscaleNum  String?
+  attestationFiscaleExpire DateTime?
+  attestationFiscaleDoc  String?    // URL document stocké
+  regulariteSociale Boolean         @default(false)
+  attestationSocialeNum  String?
+  attestationSocialeExpire DateTime?
+  attestationSocialeDoc  String?
+  attestationValide Boolean         @default(false)
+  cautionBancaire  Boolean          @default(false)
+  // §CDC Blocage administratif
+  estRadie         Boolean          @default(false)
+  estSuspendu      Boolean          @default(false)
+  estInterditSoumission Boolean     @default(false)
+  dateRadiation    DateTime?
+  motivRadiation   String?
+  autoriseContracterEtat Boolean    @default(true)
+  dateVerification DateTime?
+  dateProchainVerif DateTime?       // alerte J-30
+  // Relations
+  verificationsConformite ConformiteVerification[]
+  documents        DocumentEntreprise[]
+  contacts         ContactEntreprise[]
+  alertes          AlerteEntreprise[]
+  marches          Marche[]
+  decomptes        Decompte[]
+  users            User[]
+  companyUsers     CompanyUser[]
+  statusHistory    CompanyStatusHistory[]
+  companyMarkets   CompanyMarket[]
+  deletedAt        DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@map("entreprises")
+  @@index([statut])
+  @@index([scoreConformite])
+}
+
+// §CDC — Historique des vérifications de conformité entreprise
+model ConformiteVerification {
+  id              String     @id @default(uuid())
+  entrepriseId    String
+  entreprise      Entreprise @relation(fields: [entrepriseId], references: [id])
+  scoreAvant      Int
+  scoreApres      Int
+  statutAvant     String
+  statutApres     String
+  detail          Json?      // { nif: true, rccm: true, attestFiscale: false, ... }
+  auteur          String?
+  commentaire     String?
+  declencheurType String?    // MANUEL | AUTO | EXPIRATION | IMPORT
+  createdAt       DateTime   @default(now())
+
+  @@map("conformite_verifications")
+  @@index([entrepriseId])
+}
+
+// Documents officiels de l'entreprise
+model DocumentEntreprise {
+  id             String      @id @default(uuid())
+  entrepriseId   String
+  entreprise     Entreprise  @relation(fields: [entrepriseId], references: [id])
+  type           TypeDocument
+  libelle        String?
+  numero         String?
+  url            String?     // chemin stockage
+  dateEmission   DateTime?
+  dateExpiration DateTime?
+  valide         Boolean     @default(false)
+  verifieAt      DateTime?
+  verifieBy      String?     // userId ou email
+  observations   String?
+  actif          Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@map("documents_entreprises")
+  @@index([entrepriseId, type])
+}
+
+// Contacts multiples par entreprise
+model ContactEntreprise {
+  id           String     @id @default(uuid())
+  entrepriseId String
+  entreprise   Entreprise @relation(fields: [entrepriseId], references: [id])
+  nom          String
+  prenom       String?
+  fonction     String?
+  telephone    String?
+  email        String?
+  principal    Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@map("contacts_entreprises")
+  @@index([entrepriseId])
+}
+
+// Alertes automatiques (expiration, anomalie, blocage)
+model AlerteEntreprise {
+  id           String     @id @default(uuid())
+  entrepriseId String
+  entreprise   Entreprise @relation(fields: [entrepriseId], references: [id])
+  type         String     // EXPIRATION_FISCALE | EXPIRATION_SOCIALE | RADIATION | DOCUMENT_MANQUANT | SCORE_BAS
+  niveau       String     @default("AVERTISSEMENT") // AVERTISSEMENT | URGENT | CRITIQUE
+  message      String
+  echeance     DateTime?
+  acquittee    Boolean    @default(false)
+  acquitteeAt  DateTime?
+  acquitteeBy  String?
+  createdAt    DateTime   @default(now())
+
+  @@map("alertes_entreprises")
+  @@index([entrepriseId, acquittee])
+}
+
+// ===================== REFERENTIEL MARCHES =====================
+
+model Marche {
+  id                  String             @id @default(uuid())
+  reference           String             @unique
+  intitule            String
+  objet               String?
+  type                TypeMarche
+  procedure           ProcedurePassation
+  statut              StatutMarche       @default(BROUILLON)
+  financement         TypeFinancement
+  entrepriseId        String
+  entreprise          Entreprise         @relation(fields: [entrepriseId], references: [id])
+  projetId            String?
+  projet              Projet?            @relation(fields: [projetId], references: [id])
+  ligneBudgetaireId   String?
+  ligneBudgetaire     LigneBudgetaire?   @relation(fields: [ligneBudgetaireId], references: [id])
+  // §3.2 Parties contractantes
+  coTraitants         String?
+  sousTraitants       String?
+  missionControle     String?
+  directionTechnique  String?
+  // §3.1 Localisation
+  prefecture          String?
+  commune             String?
+  tronconCode         String?
+  regionNom           String?
+  pkDebut             Float?
+  pkFin               Float?
+  // §3.2 Dates contractuelles
+  dateSignature       DateTime?
+  dateNotification    DateTime?
+  dateOs              DateTime?            // date 1er OS de démarrage
+  dateDebutPrevue     DateTime?
+  dateFinPrevue       DateTime?
+  dateFinReelle       DateTime?
+  dateReceptionProvisoire DateTime?
+  dateReceptionDefinitive DateTime?
+  delaiMois           Int?
+  delaiJours          Int?                 // délai en jours (alternative à delaiMois)
+  // §3.3 Financier
+  montantInitialGnf   BigInt
+  montantActualiseGnf BigInt?
+  tauxTva             Float              @default(18)
+  tauxRetenueGarantie Float              @default(5)
+  tauxAvance          Float              @default(20)
+  montantAvanceGnf    BigInt             @default(0)
+  avanceComplementaireGnf BigInt         @default(0)
+  penalitesJourGnf    BigInt             @default(0)
+  plafondPenalitesPct Float              @default(10)
+  formulaRevisionPrix String?
+  // §3.4 Références
+  numContrat          String?
+  numApprobation      String?
+  bailleur            String?
+  composante          String?
+  // §3.4 Statuts contrôle
+  statutPaiement      String             @default("NON_SOLDE")
+  statutReception     String             @default("AUCUNE")
+  statutCloture       String             @default("OUVERT")
+  pretAExecuter       Boolean            @default(false)
+  observations        String?
+  // Relations
+  lots                Lot[]
+  avenants            Avenant[]
+  decomptes           Decompte[]
+  garanties           Garantie[]
+  receptions          Reception[]
+  bpuArticles         BpuArticle[]
+  ordresService       OrdreService[]
+  workflowInstances   WorkflowInstance[]
+  historiqueStatuts   HistoriqueStatutMarche[]
+  companyMarkets      CompanyMarket[]
+  fundingAllocations  FundingAllocation[]
+  formuleRevision     FormuleRevision?
+  affectations        MarcheAffectation[]
+  createdBy           String?
+  updatedBy           String?
+  deletedAt           DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@map("marches")
+  @@index([entrepriseId])
+  @@index([statut])
+  @@index([projetId])
+}
+
+// §4 Machine d'états — historique de chaque transition de statut
+model HistoriqueStatutMarche {
+  id          String       @id @default(uuid())
+  marcheId    String
+  marche      Marche       @relation(fields: [marcheId], references: [id])
+  statutAvant StatutMarche?
+  statutApres StatutMarche
+  motif       String?
+  pieceRef    String?      // référence du document justificatif
+  userId      String?
+  userEmail   String?
+  createdAt   DateTime     @default(now())
+
+  @@map("historique_statuts_marche")
+  @@index([marcheId])
+}
+
+model Lot {
+  id          String    @id @default(uuid())
+  marcheId    String
+  marche      Marche    @relation(fields: [marcheId], references: [id])
+  numero      String
+  designation String
+  montantGnf  BigInt
+  decomptes   Decompte[]
+  articles    BpuArticle[]
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("lots")
+  @@index([marcheId])
+}
+
+// §6 CDC — Référentiel prix unitaires + quantités
+model BpuArticle {
+  id              String        @id @default(uuid())
+  marcheId        String
+  marche          Marche        @relation(fields: [marcheId], references: [id])
+  lotId           String?
+  lot             Lot?          @relation(fields: [lotId], references: [id])
+  code            String        // ex: "A.1.2"
+  designation     String
+  unite           String        // m², ml, m³, kg, forfait...
+  quantitePrevue  Float
+  prixUnitaireGnf BigInt
+  montantGnf      BigInt        // quantitePrevue × prixUnitaireGnf
+  ordre           Int           @default(0)
+  attachements    Attachement[] // §9 CDC — quantités exécutées par article
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("bpu_articles")
+  @@index([marcheId])
+  @@index([lotId])
+}
+
+model OrdreService {
+  id               String   @id @default(uuid())
+  marcheId         String
+  marche           Marche   @relation(fields: [marcheId], references: [id])
+  numero           Int
+  type             String   // DEMARRAGE, ARRET, REPRISE, MODIFICATION, PROLONGATION
+  objet            String
+  dateEmission     DateTime
+  dateEffet        DateTime?
+  impactDelaiJours Int      @default(0)
+  impactMontantGnf BigInt   @default(0)
+  observations     String?
+  createdAt        DateTime @default(now())
+
+  @@map("ordres_service")
+  @@index([marcheId])
+}
+
+// §6 CDC — Référentiel avenants
+model Avenant {
+  id                       String   @id @default(uuid())
+  marcheId                 String
+  marche                   Marche   @relation(fields: [marcheId], references: [id])
+  numero                   Int
+  objet                    String
+  motif                    String?
+  impactPerimetre          String?
+  montantSupplementaireGnf BigInt   @default(0)
+  prolongationJours        Int      @default(0)
+  // Référence d'approbation ARMP — obligatoire au-delà du seuil réglementaire
+  approbationArmpRef       String?
+  dateSignature            DateTime?
+  // Workflow validation avenant
+  statut                   String   @default("EN_COURS")  // EN_COURS | VALIDE_TECHNIQUE | VALIDE_FINANCIER | VISE_DG | APPROUVE | ANNULE
+  valideTechniquePar       String?  // userId
+  valideTechniqueAt        DateTime?
+  valideFinancierPar       String?
+  valideFinancierAt        DateTime?
+  visaDgPar                String?
+  visaDgAt                 DateTime?
+  observations             String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@map("avenants")
+  @@index([marcheId])
+}
+
+model Garantie {
+  id             String   @id @default(uuid())
+  marcheId       String
+  marche         Marche   @relation(fields: [marcheId], references: [id])
+  // Types : AVANCE | BONNE_EXECUTION | RETENUE | SOUMISSION | DEFAUT
+  type           String
+  montantGnf     BigInt
+  dateEmission   DateTime?
+  dateExpiration DateTime?
+  banque         String?
+  reference      String?   // N° caution bancaire
+  active         Boolean   @default(true)
+  appelGarantie  Boolean   @default(false) // si appelée / executée
+  dateAppel      DateTime?
+  observations   String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("garanties")
+  @@index([marcheId])
+}
+
+// ===================== RÉCEPTIONS (OPR / PROVISOIRE / DÉFINITIVE) =====================
+
+model Reception {
+  id                  String    @id @default(uuid())
+  marcheId            String
+  marche              Marche    @relation(fields: [marcheId], references: [id])
+  // OPR | PROVISOIRE | DEFINITIVE
+  type                String
+  // EN_ATTENTE | PROGRAMME | REALISE | AVEC_RESERVES | REFUSE
+  statut              String    @default("EN_ATTENTE")
+  datePrevu           DateTime?
+  dateReelle          DateTime?
+  pvNumero            String?   // numéro du PV signé
+  // Participants
+  presentsEntreprise  String?   // nom(s) représentant(s)
+  presentsAgeroute    String?   // ingénieurs présents
+  presentsAutres      String?   // bailleur, bureau de contrôle
+  // Résultats
+  reserves            Json?     // liste des réserves (array de strings)
+  delaiLeveeReserves  Int?      // délai en jours pour lever les réserves
+  dateLeveeReserves   DateTime? // date de levée effective
+  observations        String?
+  // Pièces jointes du dossier de réception : PV signé scanné, photos état des ouvrages...
+  pieces              Json?
+  signedAt            DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("receptions")
+  @@index([marcheId])
+  @@index([statut])
+}
+
+// ===================== DECOMPTES =====================
+
+model Decompte {
+  id                    String         @id @default(uuid())
+  reference             String         @unique
+  type                  TypeDecompte
+  statut                StatutDecompte @default(BROUILLON)
+  marcheId              String
+  marche                Marche         @relation(fields: [marcheId], references: [id])
+  lotId                 String?
+  lot                   Lot?           @relation(fields: [lotId], references: [id])
+  entrepriseId          String
+  entreprise            Entreprise     @relation(fields: [entrepriseId], references: [id])
+  projetId              String?
+  projet                Projet?        @relation(fields: [projetId], references: [id])
+  periodeDebut          DateTime?
+  periodeFin            DateTime?
+  montantPeriodeHtGnf   BigInt         @default(0)  // HT période
+  cumulPrecedentHtGnf   BigInt         @default(0)
+  cumulActuelHtGnf      BigInt         @default(0)
+  tva                   BigInt         @default(0)  // TVA 18%
+  montantArmpGnf        BigInt         @default(0)  // Redevance ARMP 0.6%
+  montantTtcGnf         BigInt         @default(0)  // TTC = HT + TVA + ARMP
+  precompteTvaGnf       BigInt         @default(0)  // Précompte TVA = TTC × 9/118
+  retenueGarantie       BigInt         @default(0)  // Retenue = TTC × 5%
+  avanceRecuperee       BigInt         @default(0)
+  penalites             BigInt         @default(0)
+  revisionPrix          BigInt         @default(0)
+  netAPayer             BigInt         @default(0)  // TTC − PrécompteTVA − Retenue − ARMP − Avance − Pénalités
+  // §7 CDC — numéro dossier automatique + accusé
+  numeroDossier         String?        @unique
+  // §8 CDC — pièces obligatoires (checklist JSON)
+  piecesObligatoires    Json?
+  // §11 CDC — résultats des contrôles automatiques
+  controleAutoResultats Json?
+  // §12 CDC — contrôle technique Mission/Direction (observations + validations)
+  observationsTechniques Json?         // array de { auteur, role, date, texte, type: VALIDATION|OBSERVATION|REJET }
+  // §13 CDC — analyse contractuelle DMC
+  analyseDmc            String?
+  // §14 CDC — visa financier DAF
+  visaFinancier         String?        // ACCORDE | REFUSE
+  commentaireFinancier  String?
+  ligneBudgetaireCode   String?        // imputation budgétaire choisie par DAF
+  // §15 CDC — actions DG
+  traitementSuspendu    Boolean        @default(false)
+  auditRequis           Boolean        @default(false)
+  observationsDg        String?
+  // §16 CDC — circuit financier post-DG
+  circuitFinancier      CircuitFinancier?
+  // Signature électronique
+  tokenSignature        String?        @unique
+  empreinteNumerique    String?
+  dateSignature         DateTime?
+  signataire            String?
+  dateDepot             DateTime?
+  datePaiement          DateTime?
+  observations          String?
+  attachements          Attachement[]
+  workflowInstances     WorkflowInstance[]
+  paiements             Paiement[]
+  lignesDecompte        DecompteLigne[]
+  validationsAvancees   DecompteValidation[]
+  commentairesDecompte  DecompteCommentaire[]
+  paymentTraces         DecomptePaymentTrace[]
+  // §18 CDC — GED documents liés
+  documents             Document[]
+  fundingAllocations    FundingAllocation[]
+  deletedAt             DateTime?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@map("decomptes")
+  @@index([marcheId])
+  @@index([statut])
+  @@index([entrepriseId])
+}
+
+// ===================== §9 CDC — ATTACHEMENTS (sous-module technique) =====================
+
+model Attachement {
+  id               String      @id @default(uuid())
+  decompteId       String
+  decompte         Decompte    @relation(fields: [decompteId], references: [id])
+  projetId         String?
+  projet           Projet?     @relation(fields: [projetId], references: [id])
+  bpuArticleId     String?
+  bpuArticle       BpuArticle? @relation(fields: [bpuArticleId], references: [id])
+
+  // BPMN workflow
+  code             String?     // Auto-généré : ATT-2026-001
+  statut           StatutAttachement @default(BROUILLON)
+  typeAttachement  TypeAttachement   @default(MENSUEL)
+  periodeDebut     DateTime?
+  periodeFin       DateTime?
+  version          Int               @default(1)
+  soumisAt         DateTime?
+  valideAt         DateTime?
+  createdById      String?     // userId de l'auteur initial
+
+  // Localisation chantier
+  ouvrage          String?
+  section          String?
+  pkDebut          Float?
+  pkFin            Float?
+
+  // Compatibilité ancienne structure (ligne unique)
+  natureTravaux    String
+  unite            String
+  quantitePrevue   Float
+  quantiteExecutee Float
+  cumulExecuteAvant Float      @default(0)
+  prixUnitaireGnf  BigInt
+  montantHtGnf     BigInt      @default(0)  // Total HT lignes (qté × PU)
+  montantTvaGnf    BigInt      @default(0)  // TVA 18% estimée
+  montantArmpGnf   BigInt      @default(0)  // ARMP 0,6% estimé
+  montantTtcGnf    BigInt      @default(0)  // TTC estimé = HT + TVA + ARMP
+  latGps           Float?
+  lonGps           Float?
+  photos           String[]    @default([])
+  observations     String?
+  valide           Boolean     @default(false)
+  motifRejet       String?
+
+  // §12 CDC — observations techniques
+  commentaireTechnique String?
+  valideParMission     Boolean  @default(false)
+  valideParTechnique   Boolean  @default(false)
+
+  // Relations avancées §9 BPMN
+  lignes           AttachementLigne[]
+  pointsGPS        AttachementGPS[]
+  medias           AttachementMedia[]
+  validations      AttachementValidation[]
+  commentaires     AttachementCommentaire[]
+
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  @@map("attachements")
+  @@index([decompteId])
+  @@index([bpuArticleId])
+  @@index([statut])
+}
+
+// Ligne BPU d'un attachement — chaque article du BPU avec quantités
+model AttachementLigne {
+  id                String       @id @default(uuid())
+  attachementId     String
+  attachement       Attachement  @relation(fields: [attachementId], references: [id], onDelete: Cascade)
+  codeArticle       String
+  designation       String
+  unite             String
+  quantiteContrat   Float
+  quantitePrecedent Float        @default(0)
+  quantiteCourante  Float        @default(0)
+  quantiteCumulee   Float        @default(0)
+  prixUnitaire      BigInt
+  montant           BigInt       @default(0)
+  statut            String       @default("OK")     // OK | ALERTE | BLOQUE
+  depassement       Boolean      @default(false)
+  observations      String?
+  mesures           AttachementMesure[]
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@map("attachement_lignes")
+  @@index([attachementId])
+}
+
+// Mesure de quantité — preuve terrain par ligne
+model AttachementMesure {
+  id              String            @id @default(uuid())
+  ligneId         String
+  ligne           AttachementLigne  @relation(fields: [ligneId], references: [id], onDelete: Cascade)
+  methode         String            // MANUEL | GPS | PHOTO | LEVE | DRONE | INSTRUMENT
+  valeur          Float
+  unite           String
+  sourcePreuve    String            // description de la source documentaire
+  niveauConfiance Int               @default(3)   // 1 (faible) à 5 (certifié)
+  mesurePar       String            // userId ou nom
+  mesureAt        DateTime          @default(now())
+  observations    String?
+  createdAt       DateTime          @default(now())
+
+  @@map("attachement_mesures")
+  @@index([ligneId])
+}
+
+// Points GPS géoréférencés
+model AttachementGPS {
+  id            String      @id @default(uuid())
+  attachementId String
+  attachement   Attachement @relation(fields: [attachementId], references: [id], onDelete: Cascade)
+  latitude      Float
+  longitude     Float
+  altitude      Float?
+  precision     Float?      // précision en mètres
+  description   String?
+  capturePar    String?     // userId ou nom
+  captureAt     DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  @@map("attachement_gps")
+  @@index([attachementId])
+}
+
+// Médias géolocalisés (photos, vidéos, plans)
+model AttachementMedia {
+  id            String      @id @default(uuid())
+  attachementId String
+  attachement   Attachement @relation(fields: [attachementId], references: [id], onDelete: Cascade)
+  type          String      // PHOTO | VIDEO | PLAN | DOCUMENT
+  cheminFichier String
+  urlPublique   String?
+  legende       String?
+  latGps        Float?
+  lonGps        Float?
+  prisAt        DateTime?
+  prisPar       String?     // userId ou nom
+  tailleOctets  Int?
+  createdAt     DateTime    @default(now())
+
+  @@map("attachement_medias")
+  @@index([attachementId])
+}
+
+// Validations du workflow BPMN
+model AttachementValidation {
+  id            String      @id @default(uuid())
+  attachementId String
+  attachement   Attachement @relation(fields: [attachementId], references: [id], onDelete: Cascade)
+  etape         String      // MISSION | TECHNIQUE | DIRECTION
+  statut        String      // APPROUVE | REJETE | CORRECTION
+  commentaire   String
+  validePar     String      // userId
+  valideNom     String?     // nom lisible
+  valideAt      DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  @@map("attachement_validations")
+  @@index([attachementId])
+}
+
+// Commentaires et observations de l'équipe
+model AttachementCommentaire {
+  id            String      @id @default(uuid())
+  attachementId String
+  attachement   Attachement @relation(fields: [attachementId], references: [id], onDelete: Cascade)
+  contenu       String
+  auteurId      String      // userId
+  auteurNom     String?
+  auteurRole    String?
+  type          String      @default("COMMENTAIRE") // COMMENTAIRE | CORRECTION | OBSERVATION | ALERTE
+  createdAt     DateTime    @default(now())
+
+  @@map("attachement_commentaires")
+  @@index([attachementId])
+}
+
+// ===================== DÉCOMPTES — MODULES AVANCÉS =====================
+
+// Lignes de décompte avec calculs financiers détaillés par article BPU
+model DecompteLigne {
+  id                  String    @id @default(uuid())
+  decompteId          String
+  decompte            Decompte  @relation(fields: [decompteId], references: [id], onDelete: Cascade)
+  codeArticle         String
+  designation         String
+  unite               String
+  quantiteContrat     Float
+  quantitePrecedent   Float     @default(0)
+  quantiteCourante    Float     @default(0)
+  quantiteCumulee     Float     @default(0)
+  prixUnitaire        BigInt
+  montantBrut         BigInt    @default(0)  // HT = qté × PU
+  tauxTva             Float     @default(18)
+  montantTva          BigInt    @default(0)  // HT × 18%
+  tauxArmp            Float     @default(0.6) // Redevance ARMP (0.6% du HT)
+  montantArmp         BigInt    @default(0)  // HT × 0.6%
+  montantTtc          BigInt    @default(0)  // HT + TVA + ARMP
+  precompteTva        BigInt    @default(0)  // TTC × 9/118 (retenue TVA à la source)
+  tauxRetenue         Float     @default(5)
+  montantRetenue      BigInt    @default(0)  // TTC × 5% (appliqué sur TTC, pas HT)
+  tauxAvance          Float     @default(0)
+  montantAvanceRecup  BigInt    @default(0)
+  montantPenalite     BigInt    @default(0)
+  motifPenalite       String?
+  montantNet          BigInt    @default(0)  // TTC − PrécompteTVA − Retenue − ARMP − Avance − Pénalités
+  statut              String    @default("OK")
+  depassement         Boolean   @default(false)
+  attachementLigneId  String?
+  observations        String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("decompte_lignes")
+  @@index([decompteId])
+}
+
+// Validations BPMN avec signature et rôle
+model DecompteValidation {
+  id            String    @id @default(uuid())
+  decompteId    String
+  decompte      Decompte  @relation(fields: [decompteId], references: [id], onDelete: Cascade)
+  etape         String    // SOUMISSION | MISSION | TECHNIQUE | DMC | DAF | DG | UGP
+  decision      String    // APPROUVE | REJETE | CORRECTION
+  commentaire   String
+  validePar     String    // userId
+  valideNom     String?
+  valideRole    String?
+  signatureRef  String?   // référence signature électronique §9 CDC
+  valideAt      DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  @@map("decompte_validations_avancees")
+  @@index([decompteId])
+}
+
+// Commentaires et échanges inter-services
+model DecompteCommentaire {
+  id          String    @id @default(uuid())
+  decompteId  String
+  decompte    Decompte  @relation(fields: [decompteId], references: [id], onDelete: Cascade)
+  contenu     String
+  auteurId    String
+  auteurNom   String?
+  auteurRole  String?
+  type        String    @default("COMMENTAIRE")  // COMMENTAIRE | CORRECTION | INFORMATION | ALERTE
+  createdAt   DateTime  @default(now())
+
+  @@map("decompte_commentaires")
+  @@index([decompteId])
+}
+
+// Circuit de paiement §16 CDC — traçabilité trésor
+model DecomptePaymentTrace {
+  id               String    @id @default(uuid())
+  decompteId       String
+  decompte         Decompte  @relation(fields: [decompteId], references: [id], onDelete: Cascade)
+  etape            String    // ORDONNANCEMENT | VISA_TRESOR | EMISSION | VIREMENT | PAIEMENT_FINAL
+  statut           String    // EN_ATTENTE | EN_COURS | VALIDE | REJETE
+  reference        String?   // n° ordonnancement / mandat
+  montantGnf       BigInt?
+  dateTransmission DateTime?
+  dateValidation   DateTime?
+  operateurNom     String?
+  banqueReference  String?   // référence bancaire
+  observations     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("decompte_payment_traces")
+  @@index([decompteId])
+}
+
+// ===================== §18 CDC — GED (Gestion Électronique de Documents) =====================
+
+model Document {
+  id          String   @id @default(uuid())
+  decompteId  String
+  decompte    Decompte @relation(fields: [decompteId], references: [id])
+  type        String   // DECOMPTE | ATTACHEMENT | FACTURE | PHOTO | PV | COURRIER | OBSERVATION | VISA
+  nom         String
+  description String?
+  cheminFichier String
+  mimeType    String?
+  tailleOctets Int?
+  version     Int      @default(1)
+  // §18 CDC — versioning + horodatage
+  estArchive  Boolean  @default(false)
+  uploadePar  String?  // userId
+  createdAt   DateTime @default(now())
+
+  @@map("documents")
+  @@index([decompteId])
+  @@index([type])
+}
+
+// ===================== §16 CDC — CIRCUITS FINANCIERS POST-DG =====================
+
+// §16.1 FER : DG → FER → Budget → DNTCP → BCRG → Paiement
+// §16.2 Bailleurs : DG → UGP → Demande décaissement → Non-objection → Décaissement → Paiement
+
+model CircuitFinancier {
+  id            String                  @id @default(uuid())
+  decompteId    String                  @unique
+  decompte      Decompte                @relation(fields: [decompteId], references: [id])
+  type          String                  // FER | BAILLEUR | BUDGET
+  bailleurNom   String?                 // pour les circuits bailleur
+  etapeActuelle Int                     @default(0)
+  statut        String                  @default("EN_COURS") // EN_COURS | PAYE | REJETE
+  dateCreation  DateTime                @default(now())
+  etapes        CircuitFinancierEtape[]
+
+  @@map("circuits_financiers")
+}
+
+model CircuitFinancierEtape {
+  id               String           @id @default(uuid())
+  circuitId        String
+  circuit          CircuitFinancier @relation(fields: [circuitId], references: [id])
+  ordre            Int
+  nom              String           // ex: "FER", "Budget/MEF", "DNTCP", "BCRG"
+  roleOuService    String           // identifiant du service responsable
+  dateTransmission DateTime?        // §16 CDC — date de transmission
+  dateReception    DateTime?        // §16 CDC — date de réception
+  dateVisa         DateTime?        // §16 CDC — date de visa
+  commentaire      String?
+  statut           String           @default("EN_ATTENTE") // EN_ATTENTE | EN_COURS | VALIDE | REJETE
+  validePar        String?
+  valideAt         DateTime?
+
+  @@map("circuit_financier_etapes")
+  @@index([circuitId])
+}
+
+// ===================== WORKFLOW =====================
+
+model WorkflowDefinition {
+  id          String             @id @default(uuid())
+  nom         String
+  financement TypeFinancement
+  etapes      WorkflowEtape[]
+  instances   WorkflowInstance[]
+  actif       Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+
+  @@map("workflow_definitions")
+}
+
+model WorkflowEtape {
+  id           String             @id @default(uuid())
+  definitionId String
+  definition   WorkflowDefinition @relation(fields: [definitionId], references: [id])
+  ordre        Int
+  nom          String
+  roleRequis   Role
+  slaDays      Int                @default(5)
+  actions      WorkflowAction[]
+
+  @@map("workflow_etapes")
+  @@index([definitionId])
+}
+
+model WorkflowInstance {
+  id           String             @id @default(uuid())
+  definitionId String
+  definition   WorkflowDefinition @relation(fields: [definitionId], references: [id])
+  marcheId     String?
+  marche       Marche?            @relation(fields: [marcheId], references: [id])
+  decompteId   String?
+  decompte     Decompte?          @relation(fields: [decompteId], references: [id])
+  etapeActuelle Int               @default(0)
+  statut       StatutWorkflow     @default(EN_COURS)
+  actions      WorkflowAction[]
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@map("workflow_instances")
+}
+
+model WorkflowAction {
+  id          String           @id @default(uuid())
+  instanceId  String
+  instance    WorkflowInstance @relation(fields: [instanceId], references: [id])
+  etapeId     String
+  etape       WorkflowEtape    @relation(fields: [etapeId], references: [id])
+  userId      String
+  user        User             @relation(fields: [userId], references: [id])
+  decision    String
+  commentaire String?
+  createdAt   DateTime         @default(now())
+
+  @@map("workflow_actions")
+}
+
+// ===================== PAIEMENTS =====================
+
+model Paiement {
+  id          String   @id @default(uuid())
+  decompteId  String
+  decompte    Decompte @relation(fields: [decompteId], references: [id])
+  montantGnf  BigInt
+  statut      String   @default("EN_ATTENTE") // EN_ATTENTE | ORDONNE | EXECUTE | REJETE
+  dateOrdre   DateTime?
+  dateExecution DateTime?
+  reference   String?
+  banque      String?
+  // §16 CDC — circuit FER ou bailleur
+  typeCircuit String?  // FER | BAILLEUR | BUDGET
+  refDntcp    String?  // référence DNTCP
+  refBcrg     String?  // référence BCRG
+  observations String?
+  createdAt   DateTime @default(now())
+
+  @@map("paiements")
+  @@index([decompteId])
+  @@index([statut])
+}
+
+// ===================== AUDIT §19 =====================
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  userId     String?
+  user       User?       @relation(fields: [userId], references: [id])
+  action     AuditAction
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ipAddress  String?     // §19 CDC — depuis quelle IP
+  createdAt  DateTime    @default(now())
+
+  @@map("audit_logs")
+  @@index([entityType, entityId])
+  @@index([userId])
+}
+
+// ===================== §20 ALERTES AUTOMATIQUES =====================
+
+model Alerte {
+  id          String   @id @default(uuid())
+  type        String   // DEPOT | PIECES_MANQUANTES | COMPLEMENT | REJET | VALIDATION | RETARD | EXPIRATION_GARANTIE
+  entiteType  String   // Decompte | Garantie | Marche
+  entiteId    String
+  titre       String
+  message     String
+  destinataires String[] // emails / phones
+  canal       String   @default("EMAIL")  // EMAIL | SMS | WHATSAPP
+  envoye      Boolean  @default(false)
+  lu          Boolean  @default(false)
+  userId      String?  // si alerte personnalisée
+  createdAt   DateTime @default(now())
+
+  @@map("alertes")
+  @@index([entiteType, entiteId])
+  @@index([envoye])
+}
+
+// ===================== §22 PARAMÉTRAGE MÉTIER =====================
+
+model ParametreMetier {
+  id        String   @id @default(uuid())
+  cle       String   @unique  // ex: SLA_MISSION, SEUIL_AVANCE_MAX, TYPES_PIECES_OBLIGATOIRES
+  valeur    String
+  type      String   @default("STRING")  // STRING | NUMBER | JSON | BOOLEAN
+  categorie String   @default("GENERAL") // GENERAL | SLA | CALCUL | WORKFLOW | ALERTES
+  libelle   String
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("parametres_metier")
+}
+
+// ─── Lien Entreprise ↔ Utilisateur avec rôles et permissions ─────────────────
+model CompanyUser {
+  id                   String     @id @default(uuid())
+  entrepriseId         String
+  entreprise           Entreprise @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
+  userId               String
+  user                 User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleType             String     @default("LECTEUR") // ADMIN | VALIDEUR | SAISISSEUR | LECTEUR
+  isPrimary            Boolean    @default(false)
+  canSubmitDocuments   Boolean    @default(false)
+  canViewContracts     Boolean    @default(true)
+  canViewDecomptes     Boolean    @default(true)
+  canDeposerDecompte   Boolean    @default(false)
+  statut               String     @default("ACTIF") // ACTIF | SUSPENDU | REVOQUE
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  @@unique([entrepriseId, userId])
+  @@map("company_users")
+  @@index([entrepriseId])
+  @@index([userId])
+}
+
+// ─── Historique des statuts entreprise ────────────────────────────────────────
+model CompanyStatusHistory {
+  id           String     @id @default(uuid())
+  entrepriseId String
+  entreprise   Entreprise @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
+  ancienStatut String
+  nouveauStatut String
+  changedBy    String     // userId
+  commentaire  String?
+  changedAt    DateTime   @default(now())
+
+  @@map("company_status_history")
+  @@index([entrepriseId, changedAt])
+}
+
+// ─── Lien explicite Entreprise ↔ Marché avec rôle de participation ────────────
+model CompanyMarket {
+  id                  String     @id @default(uuid())
+  entrepriseId        String
+  entreprise          Entreprise @relation(fields: [entrepriseId], references: [id], onDelete: Cascade)
+  marcheId            String
+  marche              Marche     @relation(fields: [marcheId], references: [id], onDelete: Cascade)
+  roleParticipation   String     @default("TITULAIRE") // TITULAIRE | CO_TRAITANT | SOUS_TRAITANT | MANDATAIRE
+  montantAttribue     BigInt?
+  partPourcentage     Float?
+  statut              String     @default("ACTIF") // ACTIF | RESILIE | CLOS
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  @@unique([entrepriseId, marcheId])
+  @@map("company_markets")
+  @@index([entrepriseId])
+  @@index([marcheId])
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MODULE GESTION DES FINANCEMENTS
+// Sources, enveloppes, affectations, consommations, documents, audit
+// ════════════════════════════════════════════════════════════════════════════
+
+// ─── Source de financement (État, bailleur, banque, fonds interne, don) ──────
+model FundingSource {
+  id            String              @id @default(uuid())
+  sourceCode    String              @unique
+  sourceType    String              // ETAT | BAILLEUR | BANQUE | FONDS_INTERNE | CONTREPARTIE | DON
+  nom           String
+  donorName     String?
+  currencyCode  String              @default("GNF")
+  statut        String              @default("draft") // draft|pending_approval|approved|active|partially_consumed|exhausted|suspended|closed|archived
+  createdBy     String
+  updatedBy     String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  envelopes     FundingEnvelope[]
+  documents     FundingDocument[]
+
+  @@map("funding_sources")
+  @@index([statut])
+}
+
+// ─── Enveloppe budgétaire rattachée à une source et une période ──────────────
+model FundingEnvelope {
+  id                String             @id @default(uuid())
+  fundingSourceId   String
+  fundingSource     FundingSource      @relation(fields: [fundingSourceId], references: [id], onDelete: Cascade)
+  envelopeCode      String             @unique
+  label             String
+  totalAmount       BigInt             @default(0)
+  allocatedAmount   BigInt             @default(0)
+  consumedAmount    BigInt             @default(0)
+  availableAmount   BigInt             @default(0)
+  startDate         DateTime?
+  endDate           DateTime?
+  statut            String             @default("draft")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  allocations       FundingAllocation[]
+
+  @@map("funding_envelopes")
+  @@index([fundingSourceId])
+  @@index([statut])
+}
+
+// ─── Affectation d'une enveloppe à un projet, marché ou décompte ─────────────
+model FundingAllocation {
+  id                  String              @id @default(uuid())
+  fundingEnvelopeId   String
+  fundingEnvelope     FundingEnvelope     @relation(fields: [fundingEnvelopeId], references: [id], onDelete: Cascade)
+  projetId            String?
+  projet              Projet?             @relation(fields: [projetId], references: [id])
+  marcheId            String?
+  marche              Marche?             @relation(fields: [marcheId], references: [id])
+  decompteId          String?
+  decompte            Decompte?           @relation(fields: [decompteId], references: [id])
+  allocationAmount    BigInt
+  committedAmount     BigInt              @default(0)
+  consumedAmount      BigInt              @default(0)
+  allocationReason    String?
+  statut              String              @default("draft")
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  consumptions        FundingConsumption[]
+
+  @@map("funding_allocations")
+  @@index([fundingEnvelopeId])
+  @@index([projetId])
+  @@index([marcheId])
+  @@index([decompteId])
+  @@index([statut])
+}
+
+// ─── Consommation réelle : engagement, liquidation, paiement ─────────────────
+model FundingConsumption {
+  id                    String              @id @default(uuid())
+  fundingAllocationId   String
+  fundingAllocation     FundingAllocation   @relation(fields: [fundingAllocationId], references: [id], onDelete: Cascade)
+  entityType            String              // DECOMPTE | MARCHE | AUTRE
+  entityId              String
+  montant               BigInt
+  consumptionType       String              // ENGAGEMENT | LIQUIDATION | PAIEMENT
+  consumedAt            DateTime            @default(now())
+  createdAt             DateTime            @default(now())
+
+  @@map("funding_consumptions")
+  @@index([fundingAllocationId])
+  @@index([entityType, entityId])
+}
+
+// ─── Conventions, lettres d'accord, annexes, rapports financiers ─────────────
+model FundingDocument {
+  id                  String         @id @default(uuid())
+  fundingSourceId     String
+  fundingSource       FundingSource  @relation(fields: [fundingSourceId], references: [id], onDelete: Cascade)
+  documentType        String         // CONVENTION | AVENANT | RAPPORT | JUSTIFICATIF
+  documentNumber      String?
+  fileId              String?
+  cheminFichier        String?
+  issueDate           DateTime?
+  expiryDate          DateTime?
+  validationStatus    String         @default("pending") // pending|valid|expired|rejected
+  verifiedBy          String?
+  verifiedAt          DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@map("funding_documents")
+  @@index([fundingSourceId])
+  @@index([validationStatus])
+}
+
+// ─── Historique des statuts (source, enveloppe, affectation) ─────────────────
+model FundingStatusHistory {
+  id          String    @id @default(uuid())
+  entityType  String    // FUNDING_SOURCE | FUNDING_ENVELOPE | FUNDING_ALLOCATION
+  entityId    String
+  oldStatus   String
+  newStatus   String
+  changedBy   String
+  commentaire String?
+  changedAt   DateTime  @default(now())
+
+  @@map("funding_status_history")
+  @@index([entityType, entityId])
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DÉLÉGATION D'INTÉRIM — un valideur absent délègue à un suppléant sur période
+// ═══════════════════════════════════════════════════════════════════════════
+model Delegation {
+  id          String   @id @default(uuid())
+  titulaireId String
+  titulaire   User     @relation("DelegationTitulaire", fields: [titulaireId], references: [id])
+  suppleantId String
+  suppleant   User     @relation("DelegationSuppleant", fields: [suppleantId], references: [id])
+  dateDebut   DateTime
+  dateFin     DateTime
+  motif       String?
+  actif       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("delegations")
+  @@index([titulaireId])
+  @@index([suppleantId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RÉVISION DE PRIX (FIDIC) — formule d'indexation par marché
+// P = P0 × ( a + Σ bi · Ii,t / Ii,0 )
+// ═══════════════════════════════════════════════════════════════════════════
+model FormuleRevision {
+  id          String   @id @default(uuid())
+  marcheId    String   @unique
+  marche      Marche   @relation(fields: [marcheId], references: [id])
+  coeffFixe   Float    @default(0.15)   // part non révisable "a"
+  actif       Boolean  @default(true)
+  composantes RevisionComposante[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("formules_revision")
+}
+
+model RevisionComposante {
+  id          String   @id @default(uuid())
+  formuleId   String
+  formule     FormuleRevision @relation(fields: [formuleId], references: [id], onDelete: Cascade)
+  nom         String   // ex: Bitume, Ciment, Main d'oeuvre, Gasoil
+  coefficient Float    // poids bi
+  indexCode   String   // référence de la série mensuelle
+  valeurBase  Float    // Ii,0 — valeur à la date de base du marché
+  createdAt   DateTime @default(now())
+
+  @@map("revision_composantes")
+  @@index([formuleId])
+}
+
+model IndexMensuel {
+  id        String   @id @default(uuid())
+  code      String   // ex: BITUME, CIMENT, SMIG, GASOIL
+  libelle   String
+  annee     Int
+  mois      Int      // 1-12
+  valeur    Float
+  createdAt DateTime @default(now())
+
+  @@unique([code, annee, mois])
+  @@map("index_mensuels")
+  @@index([code])
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DROITS D'ACCÈS PAR UTILISATEUR — override du défaut par rôle (grant/deny)
+// ═══════════════════════════════════════════════════════════════════════════
+model UserModuleAccess {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  moduleKey String
+  allowed   Boolean
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, moduleKey])
+  @@map("user_module_access")
+  @@index([userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AFFECTATION AGENT ↔ MARCHÉ — périmètre de travail (mission de contrôle, etc.)
+// Un agent affecté à des marchés ne voit QUE ces marchés (et leurs projets,
+// entreprises, décomptes, attachements). Sans affectation : pas de restriction.
+// ═══════════════════════════════════════════════════════════════════════════
+model MarcheAffectation {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marcheId  String
+  marche    Marche   @relation(fields: [marcheId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, marcheId])
+  @@map("marche_affectations")
+  @@index([userId])
+}

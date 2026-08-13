@@ -1,0 +1,75 @@
+# ERP AGEROUTE — les secrets sont lus depuis le fichier .env (voir .env.example).
+# Aucune valeur sensible ne doit apparaître en clair dans ce fichier.
+services:
+  erp-db:
+    image: postgres:16-alpine
+    container_name: erp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - erp_db_data:/var/lib/postgresql/data
+    networks:
+      - erp-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  erp-backend:
+    build: ./backend
+    container_name: erp-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4001
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_FROM: ${SMTP_FROM}
+      GEOPORTAIL_URL: ${GEOPORTAIL_URL}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      # Indispensable : sans ce volume, toutes les pièces jointes (contrats, PV,
+      # photos d'attachement) sont détruites à chaque rebuild de l'image.
+      - erp_uploads:/app/uploads
+    depends_on:
+      erp-db:
+        condition: service_healthy
+    networks:
+      - erp-net
+      - proxy
+    labels:
+      - "traefik.enable=false"
+
+  erp-frontend:
+    build: ./frontend
+    container_name: erp-frontend
+    restart: unless-stopped
+    depends_on:
+      - erp-backend
+    networks:
+      - erp-net
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.erp.rule=Host(`gestion.ageroute.gov.gn`)"
+      - "traefik.http.routers.erp.entrypoints=websecure"
+      - "traefik.http.routers.erp.tls.certresolver=le"
+      - "traefik.http.services.erp.loadbalancer.server.port=80"
+
+volumes:
+  erp_db_data:
+  erp_uploads:
+
+networks:
+  erp-net:
+    driver: bridge
+  proxy:
+    external: true
