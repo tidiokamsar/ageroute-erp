@@ -11,6 +11,7 @@ import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { notifyWorkflowStep } from "../notifications/notifications.service";
 import { assertEntrepriseConforme } from "../conformite/conformite.service";
+import { rolesEffectifs } from "../../lib/delegations";
 import { z } from "zod";
 
 export const workflowRouter = Router();
@@ -112,17 +113,23 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
     const etapeCourante = instance.definition.etapes[instance.etapeActuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante trouvée");
 
+    // Rôles effectifs : rôle propre + rôles délégués actifs (délégation d'intérim)
+    const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
     const isAdmin  = req.user.role === "ADMIN";
-    const isDg     = req.user.role === "DG";
-    const isSuperv = isAdmin || isDg;
+    const isSuperv = isAdmin || mesRoles.includes("DG");
 
     // Superviseurs (DG/ADMIN) peuvent SUSPENDRE/AUDIT sur toute étape
     if (["SUSPENDRE","AUDIT"].includes(decision) && !isSuperv) {
       throw new ApiError(403, "Seule la Direction Générale peut suspendre ou demander un audit");
     }
     // Pour APPROUVE/REJETE/CORRECTION/COMPLEMENT : vérifier le rôle de l'étape
-    if (!["SUSPENDRE","AUDIT"].includes(decision) && !isAdmin && req.user.role !== etapeCourante.roleRequis) {
+    if (!["SUSPENDRE","AUDIT"].includes(decision) && !isAdmin && !mesRoles.includes(etapeCourante.roleRequis)) {
       throw new ApiError(403, `Étape "${etapeCourante.nom}" réservée au rôle ${etapeCourante.roleRequis} (vous êtes ${req.user.role})`);
+    }
+
+    // Un traitement suspendu bloque toute décision, sauf levée par la DG/ADMIN
+    if (instance.decompte?.traitementSuspendu && !isSuperv) {
+      throw new ApiError(403, "Traitement suspendu par la Direction Générale — aucune action possible");
     }
 
     // Enregistrer l'action
@@ -215,7 +222,7 @@ workflowRouter.post("/:instanceId/lever-suspension", async (req: Request, res: R
 workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const isSuperv = ROLES_SUPERVISEURS.includes(req.user.role);
+    const isSuperv = (await rolesEffectifs(req.user.id, req.user.role)).includes("DG") || req.user.role === "ADMIN";
 
     const instances = await prisma.workflowInstance.findMany({
       where: { statut: "EN_COURS" as const },
@@ -224,11 +231,13 @@ workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: Next
     });
 
     // Pour non-superviseurs : filtrer sur l'étape courante qui leur appartient
+    // (rôle propre ou rôle délégué actif)
+    const mesRoles = isSuperv ? [] : await rolesEffectifs(req.user.id, req.user.role);
     const taches = isSuperv
       ? instances
       : instances.filter((inst) => {
           const etape = (inst as unknown as { definition: { etapes: Array<{ roleRequis: string }> } }).definition.etapes[inst.etapeActuelle];
-          return etape && etape.roleRequis === req.user!.role;
+          return etape && mesRoles.includes(etape.roleRequis);
         });
 
     // Enrichir avec metadata
@@ -239,7 +248,7 @@ workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: Next
       const debutEtape = derniereAction ? new Date(derniereAction.createdAt) : new Date(inst.createdAt);
       const joursEnCours = Math.floor((Date.now() - debutEtape.getTime()) / 86400000);
       const enRetardSla  = etapeCourante?.slaJours != null && joursEnCours > (etapeCourante.slaJours ?? 999);
-      const peutAgir = isSuperv || (etapeCourante && etapeCourante.roleRequis === req.user!.role);
+      const peutAgir = isSuperv || (etapeCourante && mesRoles.includes(etapeCourante.roleRequis));
       return { ...inst, etapeCourante, joursEnCours, enRetardSla, peutAgir };
     });
 

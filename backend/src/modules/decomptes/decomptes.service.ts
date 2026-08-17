@@ -143,11 +143,12 @@ async function decompteIdsATraiterPour(role: string): Promise<string[]> {
 }
 
 export const decomptesService = {
-  async list(params: { page?: number; pageSize?: number; marcheId?: string; statut?: string; entrepriseId?: string; aTraiter?: boolean; role?: string }) {
+  async list(params: { page?: number; pageSize?: number; marcheId?: string; statut?: string; entrepriseId?: string; aTraiter?: boolean; role?: string; marcheIds?: string[] }) {
     const page     = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(100, params.pageSize ?? 20);
     const where: Record<string, unknown> = { deletedAt: null };
     if (params.marcheId)    where.marcheId    = params.marcheId;
+    if (params.marcheIds)   where.marcheId    = { in: params.marcheIds }; // périmètre d'affectation
     if (params.statut)      where.statut      = params.statut;
     if (params.entrepriseId) where.entrepriseId = params.entrepriseId;
 

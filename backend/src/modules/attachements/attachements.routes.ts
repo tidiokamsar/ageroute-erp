@@ -9,6 +9,8 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
+import { entrepriseIdOf } from "../../lib/scope";
+import { getMarchesAffectes } from "../../lib/affectations";
 import { z } from "zod";
 
 export const attachementsRouter = Router();
@@ -89,6 +91,14 @@ attachementsRouter.get("/", async (req: Request, res: Response, next: NextFuncti
     if (statut) where.statut = statut;
     if (typeAttachement) where.typeAttachement = typeAttachement;
 
+    // Périmètres : isolation ENTREPRISE + affectations terrain (via le décompte)
+    if (req.user?.role === "ENTREPRISE") {
+      where.decompte = { entrepriseId: await entrepriseIdOf(req.user.id), deletedAt: null };
+    } else if (req.user) {
+      const affectes = await getMarchesAffectes(req.user.id, req.user.role);
+      if (affectes) where.decompte = { marcheId: { in: affectes }, deletedAt: null };
+    }
+
     const [data, total] = await Promise.all([
       prisma.attachement.findMany({
         where,
@@ -117,6 +127,13 @@ attachementsRouter.get("/:id", async (req: Request, res: Response, next: NextFun
   try {
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id }, include: includeAll });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    // Isolation entreprise : via le décompte parent
+    if (req.user?.role === "ENTREPRISE") {
+      const dec = await prisma.decompte.findUnique({ where: { id: att.decompteId }, select: { entrepriseId: true } });
+      if (!dec || dec.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
+        throw new ApiError(404, "Attachement non trouvé");
+      }
+    }
     res.json(att);
   } catch (err) { next(err); }
 });
@@ -225,6 +242,13 @@ attachementsRouter.post("/:id/soumettre", async (req: Request, res: Response, ne
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id }, include: { lignes: true, medias: true } });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    // Isolation entreprise : seul le propriétaire peut soumettre son attachement
+    if (req.user.role === "ENTREPRISE") {
+      const dec = await prisma.decompte.findUnique({ where: { id: att.decompteId }, select: { entrepriseId: true } });
+      if (!dec || dec.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
+        throw new ApiError(403, "Cet attachement n'appartient pas à votre entreprise");
+      }
+    }
     if (att.statut !== "BROUILLON" && att.statut !== "DEMANDE_CORRECTION") {
       throw new ApiError(400, `Statut ${att.statut} ne peut pas être soumis`);
     }

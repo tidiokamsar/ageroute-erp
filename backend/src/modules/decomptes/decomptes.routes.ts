@@ -4,6 +4,8 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { decompteCreateSchema, decompteUpdateSchema } from "./decomptes.schema";
 import { decomptesService } from "./decomptes.service";
 import { ApiError } from "../../middleware/error.middleware";
+import { entrepriseIdOf } from "../../lib/scope";
+import { getMarchesAffectes } from "../../lib/affectations";
 import { z } from "zod";
 
 export const decomptesRouter = Router();
@@ -11,12 +13,16 @@ decomptesRouter.use(requireAuth);
 
 decomptesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètres : isolation des comptes ENTREPRISE + affectations terrain
+    const entrepriseScope = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    const affectes = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
     res.json(await decomptesService.list({
       page: Number(req.query.page) || 1,
       pageSize: Number(req.query.pageSize) || 20,
       marcheId: req.query.marcheId as string,
       statut: req.query.statut as string,
-      entrepriseId: req.query.entrepriseId as string,
+      entrepriseId: entrepriseScope ?? (req.query.entrepriseId as string),
+      marcheIds: affectes ?? undefined,
       aTraiter: req.query.aTraiter === "1" || req.query.aTraiter === "true",
       role: req.user?.role,
     }));
@@ -28,7 +34,14 @@ decomptesRouter.get("/stats", async (_req: Request, res: Response, next: NextFun
 });
 
 decomptesRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await decomptesService.getById(req.params.id)); } catch (err) { next(err); }
+  try {
+    const d = await decomptesService.getById(req.params.id);
+    // Isolation entreprise : un décompte d'une autre entreprise est « introuvable »
+    if (req.user?.role === "ENTREPRISE" && d.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
+      throw new ApiError(404, "Décompte introuvable");
+    }
+    res.json(d);
+  } catch (err) { next(err); }
 });
 
 // §5 CDC — dépôt du décompte — VÉRIFICATION CONFORMITÉ ENTREPRISE AVANT CRÉATION
@@ -39,6 +52,15 @@ decomptesRouter.post("/", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), asy
     // Récupérer l'entreprise via le marché
     const { prisma } = await import("../../lib/prisma");
     const marche = await prisma.marche.findFirst({ where: { id: (body as never as { marcheId: string }).marcheId, deletedAt: null } });
+    // Isolation entreprise : le marché (et l'entreprise déclarée) doivent être les siens
+    if (req.user.role === "ENTREPRISE") {
+      const mienne = await entrepriseIdOf(req.user.id);
+      const entrepriseDeclaree = (body as never as { entrepriseId?: string }).entrepriseId;
+      if (!marche || marche.entrepriseId !== mienne || (entrepriseDeclaree && entrepriseDeclaree !== mienne)) {
+        throw new ApiError(403, "Ce marché n'appartient pas à votre entreprise");
+      }
+      (body as never as { entrepriseId?: string }).entrepriseId = mienne;
+    }
     if (marche) {
       const { checkEligibilite } = await import("../entreprises/entreprises.service");
       const { eligible, raisons } = await checkEligibilite(marche.entrepriseId);
