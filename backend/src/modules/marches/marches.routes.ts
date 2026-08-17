@@ -424,7 +424,7 @@ marchesRouter.get("/:id/paiements", async (req: Request, res: Response, next: Ne
       select: { id: true },
     });
     const paiements = await prisma.paiement.findMany({
-      where: { decompteId: { in: decomptes.map(d => d.id) } },
+      where: { decompteId: { in: decomptes.map(d => d.id) }, deletedAt: null },
       include: { decompte: { select: { reference: true, type: true } } },
       orderBy: { createdAt: "desc" },
     });

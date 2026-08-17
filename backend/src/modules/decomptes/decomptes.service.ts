@@ -21,7 +21,7 @@ const include = {
   marche: marcheInclude,
   lot: true,
   attachements: true,
-  paiements: true,
+  paiements: { where: { deletedAt: null } },
   entreprise: { select: { id: true, raisonSociale: true, statut: true, motifBlocage: true } },
 };
 

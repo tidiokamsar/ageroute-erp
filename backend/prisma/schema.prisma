@@ -1246,6 +1246,8 @@ model Paiement {
   refBcrg     String?  // référence BCRG
   observations String?
   createdAt   DateTime @default(now())
+  // §3.4 AGENTS.md — pas de suppression physique des paiements (auditabilité)
+  deletedAt   DateTime?
 
   @@map("paiements")
   @@index([decompteId])

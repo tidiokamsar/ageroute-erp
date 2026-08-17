@@ -56,7 +56,7 @@ decomptesRouter.put("/:id", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), a
 });
 
 // §6 CDC — pièces obligatoires
-decomptesRouter.patch("/:id/pieces", async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.patch("/:id/pieces", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const pieces = z.object({
@@ -126,25 +126,28 @@ decomptesRouter.get("/:id/lignes", async (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 });
 
-decomptesRouter.post("/:id/lignes", async (req: Request, res: Response, next: NextFunction) => {
+// Schéma commun de saisie d'une ligne BPU (création et mise à jour complète)
+const ligneSchema = z.object({
+  codeArticle:       z.string().min(1),
+  designation:       z.string().min(2),
+  unite:             z.string().min(1),
+  quantiteContrat:   z.number().positive(),
+  quantitePrecedent: z.number().min(0).default(0),
+  quantiteCourante:  z.number().min(0),
+  prixUnitaire:      z.number().positive(),
+  tauxTva:           z.number().min(0).default(18),
+  tauxRetenue:       z.number().min(0).default(5),
+  tauxAvance:        z.number().min(0).default(0),
+  montantPenalite:   z.number().min(0).default(0),
+  motifPenalite:     z.string().optional(),
+  attachementLigneId:z.string().optional(),
+  observations:      z.string().optional(),
+});
+
+decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const body = z.object({
-      codeArticle:       z.string().min(1),
-      designation:       z.string().min(2),
-      unite:             z.string().min(1),
-      quantiteContrat:   z.number().positive(),
-      quantitePrecedent: z.number().min(0).default(0),
-      quantiteCourante:  z.number().min(0),
-      prixUnitaire:      z.number().positive(),
-      tauxTva:           z.number().min(0).default(18),
-      tauxRetenue:       z.number().min(0).default(5),
-      tauxAvance:        z.number().min(0).default(0),
-      montantPenalite:   z.number().min(0).default(0),
-      motifPenalite:     z.string().optional(),
-      attachementLigneId:z.string().optional(),
-      observations:      z.string().optional(),
-    }).parse(req.body);
+    const body = ligneSchema.parse(req.body);
 
     const { prisma } = await import("../../lib/prisma");
     const decompte = await prisma.decompte.findUnique({ where: { id: req.params.id }, include: { marche: true } });
@@ -227,17 +230,18 @@ decomptesRouter.post("/:id/lignes", async (req: Request, res: Response, next: Ne
   } catch (err) { next(err); }
 });
 
-decomptesRouter.put("/:id/lignes/:ligneId", async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.put("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const body = ligneSchema.parse(req.body);
     const { prisma } = await import("../../lib/prisma");
     const ligne = await prisma.decompteLigne.findFirst({ where: { id: req.params.ligneId, decompteId: req.params.id } });
     if (!ligne) throw new ApiError(404, "Ligne introuvable");
-    const updated = await prisma.decompteLigne.update({ where: { id: req.params.ligneId }, data: req.body as never });
+    const updated = await prisma.decompteLigne.update({ where: { id: req.params.ligneId }, data: body as never });
     res.json(updated);
   } catch (err) { next(err); }
 });
 
-decomptesRouter.delete("/:id/lignes/:ligneId", async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.delete("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { prisma } = await import("../../lib/prisma");
     await prisma.decompteLigne.delete({ where: { id: req.params.ligneId } });
@@ -246,7 +250,7 @@ decomptesRouter.delete("/:id/lignes/:ligneId", async (req: Request, res: Respons
 });
 
 // POST /:id/calculate — recalcule total depuis lignes (avec taux custom)
-decomptesRouter.post("/:id/calculate", async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.post("/:id/calculate", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = z.object({
       applyVat:            z.boolean().default(true),

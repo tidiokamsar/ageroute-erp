@@ -102,7 +102,7 @@ exportRouter.get("/entreprises", async (req: Request, res: Response, next: NextF
 exportRouter.get("/paiements", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { statut } = req.query;
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { deletedAt: null };
     if (statut) where.statut = statut;
 
     const paiements = await prisma.paiement.findMany({
