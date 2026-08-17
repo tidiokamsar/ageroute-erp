@@ -1,3 +1,18 @@
+/**
+ * ⚠️ MODULE HORS SERVICE — exclu de la compilation (voir backend/tsconfig.json).
+ *
+ * Ce routeur n'est PAS monté dans app.ts et il est incompatible avec l'état
+ * actuel du code : il importe `middleware/auth` (inexistant — l'authentification
+ * est dans `middleware/auth.middleware.ts`) et interroge le schéma Prisma avec
+ * des champs/relations qui n'existent plus (`marche.attachements`,
+ * `montantHtGnf`, filtre `marcheId` sur Attachement).
+ *
+ * Il provient d'une version antérieure de la source. Sa restauration (portail
+ * entreprise) est une décision d'équipe : il faut le réécrire contre le schéma
+ * actuel puis le monter dans app.ts. Le frontend (PortailEntreprisePage.tsx)
+ * appelle ces endpoints — ils répondent 404 tant que ce module n'est pas remis
+ * en service.
+ */
 import { Router, Request, Response } from "express";
 import { prisma } from "../../lib/prisma";
 import { authenticate } from "../../middleware/auth";

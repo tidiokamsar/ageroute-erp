@@ -202,7 +202,7 @@ async function main() {
   await prisma.projet.upsert({
     where: { code: "PROJ-001" },
     update: {},
-    create: { code:"PROJ-001", nom:"Réhabilitation RN1 Conakry-Coyah", bailleur:"Banque Mondiale", statut:"EN_COURS", budgetGnf:BigInt("50000000000") },
+    create: { code:"PROJ-001", nom:"Réhabilitation RN1 Conakry-Coyah", intitule:"Réhabilitation RN1 Conakry-Coyah", bailleur:"Banque Mondiale", bailleurPrincipal:"Banque Mondiale", statut:"EN_EXECUTION", budgetGnf:BigInt("50000000000"), budgetInitialGnf:BigInt("50000000000") },
   });
   console.log("✓ Projet exemple créé");
 

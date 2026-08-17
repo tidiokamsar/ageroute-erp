@@ -170,7 +170,7 @@ attachementsRouter.post("/", requireRole("ADMIN", "DMC", "MISSION", "TECHNIQUE",
 
     const created = await prisma.attachement.create({
       data: {
-        ...data as never,
+        ...(data as object),
         code,
         montantHtGnf,
         statut: "BROUILLON",
@@ -203,7 +203,7 @@ attachementsRouter.put("/:id", requireRole("ADMIN", "DMC", "MISSION", "TECHNIQUE
 
     const updated = await prisma.attachement.update({
       where: { id: req.params.id },
-      data: { ...(data as never), ...(montantHtGnf !== undefined ? { montantHtGnf } : {}) } as never,
+      data: { ...(data as object), ...(montantHtGnf !== undefined ? { montantHtGnf } : {}) } as never,
       include: includeAll,
     });
 
@@ -483,7 +483,7 @@ attachementsRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "T
     const ligne = await prisma.attachementLigne.create({
       data: {
         attachementId: req.params.id,
-        ...data as never,
+        ...(data as object),
         quantitePrecedent,
         quantiteCumulee,
         montant,
