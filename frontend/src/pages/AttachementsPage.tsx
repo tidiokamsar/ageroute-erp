@@ -15,6 +15,7 @@ import { Button } from "../components/ui/Button";
 import { Input, Select, FormField, Textarea } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { toast } from "../components/ui/Toast";
+import { SecureFileLink, SecureImg } from "../components/ui/SecureFile";
 import {
   Plus, Paperclip, Check, X, MapPin, Trash2, Image as ImageIcon,
   Send, Eye, AlertTriangle, CheckCircle, XCircle, Clock, FileText,
@@ -576,16 +577,14 @@ function FicheControle({
           {att.medias?.length > 0 ? (
             <div className="grid grid-cols-3 gap-2">
               {att.medias.slice(0, 9).map((m) => (
-                <a key={m.id} href={m.urlPublique ?? undefined} target="_blank" rel="noreferrer"
+                <SecureFileLink key={m.id} href={m.urlPublique ?? undefined}
                    title={m.urlPublique ? "Cliquer pour ouvrir le document" : "Fichier non disponible"}
-                   className={`aspect-square rounded-lg bg-gray-100 border border-gray-200 overflow-hidden relative group block ${m.urlPublique ? "cursor-pointer hover:border-navy/50 hover:shadow" : "cursor-default"}`}
-                   onClick={(e) => { if (!m.urlPublique) e.preventDefault(); }}>
+                   className={`aspect-square rounded-lg bg-gray-100 border border-gray-200 overflow-hidden relative group block ${m.urlPublique ? "cursor-pointer hover:border-navy/50 hover:shadow" : "cursor-default"}`}>
                   {m.urlPublique ? (
-                    <img
+                    <SecureImg
                       src={m.urlPublique}
                       alt={m.legende ?? "Photo"}
                       className="w-full h-full object-cover"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
@@ -596,7 +595,7 @@ function FicheControle({
                   {m.legende && (
                     <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 truncate">{m.legende}</div>
                   )}
-                </a>
+                </SecureFileLink>
               ))}
               {att.medias.length > 9 && (
                 <div className="aspect-square rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-xs text-gray-500">
@@ -1236,14 +1235,12 @@ export function AttachementsPage() {
                     ) : (
                       <div className="grid grid-cols-3 gap-3">
                         {detail.medias.map((m: any) => (
-                          <a key={m.id} href={m.urlPublique ?? undefined} target="_blank" rel="noreferrer"
-                             onClick={(e) => { if (!m.urlPublique) e.preventDefault(); }}
+                          <SecureFileLink key={m.id} href={m.urlPublique ?? undefined}
                              title={m.urlPublique ? "Cliquer pour ouvrir" : "Fichier non disponible"}
                              className={`rounded-xl border border-gray-200 overflow-hidden block ${m.urlPublique ? "hover:border-navy/50 hover:shadow transition-all" : "opacity-70"}`}>
                             <div className="aspect-square bg-gray-100 relative">
                               {m.urlPublique && m.type !== "DOCUMENT" ? (
-                                <img src={m.urlPublique} alt={m.legende ?? "Photo"} className="w-full h-full object-cover"
-                                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}/>
+                                <SecureImg src={m.urlPublique} alt={m.legende ?? "Photo"} className="w-full h-full object-cover"/>
                               ) : (
                                 <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
                                   <ImageIcon className="h-8 w-8"/>
@@ -1253,7 +1250,7 @@ export function AttachementsPage() {
                             </div>
                             {m.legende && <p className="text-xs text-gray-600 px-2 py-1.5 truncate">{m.legende}</p>}
                             <p className="text-[10px] text-gray-400 px-2 pb-1.5 truncate">{m.cheminFichier.split("/").pop()}</p>
-                          </a>
+                          </SecureFileLink>
                         ))}
                       </div>
                     )}

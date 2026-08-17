@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, parseApiError } from "../../lib/api";
+import { openSecureFile } from "../../lib/secureFile";
 import { Upload, File, X, ExternalLink, Eye } from "lucide-react";
 import { Modal } from "./Modal";
 import { toast } from "./Toast";
@@ -153,8 +154,8 @@ export function DocumentViewer({ url, filename, className = "" }: DocumentViewer
   const fullUrl = url.startsWith("http") ? url : `${window.location.origin}${url.startsWith("/") ? "" : "/"}${url}`;
 
   function open() {
-    // Pour les PDF et images, ouvrir dans un onglet
-    window.open(fullUrl, "_blank");
+    // Pour les fichiers protégés, obtenir une URL signée éphémère avant l'ouverture
+    void openSecureFile(fullUrl);
   }
 
   return (

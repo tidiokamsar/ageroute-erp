@@ -12,6 +12,7 @@ import { Button } from "../components/ui/Button";
 import { Input, Select, FormField, Textarea } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { toast } from "../components/ui/Toast";
+import { SecureFileLink } from "../components/ui/SecureFile";
 import {
   Plus, Search, Building2, Pencil, Trash2, CheckCircle2, XCircle, AlertTriangle,
   ShieldCheck, ShieldAlert, ShieldX, Lock, Unlock, RefreshCw, FileText,
@@ -614,10 +615,10 @@ export function EntreprisesPage() {
                             <span className="font-semibold text-gray-800">{typeLabel}</span>
                             {doc.numero && <span className="text-[10px] text-gray-400">N°{doc.numero}</span>}
                             {doc.url && (
-                              <a href={doc.url} target="_blank" rel="noreferrer"
+                              <SecureFileLink href={doc.url}
                                  className="text-[10px] font-bold text-navy underline hover:text-navy/70">
                                 📄 Ouvrir le document
-                              </a>
+                              </SecureFileLink>
                             )}
                           </div>
                           <div className="flex gap-4 mt-1 text-[11px] text-gray-500">

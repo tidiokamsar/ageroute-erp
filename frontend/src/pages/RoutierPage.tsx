@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { SecureFileLink } from "../components/ui/SecureFile";
 import {
   MapPinIcon, DocumentTextIcon, PhotoIcon, WrenchScrewdriverIcon,
   ClipboardDocumentListIcon, ChartBarIcon, InformationCircleIcon,
@@ -647,10 +648,10 @@ function TronconModal({ troncon: init, onClose }: { troncon: Troncon; onClose: (
                         </div>
                       </div>
                       {d.url && (
-                        <a href={d.url} target="_blank" rel="noreferrer"
+                        <SecureFileLink href={d.url}
                           className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-semibold">
                           <ArrowDownTrayIcon className="w-4 h-4" /> Télécharger
-                        </a>
+                        </SecureFileLink>
                       )}
                     </div>
                   ))}

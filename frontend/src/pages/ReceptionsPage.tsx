@@ -11,6 +11,7 @@ import { Button } from "../components/ui/Button";
 import { Input, Select, FormField } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { toast } from "../components/ui/Toast";
+import { SecureFileLink, SecureImg } from "../components/ui/SecureFile";
 import { Plus, ClipboardCheck, Clock, CheckCircle2, AlertTriangle, PenLine } from "lucide-react";
 
 interface Reception {
@@ -423,16 +424,16 @@ export function ReceptionsPage() {
               <div className="grid grid-cols-2 gap-2">
                 {(viewRec.pieces ?? []).map((pc, i) => (
                   pc.url ? (
-                    <a key={i} href={pc.url} target="_blank" rel="noreferrer"
+                    <SecureFileLink key={i} href={pc.url}
                        className="border border-gray-200 rounded-lg p-2 hover:border-navy/40 transition-colors block">
                       {pc.type === "PHOTO" ? (
-                        <img src={pc.url} alt={pc.nom} className="w-full h-24 object-cover rounded mb-1"/>
+                        <SecureImg src={pc.url} alt={pc.nom} className="w-full h-24 object-cover rounded mb-1"/>
                       ) : (
-                        <div className="w-full h-24 bg-gray-50 rounded mb-1 flex items-center justify-center text-3xl">📄</div>
+                      <div className="w-full h-24 bg-gray-50 rounded mb-1 flex items-center justify-center text-3xl">📄</div>
                       )}
                       <p className="truncate text-[10px] font-medium text-navy">{pc.nom}</p>
                       <p className="text-[9px] text-gray-400">Cliquer pour ouvrir</p>
-                    </a>
+                    </SecureFileLink>
                   ) : (
                     <div key={i} className="border border-gray-100 rounded-lg p-2 opacity-60">
                       <div className="w-full h-24 bg-gray-50 rounded mb-1 flex items-center justify-center text-3xl">{pc.type === "PHOTO" ? "🖼" : "📄"}</div>

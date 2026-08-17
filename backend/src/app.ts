@@ -34,6 +34,7 @@ import { portailRouter } from "./modules/portail/portail.routes";
 import { revisionRouter } from "./modules/revision/revision.routes";
 import { searchRouter } from "./modules/search/search.routes";
 import { signatureAuditRouter } from "./modules/signature-audit/signature-audit.routes";
+import { uploadsRouter } from "./modules/uploads/uploads.routes";
 import { requireAuth } from "./middleware/auth.middleware";
 import { checkModuleAccess } from "./middleware/moduleAccess.middleware";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
@@ -126,6 +127,8 @@ export function createApp() {
   app.use("/api/revision", requireAuth, checkModuleAccess("revision"), revisionRouter);
   // recherche globale : authentification + périmètre d'affectation vérifiés en handler
   app.use("/api/search", searchRouter);
+  // Pièces jointes : dépôt authentifié + téléchargement par URL signée éphémère (P0-2)
+  app.use("/api/uploads", uploadsRouter);
   // Résumé public agrégé pour l'intégration SharePoint (SIGTIR) — lecture seule, sans auth.
   // N'expose que des agrégats et quelques décomptes récents (déjà consultable via /api/public/marche/:numContrat).
   app.get("/api/public/sigtir-summary", async (_req, res, next) => {
