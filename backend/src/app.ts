@@ -27,7 +27,15 @@ import { conformiteRouter } from "./modules/conformite/conformite.routes";
 import { garantiesRouter } from "./modules/garanties/garanties.routes";
 import { receptionsRouter } from "./modules/receptions/receptions.routes";
 import { bpmnRouter } from "./modules/bpmn/bpmn.routes";
+import { delegationsRouter } from "./modules/delegations/delegations.routes";
+import { exportRouter } from "./modules/export/export.routes";
+import { fundingRouter } from "./modules/funding/funding.routes";
+import { portailRouter } from "./modules/portail/portail.routes";
+import { revisionRouter } from "./modules/revision/revision.routes";
+import { searchRouter } from "./modules/search/search.routes";
+import { signatureAuditRouter } from "./modules/signature-audit/signature-audit.routes";
 import { requireAuth } from "./middleware/auth.middleware";
+import { checkModuleAccess } from "./middleware/moduleAccess.middleware";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 import { prisma } from "./lib/prisma";
 import { logAudit } from "./lib/audit";
@@ -70,34 +78,54 @@ export function createApp() {
   });
 
   app.use("/api/auth", authRouter);
-  app.use("/api/entreprises", entreprisesRouter);
-  app.use("/api/marches", marchesRouter);
-  app.use("/api/marches/:marcheId/bpu", bpuRouter);
-  app.use("/api/marches/:marcheId/os", osRouter);
-  app.use("/api/decomptes", decomptesRouter);
-  app.use("/api/attachements", attachementsRouter);
-  app.use("/api/dashboard", dashboardRouter);
+
+  // ─── Contrôle d'accès par module (override administrateur, §P0-4 AGENTS.md) ──
+  // Piège documenté : requireAuth doit TOUJOURS précéder checkModuleAccess,
+  // sinon req.user est indéfini et tout le monde reçoit 401.
+  // checkModuleAccess ne bloque que les retraits explicites (non régressif) ;
+  // le rôle continue de décider par défaut, l'ADMIN n'est jamais bloqué.
+  app.use("/api/entreprises", requireAuth, checkModuleAccess("entreprises"), entreprisesRouter);
+  app.use("/api/marches", requireAuth, checkModuleAccess("marches"), marchesRouter);
+  app.use("/api/marches/:marcheId/bpu", requireAuth, checkModuleAccess("marches"), bpuRouter);
+  app.use("/api/marches/:marcheId/os", requireAuth, checkModuleAccess("marches"), osRouter);
+  app.use("/api/decomptes", requireAuth, checkModuleAccess("decomptes"), decomptesRouter);
+  app.use("/api/attachements", requireAuth, checkModuleAccess("attachements"), attachementsRouter);
+  app.use("/api/dashboard", requireAuth, checkModuleAccess("dashboard"), dashboardRouter);
+  // users : ADMIN exigé au niveau du routeur (aucune clé de module nécessaire)
   app.use("/api/users", usersRouter);
-  app.use("/api/workflow", workflowRouter);
+  app.use("/api/workflow", requireAuth, checkModuleAccess("workflow"), workflowRouter);
+  // bpmn = même espace fonctionnel « workflow » (tâches + supervision)
+  app.use("/api/bpmn", requireAuth, checkModuleAccess("workflow"), bpmnRouter);
+  // notifications : personnelles, authentification seule
   app.use("/api/notifications", notificationsRouter);
-  app.use("/api/routier", routierRouter);
-  app.use("/api/paiements", paiementsRouter);
-  app.use("/api/signature", signatureRouter);
+  app.use("/api/routier", requireAuth, checkModuleAccess("routier"), routierRouter);
+  app.use("/api/paiements", requireAuth, checkModuleAccess("paiements"), paiementsRouter);
+  app.use("/api/signature", requireAuth, checkModuleAccess("signatures"), signatureRouter);
+  app.use("/api/signature-audit", requireAuth, checkModuleAccess("signatures"), signatureAuditRouter);
   // §6 CDC — référentiels projets + avenants
-  app.use("/api/projets", projetsRouter);
-  app.use("/api/avenants", avenantsRouter);
+  app.use("/api/projets", requireAuth, checkModuleAccess("projets"), projetsRouter);
+  app.use("/api/avenants", requireAuth, checkModuleAccess("avenants"), avenantsRouter);
   // §16 CDC — circuits financiers post-DG
-  app.use("/api/circuit-financier", circuitFinancierRouter);
+  app.use("/api/circuit-financier", requireAuth, checkModuleAccess("financier"), circuitFinancierRouter);
   // §22 CDC — paramétrage métier
-  app.use("/api/parametrage", parametrageRouter);
-  // §CDC — Conformité entreprise (score, blocage, historique)
-  app.use("/api/conformite", conformiteRouter);
+  app.use("/api/parametrage", requireAuth, checkModuleAccess("parametrage"), parametrageRouter);
+  // §CDC — Conformité entreprise (score, blocage, historique) — rôles en route
+  app.use("/api/conformite", requireAuth, conformiteRouter);
   // Gestion des Garanties marchés
-  app.use("/api/garanties", garantiesRouter);
+  app.use("/api/garanties", requireAuth, checkModuleAccess("garanties"), garantiesRouter);
   // Gestion des Réceptions OPR / Provisoire / Définitive
-  app.use("/api/receptions", receptionsRouter);
-  // Moteur BPMN générique — 5 modules (Projet/Marché/Attachement/Décompte/Conformité)
-  app.use("/api/bpmn", bpmnRouter);
+  app.use("/api/receptions", requireAuth, checkModuleAccess("receptions"), receptionsRouter);
+  // ─── Modules restaurés le 17/08/2026 ─────────────────────────────────────────
+  // Présents dans la source mais non montés dans l'import du 13/08 (features 404).
+  app.use("/api/delegations", requireAuth, checkModuleAccess("delegations"), delegationsRouter);
+  // export : transversal (lecture multi-modules), authentification seule
+  app.use("/api/export", requireAuth, exportRouter);
+  app.use("/api/funding", requireAuth, checkModuleAccess("financements"), fundingRouter);
+  // portail entreprise : rôle contrôlé en routeur (entrepriseOnly)
+  app.use("/api/portail", portailRouter);
+  app.use("/api/revision", requireAuth, checkModuleAccess("revision"), revisionRouter);
+  // recherche globale : authentification + périmètre d'affectation vérifiés en handler
+  app.use("/api/search", searchRouter);
   // Résumé public agrégé pour l'intégration SharePoint (SIGTIR) — lecture seule, sans auth.
   // N'expose que des agrégats et quelques décomptes récents (déjà consultable via /api/public/marche/:numContrat).
   app.get("/api/public/sigtir-summary", async (_req, res, next) => {
@@ -167,7 +195,7 @@ export function createApp() {
   });
 
   // Audit log endpoint
-  app.get("/api/audit", requireAuth, async (req, res, next) => {
+  app.get("/api/audit", requireAuth, checkModuleAccess("audit"), async (req, res, next) => {
     try {
       const logs = await prisma.auditLog.findMany({
         include: { user: { select: { nomComplet: true, email: true } } },

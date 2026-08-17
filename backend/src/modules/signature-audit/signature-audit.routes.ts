@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
 import crypto from "crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { ApiError } from "../../middleware/error.middleware";
@@ -95,34 +96,37 @@ async function logSigEvent(sigId: string, eventType: string, status: string, mes
 // ─── GET /api/signature-audit ─────────────────────────────────────────────────
 signatureAuditRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, objectType, page = "1", pageSize = "20" } = req.query;
-    const limit = Number(pageSize);
-    const offset = (Number(page) - 1) * limit;
+    const { status, objectType } = req.query;
+    // Entrées utilisateur bornées — requête paramétrée obligatoire (P3-11 REVUE)
+    const limit = Math.min(Math.max(Number(req.query.pageSize) || 20, 1), 200);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const offset = (page - 1) * limit;
 
-    let whereClause = "WHERE 1=1";
-    if (status) whereClause += ` AND so.status = '${status}'`;
-    if (objectType) whereClause += ` AND so.object_type = '${objectType}'`;
+    const conditions: Prisma.Sql[] = [Prisma.sql`1=1`];
+    if (status) conditions.push(Prisma.sql`AND so.status = ${String(status)}`);
+    if (objectType) conditions.push(Prisma.sql`AND so.object_type = ${String(objectType)}`);
+    const whereClause = Prisma.join(conditions, " ");
 
-    const rows = await prisma.$queryRawUnsafe<(SigObject & {
+    const rows = await prisma.$queryRaw<(SigObject & {
       signer_nom: string | null; signature_status: string | null; signed_at: Date | null;
-    })[]>(`
+    })[]>(Prisma.sql`
       SELECT so.*,
-        u.\"nomComplet\" as signer_nom,
+        u."nomComplet" as signer_nom,
         ss.signature_status,
         ss.signed_at
       FROM sig_objects so
       LEFT JOIN sig_signatures ss ON ss.sig_object_id = so.id
       LEFT JOIN users u ON u.id = ss.signer_user_id
-      ${whereClause}
+      WHERE ${whereClause}
       ORDER BY so.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `);
 
-    const total = await prisma.$queryRawUnsafe<{count:string}[]>(
-      `SELECT COUNT(*)::text as count FROM sig_objects so ${whereClause}`
+    const total = await prisma.$queryRaw<{count:string}[]>(
+      Prisma.sql`SELECT COUNT(*)::text as count FROM sig_objects so WHERE ${whereClause}`
     );
 
-    res.json({ data: rows, total: Number(total[0]?.count ?? 0), page: Number(page), pageSize: limit });
+    res.json({ data: rows, total: Number(total[0]?.count ?? 0), page, pageSize: limit });
   } catch (err) { next(err); }
 });
 
