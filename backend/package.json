@@ -9,8 +9,7 @@
     "test": "tsx --test \"src/**/*.test.ts\"",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "db:push": "prisma db push --accept-data-loss",
-    "db:deploy": "prisma db push --accept-data-loss && tsx src/lib/seed.ts",
+    "db:sql": "bash -c 'for f in prisma/sql/*.sql; do [ -e \"$f\" ] || continue; echo \"-- $f\"; psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f \"$f\"; done'",
     "db:seed": "tsx src/lib/seed.ts"
   },
   "dependencies": {
