@@ -76,6 +76,7 @@ git merge --no-ff origin/fix/p0-access-control -m "merge: fix/p0-access-control"
 git merge --no-ff origin/fix/restore-modules  -m "merge: fix/restore-modules"
 git merge --no-ff origin/fix/uploads-auth     -m "merge: fix/uploads-auth"
 git merge --no-ff origin/fix/deploy-safety    -m "merge: fix/deploy-safety"
+git merge --no-ff origin/fix/roles-workflows  -m "merge: fix/roles-workflows"
 git push origin master
 ```
 
