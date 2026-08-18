@@ -4,6 +4,7 @@
  * 9 onglets : Résumé | Lignes BPU | Calculs | Pièces | Validations | Workflow | Paiement | Audit | Historique
  */
 import { useState, useEffect } from "react";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, parseApiError, fmtGnf } from "../lib/api";
 import { useAuth, canWrite } from "../lib/auth";
@@ -172,6 +173,8 @@ export function DecomptesPage() {
   const [commentType, setCommentType] = useState("COMMENTAIRE");
   const [payModal, setPayModal] = useState(false);
   const [payForm, setPayForm] = useState<Record<string, unknown>>({ etape: "ORDONNANCEMENT", statut: "EN_ATTENTE" });
+  const [confirmSuppr, setConfirmSuppr] = useState<string | null>(null);
+  const [confirmSupprLigne, setConfirmSupprLigne] = useState<string | null>(null);
   const [calcPreview, setCalcPreview] = useState({ tva: 0, retenue: 0, avance: 0, net: 0 });
 
   // ── Queries ──────────────────────────────────────────────────────────────────
@@ -535,12 +538,27 @@ export function DecomptesPage() {
                 )}
                 {canAdmin && det.statut !== "PAYE" && (
                   <button className="px-2.5 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg"
-                    onClick={() => { if (confirm("Supprimer ?")) deleteMut.mutate(det.id); }}>
+                    onClick={() => setConfirmSuppr(det.id)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
             </div>
+
+            <ConfirmDialog
+              open={confirmSuppr !== null} danger title="Supprimer ce décompte ?"
+              message={<>Le décompte <b>{det.reference}</b> sera retiré de toutes les listes (suppression logicielle, tracée en audit). Un décompte payé ne peut pas être supprimé.</>}
+              confirmLabel="Supprimer le décompte" loading={deleteMut.isPending}
+              onClose={() => setConfirmSuppr(null)}
+              onConfirm={() => { if (confirmSuppr) deleteMut.mutate(confirmSuppr); setConfirmSuppr(null); }}
+            />
+            <ConfirmDialog
+              open={confirmSupprLigne !== null} danger title="Supprimer cette ligne ?"
+              message="La ligne BPU sera définitivement supprimée du décompte. Vérifiez le recalcul des totaux après suppression."
+              confirmLabel="Supprimer la ligne" loading={delLigneMut.isPending}
+              onClose={() => setConfirmSupprLigne(null)}
+              onConfirm={() => { if (confirmSupprLigne) delLigneMut.mutate(confirmSupprLigne); setConfirmSupprLigne(null); }}
+            />
 
             {/* Tabs */}
             <div className="flex gap-0.5 overflow-x-auto border-b border-gray-100 mb-4">
@@ -660,7 +678,7 @@ export function DecomptesPage() {
                             {l.depassement ? <span className="text-red-600 flex items-center gap-0.5 font-bold"><AlertTriangle className="h-3 w-3"/>!!</span> : <span className="text-green-500"><Check className="h-3 w-3"/></span>}
                           </td>
                           <td className="px-2 py-2">
-                            <button className="text-red-300 hover:text-red-500" onClick={() => { if (confirm("Supprimer ?")) delLigneMut.mutate(l.id); }}>
+                            <button className="text-red-300 hover:text-red-500" onClick={() => setConfirmSupprLigne(l.id)}>
                               <Trash2 className="h-3 w-3" />
                             </button>
                           </td>

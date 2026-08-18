@@ -3,6 +3,7 @@
  * Le suppléant hérite temporairement du rôle du titulaire dans le workflow (tracé P.O.).
  */
 import { useState } from "react";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, parseApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -41,6 +42,7 @@ export function DelegationsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const [modal, setModal] = useState(false);
+  const [aSupprimer, setASupprimer] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, unknown>>({});
 
   const { data: delegations, isLoading } = useQuery({
@@ -123,7 +125,7 @@ export function DelegationsPage() {
                       <Power className="h-4 w-4" />
                     </button>
                     <button
-                      onClick={() => { if (confirm("Supprimer cette délégation ?")) delMut.mutate(d.id); }}
+                      onClick={() => setASupprimer(d.id)}
                       title="Supprimer"
                       className="p-2 rounded-lg hover:bg-red-50 text-red-500">
                       <Trash2 className="h-4 w-4" />
@@ -135,6 +137,14 @@ export function DelegationsPage() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        open={aSupprimer !== null} danger title="Supprimer cette délégation ?"
+        message="Le suppléant ne portera plus le rôle du titulaire. Un historique d'audit de la suppression est conservé."
+        confirmLabel="Supprimer la délégation" loading={delMut.isPending}
+        onClose={() => setASupprimer(null)}
+        onConfirm={() => { if (aSupprimer) delMut.mutate(aSupprimer); setASupprimer(null); }}
+      />
 
       <Modal open={modal} onClose={() => setModal(false)} title="Nouvelle délégation d'intérim" size="md">
         <div className="p-4 space-y-4">

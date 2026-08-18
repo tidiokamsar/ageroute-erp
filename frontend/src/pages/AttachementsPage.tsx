@@ -8,6 +8,7 @@
  *   - Traçabilité complète des validations précédentes
  */
 import { useState, useEffect } from "react";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, parseApiError, fmtGnf } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -791,6 +792,7 @@ export function AttachementsPage() {
   }, []);
   const [activeTab, setActiveTab] = useState<"fiche" | "lignes" | "gps" | "medias" | "audit">("fiche");
   const [workflowModal, setWorkflowModal] = useState<{ action: string; id: string; label: string } | null>(null);
+  const [confirmSuppr, setConfirmSuppr] = useState<string | null>(null);
   const [workflowComment, setWorkflowComment] = useState("");
   const [addLigneModal, setAddLigneModal] = useState(false);
   const [addGpsModal, setAddGpsModal] = useState(false);
@@ -1146,7 +1148,7 @@ export function AttachementsPage() {
                   </button>
                   {canAdmin && (detail.statut === "BROUILLON" || detail.statut === "DEMANDE_CORRECTION") && (
                     <button
-                      onClick={() => { if (confirm("Supprimer cet attachement ?")) deleteMut.mutate(detail.id); }}
+                      onClick={() => setConfirmSuppr(detail.id)}
                       className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                     >
                       <Trash2 className="h-3.5 w-3.5"/>
@@ -1154,6 +1156,14 @@ export function AttachementsPage() {
                   )}
                 </div>
               </div>
+
+              <ConfirmDialog
+                open={confirmSuppr !== null} danger title="Supprimer cet attachement ?"
+                message={<>L'attachement <b>{detail.code ?? ""}</b> et ses lignes/mesures seront définitivement supprimés. Cette action est tracée en audit.</>}
+                confirmLabel="Supprimer l'attachement" loading={deleteMut.isPending}
+                onClose={() => setConfirmSuppr(null)}
+                onConfirm={() => { if (confirmSuppr) deleteMut.mutate(confirmSuppr); setConfirmSuppr(null); }}
+              />
 
               {/* Contenu onglet */}
               <div className="p-4 max-h-[70vh] overflow-y-auto">

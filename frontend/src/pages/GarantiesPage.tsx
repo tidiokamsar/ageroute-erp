@@ -4,6 +4,7 @@
  * Alertes automatiques expiration 30 jours
  */
 import { useState } from "react";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, parseApiError, fmtGnf } from "../lib/api";
 import { useAuth, canWrite } from "../lib/auth";
@@ -50,6 +51,7 @@ export function GarantiesPage() {
   const [filterExpirantes, setFilterExpirantes] = useState(false);
   const [appelModal, setAppelModal] = useState<Garantie | null>(null);
   const [appelObs, setAppelObs] = useState("");
+  const [mainleveeCible, setMainleveeCible] = useState<Garantie | null>(null);
 
   const { data: synthese } = useQuery({
     queryKey: ["garanties-synthese"],
@@ -191,7 +193,7 @@ export function GarantiesPage() {
                       {!g.appelGarantie && (user?.role === "ADMIN" || user?.role === "DG" || user?.role === "DAF") && (<>
                         <Button size="sm" variant="ghost" onClick={() => { setAppelObs(""); setAppelModal(g); }} className="text-red-600">Appeler</Button>
                         {g.active && <Button size="sm" variant="ghost" className="text-green-700"
-                          onClick={() => { if (confirm(`Mainlevée de la garantie ${g.type} (${g.montantGnf ? Number(g.montantGnf).toLocaleString("fr-GN") + " FG" : ""}) — restituer à l'entreprise ?`)) mainleveeMut.mutate(g.id); }}>
+                          onClick={() => setMainleveeCible(g)}>
                           Mainlevée
                         </Button>}
                       </>)}
@@ -272,6 +274,14 @@ export function GarantiesPage() {
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={mainleveeCible !== null} danger title="Mainlevée de garantie"
+        message={<>Restituer la caution <b>{mainleveeCible?.type}</b> de <b>{mainleveeCible?.montantGnf ? Number(mainleveeCible.montantGnf).toLocaleString("fr-GN") + " FG" : ""}</b> à l'entreprise ? La garantie sera marquée inactive et ne protègera plus le marché.</>}
+        confirmLabel="Accorder la mainlevée" loading={mainleveeMut.isPending}
+        onClose={() => setMainleveeCible(null)}
+        onConfirm={() => { if (mainleveeCible) mainleveeMut.mutate(mainleveeCible.id); setMainleveeCible(null); }}
+      />
     </div>
   );
 }

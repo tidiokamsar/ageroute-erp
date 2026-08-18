@@ -83,8 +83,10 @@ attachementsRouter.get("/stats", async (_req: Request, res: Response, next: Next
 
 attachementsRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { decompteId, statut, typeAttachement, page = "1", pageSize = "20" } = req.query as Record<string, string>;
-    const skip = (Number(page) - 1) * Number(pageSize);
+    const { decompteId, statut, typeAttachement } = req.query as Record<string, string>;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
+    const skip = (page - 1) * pageSize;
 
     const where: Record<string, unknown> = {};
     if (decompteId) where.decompteId = decompteId;
@@ -112,12 +114,12 @@ attachementsRouter.get("/", async (req: Request, res: Response, next: NextFuncti
         },
         orderBy: { createdAt: "desc" },
         skip,
-        take: Number(pageSize),
+        take: pageSize,
       }),
       prisma.attachement.count({ where }),
     ]);
 
-    res.json({ data, total, page: Number(page), pageSize: Number(pageSize) });
+    res.json({ data, total, page, pageSize });
   } catch (err) { next(err); }
 });
 

@@ -50,6 +50,16 @@ export function createApp() {
   app.use(express.json({ limit: "10mb" }));
   app.use(morgan(env.NODE_ENV === "development" ? "dev" : "combined"));
 
+  // Garde-fou global — plafond d'appels API par adresse IP (anti-abus,
+  // anti-énumération). Le /api/auth/login conserve sa limite stricte dédiée.
+  app.use("/api", rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 500,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Trop de requêtes — réessayez plus tard" },
+  }));
+
   app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: "Trop de tentatives" } }));
 
   app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "ERP AGEROUTE", timestamp: new Date().toISOString() }));
@@ -197,13 +207,26 @@ export function createApp() {
     } catch (err) { next(err); }
   });
 
-  // Audit log endpoint
+  // Audit log endpoint — filtres optionnels (action, entité, utilisateur, période)
   app.get("/api/audit", requireAuth, checkModuleAccess("audit"), async (req, res, next) => {
     try {
+      const where: Record<string, unknown> = {};
+      if (req.query.action)     where.action     = String(req.query.action);
+      if (req.query.entityType) where.entityType = String(req.query.entityType);
+      if (req.query.entityId)   where.entityId   = String(req.query.entityId);
+      if (req.query.userId)     where.userId     = String(req.query.userId);
+      if (req.query.du || req.query.au) {
+        where.createdAt = {
+          ...(req.query.du ? { gte: new Date(String(req.query.du)) } : {}),
+          ...(req.query.au ? { lte: new Date(`${String(req.query.au)}T23:59:59.999Z`) } : {}),
+        };
+      }
+      const take = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
       const logs = await prisma.auditLog.findMany({
+        where,
         include: { user: { select: { nomComplet: true, email: true } } },
         orderBy: { createdAt: "desc" },
-        take: Number(req.query.limit) || 100,
+        take,
       });
       res.json(logs);
     } catch (err) { next(err); }
