@@ -6,6 +6,7 @@ import { prisma } from "../../lib/prisma";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
+import { bornerPagination, buildSignatureAuditWhere } from "./signature-audit.query";
 
 export const signatureAuditRouter = Router();
 signatureAuditRouter.use(requireAuth);
@@ -97,15 +98,10 @@ async function logSigEvent(sigId: string, eventType: string, status: string, mes
 signatureAuditRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, objectType } = req.query;
-    // Entrées utilisateur bornées — requête paramétrée obligatoire (P3-11 REVUE)
-    const limit = Math.min(Math.max(Number(req.query.pageSize) || 20, 1), 200);
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const offset = (page - 1) * limit;
-
-    const conditions: Prisma.Sql[] = [Prisma.sql`1=1`];
-    if (status) conditions.push(Prisma.sql`AND so.status = ${String(status)}`);
-    if (objectType) conditions.push(Prisma.sql`AND so.object_type = ${String(objectType)}`);
-    const whereClause = Prisma.join(conditions, " ");
+    // Entrées utilisateur bornées — requête paramétrée obligatoire (P3-11 REVUE).
+    // Construction déportée dans signature-audit.query.ts pour être testée.
+    const { limit, page, offset } = bornerPagination(req.query.pageSize, req.query.page);
+    const whereClause = buildSignatureAuditWhere({ status, objectType });
 
     const rows = await prisma.$queryRaw<(SigObject & {
       signer_nom: string | null; signature_status: string | null; signed_at: Date | null;

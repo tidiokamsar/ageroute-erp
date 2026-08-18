@@ -34,7 +34,7 @@ import { logAudit } from "../../lib/audit";
 import { getEffectiveModules } from "../../lib/modules.catalog";
 import { getMarchesAffectes } from "../../lib/affectations";
 import { entrepriseIdOf } from "../../lib/scope";
-import { ALLOWED_MIME_TYPES, buildStoredFilename, isSafeStoredFilename } from "./uploads.security";
+import { ALLOWED_MIME_TYPES, buildStoredFilename, isSafeStoredFilename, peutLireReference, signerLienFichier, verifierLienFichier } from "./uploads.security";
 
 export const uploadsRouter = Router();
 // Pas de requireAuth au niveau du routeur : /files/:filename doit rester
@@ -97,15 +97,14 @@ function signatureConforme(filePath: string, mimeType: string): boolean {
   }
 }
 
+// Signature/vérification déportées dans uploads.security.ts (fonctions pures,
+// couvertes par uploads.security.test.ts). Comportement inchangé.
 function signToken(filename: string, expires: number): string {
-  return crypto.createHmac("sha256", env.JWT_SECRET).update(`${filename}:${expires}`).digest("hex");
+  return signerLienFichier(env.JWT_SECRET, filename, expires);
 }
 
 function verifyToken(filename: string, expires: number, token: string): boolean {
-  const expected = signToken(filename, expires);
-  const a = Buffer.from(expected);
-  const b = Buffer.from(token);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  return verifierLienFichier(env.JWT_SECRET, filename, expires, token);
 }
 
 // ─── POST /api/uploads — dépôt d'une pièce jointe ─────────────────────────────
@@ -174,15 +173,13 @@ async function findReferences(url: string): Promise<FileReference[]> {
 }
 
 async function canReadReference(req: Request, reference: FileReference, modules: string[]): Promise<boolean> {
-  if (!req.user || !modules.includes(reference.moduleKey)) return false;
-  if (req.user.role === "ENTREPRISE") {
-    // Le jeton ne porte pas l'entreprise : on la résout en base, comme le fait
-    // déjà le module portail (lib/scope.ts).
-    const entrepriseId = await entrepriseIdOf(req.user.id);
-    return Boolean(entrepriseId && reference.entrepriseId === entrepriseId);
-  }
-  const marches = await getMarchesAffectes(req.user.id, req.user.role);
-  return marches === null || Boolean(reference.marcheId && marches.includes(reference.marcheId));
+  if (!req.user) return false;
+  // Le jeton ne porte pas l'entreprise : on la résout en base, comme le fait
+  // déjà le module portail (lib/scope.ts). La décision elle-même est déportée
+  // dans uploads.security.ts pour être couverte par des tests.
+  const entrepriseId = req.user.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+  const marches = req.user.role === "ENTREPRISE" ? null : await getMarchesAffectes(req.user.id, req.user.role);
+  return peutLireReference(req.user.role, reference, modules, entrepriseId, marches);
 }
 
 // ─── GET /api/uploads/sign/:filename — URL signée après contrôle du périmètre ─
