@@ -297,3 +297,40 @@ parametrageRouter.post("/regles/:id/valider", requireRole("ADMIN", "DAF"), async
     res.json(validee);
   } catch (err) { next(err); }
 });
+
+/** GET /api/parametrage/regles/:cle/historique — piste d'audit d'une règle. */
+parametrageRouter.get("/regles/:cle/historique", requireRole("ADMIN", "DAF"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const cle = req.params.cle;
+    if (!(cle in REGLES_DEFAUT)) throw new ApiError(404, `Clé de règle inconnue : ${cle}`);
+
+    const lignes = await prisma.regleGestionHistorique.findMany({
+      where: { cle },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+
+    // Les identifiants d'agents sont remplacés par des noms lisibles : une
+    // piste d'audit doit se lire sans requête complémentaire.
+    const ids = [...new Set(lignes.flatMap((l) => [l.saisiPar, l.validePar]).filter(Boolean) as string[])];
+    const agents = ids.length
+      ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, nomComplet: true, email: true } })
+      : [];
+    const parId = new Map(agents.map((a) => [a.id, a]));
+
+    res.json({
+      cle,
+      valeurDefaut: REGLES_DEFAUT[cle as CleRegles],
+      historique: lignes.map((l) => ({
+        id: l.id,
+        ancienne: l.ancienne,
+        nouvelle: l.nouvelle,
+        dateEffet: l.dateEffet,
+        motif: l.motif,
+        saisiPar: parId.get(l.saisiPar)?.nomComplet ?? l.saisiPar,
+        validePar: l.validePar ? (parId.get(l.validePar)?.nomComplet ?? l.validePar) : null,
+        createdAt: l.createdAt,
+      })),
+    });
+  } catch (err) { next(err); }
+});

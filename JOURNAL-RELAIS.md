@@ -21,6 +21,88 @@
 
 ---
 
+## RELAIS N°6 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L0.4)
+
+### Rapport de fin de lot — L0.4 « UI Règles financières »
+
+**Branche** : `feat/regles-l02-api` (L0.2 + L0.4 dans la même branche : l'écran
+consomme des routes qui n'existent nulle part ailleurs, les séparer aurait
+donné une branche non testable).
+
+**Livré.**
+- `frontend/src/pages/ReglesFinancieres.tsx` — onglet complet : liste par
+  catégorie (Finance / Workflow / États / Conformité), saisie **typée d'après
+  `options`** (ENUM = liste, NUMBER = champ borné min/max, BOOLEAN = Oui/Non,
+  MULTI = pastilles de rôles, JSON = zone de texte), portée
+  Global/Bailleur/Type/Marché avec identifiant exigé hors Global, date d'effet,
+  motif obligatoire, bouton Simuler (modale avant/après ligne à ligne avec les
+  formules et les écarts), historique dépliable par règle.
+- `ParametragePage` : deux onglets — « Paramètres métier » (existant, intact)
+  et « Règles financières ».
+- Backend, ajout nécessaire à l'écran : `GET /api/parametrage/regles/:cle/historique`
+  (100 dernières lignes, identifiants d'agents résolus en noms lisibles — une
+  piste d'audit doit se lire sans requête complémentaire).
+
+**Le principe des quatre yeux est visible, pas seulement appliqué.** Sur une
+demande en attente, celui qui l'a saisie ne voit pas de bouton Valider mais la
+mention « Votre saisie — la validation revient à une autre personne ». Le
+serveur refuse de toute façon (L0.2), mais un contrôle qui n'apparaît qu'au
+moment de l'échec s'apprend mal.
+
+**Aucune touche au moteur de calcul.** La simulation est demandée au serveur,
+qui partage la fonction pure du moteur : aucune formule n'est réimplémentée
+côté navigateur.
+
+**Vérification.** Front : `docker build ./frontend` **réussi** (c'est le juge de
+paix : `tsc` en local signalait deux erreurs sur RoutierPage dues à des
+dépendances absentes du node_modules que j'avais lié, pas au code — elles sont
+bien déclarées dans package.json et le build complet passe). Backend :
+`npx tsc --noEmit` 0 erreur, `node scripts/run-tests.mjs` **119/119** sous
+node:20-slim avec openssl.
+
+**Reste à faire.** L'écran n'a pas été exercé dans un navigateur authentifié :
+je ne saisis pas de mot de passe dans un formulaire de connexion. Les états
+vides, les messages d'erreur du serveur et le rendu de la modale de simulation
+méritent un passage manuel après déploiement.
+
+### PROMPT pour la DSI (humain) — fusion
+
+```bash
+git fetch origin
+git checkout master && git pull --ff-only origin master
+git merge --no-ff origin/feat/regles-l02-api -m "merge: L0.2 API regles + quatre yeux, L0.4 UI regles financieres"
+git push origin master
+```
+
+Aucune migration SQL nouvelle. Déploiement par le runbook habituel
+(`PROMPT-DEPLOIEMENT-SANS-PRIVILEGES.md`).
+
+### PROMPT pour le relecteur — lots L0.2 + L0.4
+
+```text
+Tu es relecteur des lots L0.2 et L0.4 du programme de paramétrage A1-A10.
+Références : PLAN-TRAVAIL-AGENT-PARAMETRAGE.md §2 et §3, JOURNAL-RELAIS.md
+(RELAIS N°5 et N°6). Objet : branche feat/regles-l02-api.
+
+1. git fetch && git checkout feat/regles-l02-api
+2. Checklist :
+   a. DoD : backend `npx tsc` 0 erreur + `node scripts/run-tests.mjs` 119/119
+      dans node:20-slim AVEC openssl ; front `docker build ./frontend` ;
+   b. Quatre yeux : vérifie qu'aucun chemin — API ou écran — ne permet à un
+      saisisseur de valider sa propre règle ; que l'historique est écrit dans
+      la MÊME transaction que le passage VALIDE ; que invaliderCacheRegles()
+      suit la transaction ;
+   c. UI : la saisie respecte-t-elle les bornes déclarées dans options ? un
+      motif de moins de 10 caractères bloque-t-il le bouton Proposer ? la
+      portée hors Global exige-t-elle un identifiant ?
+   d. Non-régression : tant qu'aucune règle n'est VALIDE, le moteur applique
+      REGLES_DEFAUT — vérifie-le en rejouant les tests du lot L1.1.
+3. Verdict : APPROUVÉ (avec remarques) ou REFUS motivé.
+4. Consigne le RELAIS N°7.
+```
+
+---
+
 ## RELAIS N°5 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L0.2)
 
 ### Rapport de fin de lot — L0.2 « API CRUD + 4 yeux »

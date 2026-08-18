@@ -9,6 +9,7 @@ import { Button } from "../components/ui/Button";
 import { Input, FormField } from "../components/ui/Input";
 import { toast } from "../components/ui/Toast";
 import { Settings, Save, RefreshCw, ChevronDown, ChevronRight, Plus } from "lucide-react";
+import { ReglesFinancieres } from "./ReglesFinancieres";
 
 interface Param { cle: string; valeur: string; type: string; categorie: string; libelle: string; }
 
@@ -34,8 +35,31 @@ function orderedCats(grouped: Record<string, unknown>): string[] {
 }
 const CATEGORIES_SAISIE = ["GENERAL","WORKFLOW","SLA","CALCUL","MARCHES","ATTACHEMENTS","PORTAIL","RECEPTIONS","PAIEMENTS","GARANTIES","REVISION","CONFORMITE","PILOTAGE","DELEGATIONS","ALERTES","NOTIFICATIONS"];
 
+/** Bascule entre les paramètres simples (§22) et le registre des règles (A1-A10). */
+function OngletsParametrage({ onglet, setOnglet }: { onglet: string; setOnglet: (o: string) => void }) {
+  return (
+    <div className="flex gap-1 border-b border-gray-200">
+      {[
+        { cle: "parametres", libelle: "Paramètres métier" },
+        { cle: "regles", libelle: "Règles financières" },
+      ].map((o) => (
+        <button
+          key={o.cle}
+          onClick={() => setOnglet(o.cle)}
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+            onglet === o.cle ? "border-navy text-navy" : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          {o.libelle}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ParametragePage() {
   const qc = useQueryClient();
+  const [onglet, setOnglet] = useState<string>("parametres");
   const [edits, setEdits] = useState<Record<string,string>>({});
   const [collapsed, setCollapsed] = useState<Record<string,boolean>>({});
 
@@ -80,8 +104,18 @@ export function ParametragePage() {
 
   const toggleSection = (cat: string) => setCollapsed((c) => ({ ...c, [cat]: !c[cat] }));
 
+  if (onglet === "regles") {
+    return (
+      <div className="space-y-4">
+        <OngletsParametrage onglet={onglet} setOnglet={setOnglet} />
+        <ReglesFinancieres />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
+      <OngletsParametrage onglet={onglet} setOnglet={setOnglet} />
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Settings className="h-4 w-4"/> Paramétrage métier §22</h2>
