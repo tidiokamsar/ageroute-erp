@@ -210,6 +210,14 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
   const { eligible, raisons } = await checkEligibilite(entrepriseId);
   if (!eligible) throw new ApiError(403, `Dépôt bloqué — ${raisons.join(" ; ")}`);
 
+    // F5 — au moins un attachement VALIDÉ pour ce marché
+    const attachementValide = await prisma.attachement.count({
+      where: { decompte: { marcheId, deletedAt: null }, valide: true },
+    });
+    if (attachementValide === 0) {
+      throw new ApiError(400, "Aucun attachement validé pour ce marché — le dépôt exige au moins un attachement validé");
+    }
+
   // Référence à partir du nombre de décomptes existants du marché
   const nbExistants = await prisma.decompte.count({ where: { marcheId } });
   const numStr = String(nbExistants + 1).padStart(2, "0");

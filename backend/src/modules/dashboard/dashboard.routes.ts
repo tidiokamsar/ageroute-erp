@@ -6,6 +6,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
+import { getMarchesAffectes } from "../../lib/affectations";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -14,7 +15,11 @@ dashboardRouter.use(requireAuth);
 async function generalDashboard(req: Request, res: Response, next: NextFunction) {
   try {
     const role = req.user?.role ?? "ADMIN";
+    // Vue par profil : les rôles scopés ne voient que leurs marchés affectés
+    const affectes = req.user ? await getMarchesAffectes(req.user.id, role) : null;
     const entrepriseFilter: Record<string,unknown> = {};
+    const marcheScope = affectes ? { marcheId: { in: affectes } } : {};
+    const marcheScopeNonDeleted = affectes ? { deletedAt: null, ...marcheScope } : { deletedAt: null };
 
     const [
       totalDecomptes, enAttente, enCorrection, validesDg,
@@ -23,19 +28,19 @@ async function generalDashboard(req: Request, res: Response, next: NextFunction)
       totalEntreprises, entreprisesBloquees,
       decomptesByStatut,
     ] = await Promise.all([
-      prisma.decompte.count({ where: { deletedAt: null, ...entrepriseFilter } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: { in: ["DEPOSE","EN_CONTROLE","EN_VALIDATION"] }, ...entrepriseFilter } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "EN_CORRECTION", ...entrepriseFilter } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "VALIDE_DG", ...entrepriseFilter } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "EN_CIRCUIT_FINANCIER", ...entrepriseFilter } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "PAYE", ...entrepriseFilter } }),
-      prisma.decompte.aggregate({ where: { deletedAt: null, ...entrepriseFilter }, _sum: { netAPayer: true } }),
-      prisma.decompte.aggregate({ where: { deletedAt: null, statut: "PAYE", ...entrepriseFilter }, _sum: { netAPayer: true } }),
-      prisma.marche.count({ where: { deletedAt: null } }),
-      prisma.marche.count({ where: { deletedAt: null, statut: "ACTIF" } }),
+      prisma.decompte.count({ where: { ...marcheScopeNonDeleted, ...entrepriseFilter } }),
+      prisma.decompte.count({ where: { ...marcheScopeNonDeleted, statut: { in: ["DEPOSE","EN_CONTROLE","EN_VALIDATION"] }, ...entrepriseFilter } }),
+      prisma.decompte.count({ where: { ...marcheScopeNonDeleted, statut: "EN_CORRECTION", ...entrepriseFilter } }),
+      prisma.decompte.count({ where: { ...marcheScopeNonDeleted, statut: "VALIDE_DG", ...entrepriseFilter } }),
+      prisma.decompte.count({ where: { ...marcheScopeNonDeleted, statut: "EN_CIRCUIT_FINANCIER", ...entrepriseFilter } }),
+      prisma.decompte.count({ where: { ...marcheScopeNonDeleted, statut: "PAYE", ...entrepriseFilter } }),
+      prisma.decompte.aggregate({ where: { ...marcheScopeNonDeleted, ...entrepriseFilter }, _sum: { netAPayer: true } }),
+      prisma.decompte.aggregate({ where: { ...marcheScopeNonDeleted, statut: "PAYE", ...entrepriseFilter }, _sum: { netAPayer: true } }),
+      prisma.marche.count({ where: affectes ? { deletedAt: null, id: { in: affectes } } : { deletedAt: null } }),
+      prisma.marche.count({ where: affectes ? { deletedAt: null, statut: "ACTIF", id: { in: affectes } } : { deletedAt: null, statut: "ACTIF" } }),
       prisma.entreprise.count({ where: { deletedAt: null } }),
       prisma.entreprise.count({ where: { deletedAt: null, statut: "BLOQUE" } }),
-      prisma.decompte.groupBy({ by: ["statut"], where: { deletedAt: null, ...entrepriseFilter }, _count: true }),
+      prisma.decompte.groupBy({ by: ["statut"], where: { ...marcheScopeNonDeleted, ...entrepriseFilter }, _count: true }),
     ]);
 
     // Taux rejet/correction (30 derniers jours)

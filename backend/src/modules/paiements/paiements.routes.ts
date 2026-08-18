@@ -86,6 +86,58 @@ paiementsRouter.post("/", requireRole("ADMIN", "DAF"), async (req: Request, res:
   } catch (err) { next(err); }
 });
 
+// ─── F8 — Confirmation bancaire BCRG : DAF prépare, BCRG confirme le virement réel ──
+paiementsRouter.post("/:id/confirmation-bcrg", requireRole("ADMIN", "BCRG"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentification requise");
+    const body = z.object({
+      montantReelGnf: z.number().positive().transform((v) => BigInt(Math.round(v))),
+      dateReelleTransfert: z.coerce.date(),
+      observations: z.string().optional(),
+    }).parse(req.body);
+
+    const paiement = await prisma.paiement.findFirst({ where: { id: req.params.id, deletedAt: null } });
+    if (!paiement) throw new ApiError(404, "Paiement introuvable");
+    if (paiement.confirmeAt) throw new ApiError(400, "Ce paiement a déjà été confirmé par la BCRG");
+
+    // Le montant réel ne peut pas être nul ni dévier de plus de 1% du montant ordonnancé
+    const ecart = body.montantReelGnf > paiement.montantGnf
+      ? body.montantReelGnf - paiement.montantGnf
+      : paiement.montantGnf - body.montantReelGnf;
+    const seuilTolerance = paiement.montantGnf / 100n; // 1%
+    if (ecart > seuilTolerance) {
+      throw new ApiError(400, `Écart trop important : montant réel ${body.montantReelGnf} GNF vs ordonnancé ${paiement.montantGnf} GNF (écart ${ecart} GNF > 1%) — à arbitrer avec la DAF`);
+    }
+
+    const updated = await prisma.paiement.update({
+      where: { id: req.params.id },
+      data: {
+        montantReelGnf: body.montantReelGnf,
+        dateReelleTransfert: body.dateReelleTransfert,
+        confirmePar: req.user.email,
+        confirmeAt: new Date(),
+      },
+    });
+
+    // Si tous les paiements du décompte sont confirmés, marquer le décompte définitivement PAYE
+    const tous = await prisma.paiement.findMany({ where: { decompteId: paiement.decompteId, deletedAt: null } });
+    const tousConfirmes = tous.every((p) => p.confirmeAt !== null);
+    if (tousConfirmes) {
+      await prisma.decompte.update({
+        where: { id: paiement.decompteId },
+        data: { statut: "PAYE", datePaiement: body.dateReelleTransfert },
+      });
+    }
+
+    await logAudit({
+      userId: req.user.id, action: "CONFIRM_BCRG", entityType: "Paiement", entityId: req.params.id,
+      after: { montantReel: body.montantReelGnf.toString(), dateReelle: body.dateReelleTransfert.toISOString(), confirmePar: req.user.email },
+    });
+
+    res.json({ ...updated, tousConfirmes, message: tousConfirmes ? "Virement confirmé — décompte définitivement payé" : "Virement confirmé" });
+  } catch (err) { next(err); }
+});
+
 paiementsRouter.delete("/:id", requireRole("ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
