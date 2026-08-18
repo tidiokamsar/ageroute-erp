@@ -140,4 +140,5 @@ d'observation d'une quinzaine avant ouverture de l'exploitation réelle.
 | L2.2 Libellés états | — | Codex | ZCode | Parallélisable |
 | L3.1 Score paramétré | — | ZCode | Codex | À faire |
 | L3.2 UI onglets restants | — | Codex | ZCode | À faire |
+| **FIX-1** Vues à traiter + double moteur + périmètres/affectations | `fix/perimetres-roles` | ZCode | Claude | **RÉALISÉ — relais N°5 (retour utilisateur réel)** |
 | REC Recette DAF | — | DAF/DMP/DGI + DSI | — | Humain |
