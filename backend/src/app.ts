@@ -131,12 +131,6 @@ export function createApp() {
   app.use("/api/delegations", requireAuth, checkModuleAccess("delegations"), delegationsRouter);
   // export : transversal (lecture multi-modules), authentification seule
   app.use("/api/export", requireAuth, exportRouter);
-  // Monté à la RACINE /api : ses chemins sont /fundings, /funding-documents et
-  // /funding-envelopes, et c'est ce que le frontend appelle. Un montage sous
-  // /api/funding donnait /api/funding/fundings — la page Financements tombait
-  // en 404. Doit rester APRÈS toutes les routes spécifiques.
-  // Auth et contrôle de module sont portés par le routeur lui-même.
-  app.use("/api", fundingRouter);
   // portail entreprise : rôle contrôlé en routeur (entrepriseOnly)
   app.use("/api/portail", portailRouter);
   app.use("/api/revision", requireAuth, checkModuleAccess("revision"), revisionRouter);
@@ -144,6 +138,16 @@ export function createApp() {
   app.use("/api/search", searchRouter);
   // Pièces jointes : dépôt authentifié + téléchargement par URL signée éphémère (P0-2)
   app.use("/api/uploads", uploadsRouter);
+
+  // Financements — monté à la RACINE /api car ses chemins sont de premier
+  // niveau (/fundings, /funding-documents, /funding-envelopes), ce qu'appelle
+  // le frontend. Un montage sous /api/funding donnait /api/funding/fundings et
+  // la page tombait en 404.
+  // ⚠️ DOIT rester le DERNIER montage /api : son requireAuth interne s'applique
+  // à toute requête qui l'atteint. Placé plus haut, il renvoyait 401 sur
+  // /api/uploads/files/… et cassait les liens signés (qui n'ont pas d'en-tête
+  // Authorization, par conception).
+  app.use("/api", fundingRouter);
   // Résumé public agrégé pour l'intégration SharePoint (SIGTIR) — lecture seule, sans auth.
   // N'expose que des agrégats et quelques décomptes récents (déjà consultable via /api/public/marche/:numContrat).
   app.get("/api/public/sigtir-summary", async (_req, res, next) => {
