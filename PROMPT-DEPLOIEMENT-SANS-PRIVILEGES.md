@@ -15,7 +15,7 @@
 Serveur **102.211.199.131** (Docker + Traefik), application
 https://gestion.ageroute.gov.gn, répertoire `/opt/erp-ageroute` (déployé
 historiquement par archive tar — il n'y a jamais eu de git dedans, c'est
-normal). L'archive de release **`erp-ageroute-v2026.08.1.tar.gz`** (source
+normal). L'archive de release **`erp-ageroute-v2026.08.3.tar.gz`** (source
 complète, tag v2026.08.1) sera déposée dans ton `$HOME` par l'équipe.
 
 Tu as accès à **docker** (tu peux `docker ps`, `docker exec`, `docker inspect`)
@@ -66,8 +66,14 @@ Si le dump est vide ou la commande échoue → ARRÊT et rapport.
 ## PHASE 3 — Préparation du staging dans $HOME (dès réception de l'archive)
 
 ```bash
-tar -xzf ~/erp-ageroute-v2026.08.1.tar.gz -C ~/erp-deploy/staging
+tar -xzf ~/erp-ageroute-v2026.08.3.tar.gz -C ~/erp-deploy/staging
 ```
+
+Si un staging issu d'une version antérieure existe déjà (v2026.08.1/2) :
+le rafraîchir plutôt que repartir de zéro — dans le clone git de staging
+(`git pull --ff-only origin master`, vérifier `git describe --tags` =
+v2026.08.3) ou re-extraire l'archive après avoir préservé le `.env`
+préparé (droits 600, secrets déjà tournés — ne pas les regénérer).
 
 Prépare le `.env` du staging — reprise des valeurs base SANS les afficher,
 rotation des secrets JWT (déconnecte tous les utilisateurs : prévenir avant
