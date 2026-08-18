@@ -336,6 +336,38 @@ bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next:
       await updateEntityStatut(instance.module_type, instance.entity_id, statutFinal[instance.module_type] ?? "APPROUVE").catch(() => {});
       await logAudit({ userId: req.user.id, action: "APPROVE", entityType: `Bpmn_${instance.module_type}`, entityId: instance.entity_id });
 
+      // F4 — Décomptes : déclencher le circuit financier après validation DG
+      // (même logique que le moteur workflow interne — sans cela, les dépôts
+      // via le portail entreprise restent bloqués à VALIDE_DG sans paiement)
+      if (instance.module_type === "DECOMPTE") {
+        try {
+          const dec = await prisma.decompte.findUnique({
+            where: { id: instance.entity_id },
+            include: { marche: true, circuitFinancier: true },
+          });
+          if (dec && !dec.circuitFinancier && (dec.statut === "VALIDE_DG" || dec.statut === "VALIDE")) {
+            const fin = dec.marche.financement;
+            const typeCircuit = fin === "FER" ? "FER" : fin === "BUDGET_NATIONAL" ? "BUDGET" : "BAILLEUR";
+            const etapesDefs = typeCircuit === "FER"
+              ? [{ordre:1,nom:"FER",roleOuService:"FER_AGT"},{ordre:2,nom:"Budget/MEF",roleOuService:"BUDGET"},{ordre:3,nom:"DNTCP",roleOuService:"TRESOR"},{ordre:4,nom:"BCRG",roleOuService:"BCRG"},{ordre:5,nom:"Paiement",roleOuService:"DAF"}]
+              : typeCircuit === "BUDGET"
+              ? [{ordre:1,nom:"Budget/MEF",roleOuService:"BUDGET"},{ordre:2,nom:"DNTCP",roleOuService:"TRESOR"},{ordre:3,nom:"BCRG",roleOuService:"BCRG"},{ordre:4,nom:"Paiement",roleOuService:"DAF"}]
+              : [{ordre:1,nom:"UGP",roleOuService:"UGP"},{ordre:2,nom:"Non-objection bailleur",roleOuService:"BAILLEUR"},{ordre:3,nom:"Décaissement",roleOuService:"BAILLEUR"},{ordre:4,nom:"Paiement",roleOuService:"DAF"}];
+            await prisma.circuitFinancier.create({
+              data: {
+                decompteId: dec.id, type: typeCircuit,
+                bailleurNom: dec.marche.bailleur ?? undefined,
+                etapes: { create: etapesDefs },
+              },
+            });
+            await prisma.decompte.update({
+              where: { id: dec.id },
+              data: { statut: "EN_CIRCUIT_FINANCIER" },
+            });
+          }
+        } catch (_) { /* non bloquant — le circuit manuel reste possible */ }
+      }
+
       // Notifier DG + soumetteur + rôle précédent de l'approbation finale
       const dgEmails = await getEmailsByRole("DG");
       void notifyApprouve({
