@@ -7,6 +7,8 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
+import { REGLES_DEFAUT, type CleRegles } from "../../lib/regles";
+import { simulerAvecSurcharges } from "./simulateur";
 import { z } from "zod";
 
 export const parametrageRouter = Router();
@@ -59,6 +61,63 @@ parametrageRouter.put("/:cle", requireRole("ADMIN"), async (req: Request, res: R
     if (!param) throw new ApiError(404, `Paramètre "${req.params.cle}" introuvable`);
     const updated = await prisma.parametreMetier.update({ where: { cle: req.params.cle }, data: { valeur } });
     res.json(updated);
+  } catch (err) { next(err); }
+});
+
+// ─── L0.3 — Simulateur de règles financières (A1-A7) ─────────────────────────
+// Calcule un décompte d'exemple ligne à ligne, avant/après application d'un
+// jeu de règles proposé — SANS rien appliquer. Outil d'aide à l'arbitrage DAF.
+const corpsSimulation = z.object({
+  regles: z.record(z.string()).optional(),
+  montantHtGnf: z.number().positive(),
+  tauxTva: z.number().min(0).max(100).optional(),
+  tauxRg: z.number().min(0).max(100).optional(),
+  tauxAvance: z.number().min(0).max(100).optional(),
+  penalitesGnf: z.number().nonnegative().optional(),
+  revisionPrixGnf: z.number().nonnegative().optional(),
+}).superRefine((corps, ctx) => {
+  const clesInconnues = Object.keys(corps.regles ?? {}).filter((c) => !(c in REGLES_DEFAUT));
+  if (clesInconnues.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Clés de règles inconnues : ${clesInconnues.join(", ")}` });
+  }
+});
+
+parametrageRouter.post("/regles/simuler", requireRole("ADMIN", "DAF"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const corps = corpsSimulation.parse(req.body);
+    const surcharges = Object.fromEntries(
+      Object.entries(corps.regles ?? {}).map(([cle, valeur]) => [cle, String(valeur)]),
+    ) as Partial<Record<CleRegles, string>>;
+
+    const { avant, apres } = simulerAvecSurcharges({
+      montantHtGnf: BigInt(Math.round(corps.montantHtGnf)),
+      penalitesGnf: corps.penalitesGnf !== undefined ? BigInt(Math.round(corps.penalitesGnf)) : undefined,
+      revisionPrixGnf: corps.revisionPrixGnf !== undefined ? BigInt(Math.round(corps.revisionPrixGnf)) : undefined,
+      tauxTva: corps.tauxTva ?? 18,
+      tauxRg: corps.tauxRg ?? 5,
+      tauxAvance: corps.tauxAvance ?? 20,
+    }, surcharges);
+
+    const lignes = avant.lignes.map((ligne) => {
+      const apresLigne = apres.lignes.find((l) => l.cle === ligne.cle);
+      return {
+        cle: ligne.cle,
+        libelle: ligne.libelle,
+        formuleApres: apresLigne?.formule ?? ligne.formule,
+        avantGnf: ligne.montantGnf,
+        apresGnf: apresLigne?.montantGnf ?? ligne.montantGnf,
+        ecartGnf: (BigInt(apresLigne?.montantGnf ?? ligne.montantGnf) - BigInt(ligne.montantGnf)).toString(),
+      };
+    });
+
+    res.json({
+      montantHtGnf: corps.montantHtGnf,
+      surcharges,
+      lignes,
+      netAvantGnf: avant.netAPayerGnf,
+      netApresGnf: apres.netAPayerGnf,
+      message: "Simulation — aucune règle n'a été appliquée ni enregistrée",
+    });
   } catch (err) { next(err); }
 });
 
