@@ -7,7 +7,9 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
-import { REGLES_DEFAUT, type CleRegles } from "../../lib/regles";
+import { REGLES_DEFAUT, invaliderCacheRegles, type CleRegles } from "../../lib/regles";
+import { logAudit } from "../../lib/audit";
+import { METADONNEES, peutValiderRegle, validerDemande } from "./regles.catalogue";
 import { simulerAvecSurcharges } from "./simulateur";
 import { z } from "zod";
 
@@ -136,5 +138,162 @@ parametrageRouter.post("/upsert", requireRole("ADMIN"), async (req: Request, res
       update: { valeur },
     });
     res.json(result);
+  } catch (err) { next(err); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lot L0.2 — Registre des règles de gestion : CRUD + validation à quatre yeux
+//
+// Une règle est SAISIE (statut BROUILLON) puis VALIDÉE par une autre personne.
+// Seules les règles VALIDE et à date sont consommées par le moteur (L0.1) :
+// tant qu'une demande reste en brouillon, le comportement ne bouge pas.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** GET /api/parametrage/regles — défauts fusionnés avec les surcharges en base. */
+parametrageRouter.get("/regles", requireRole("ADMIN", "DAF"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { categorie, portee } = req.query as { categorie?: string; portee?: string };
+
+    const enregistrements = await prisma.regleGestion.findMany({
+      where: { ...(portee ? { portee } : {}) },
+      orderBy: [{ cle: "asc" }, { dateEffet: "desc" }, { version: "desc" }],
+    });
+
+    const parCle = new Map<string, typeof enregistrements>();
+    for (const r of enregistrements) {
+      const liste = parCle.get(r.cle) ?? [];
+      liste.push(r);
+      parCle.set(r.cle, liste);
+    }
+
+    const regles = (Object.keys(REGLES_DEFAUT) as CleRegles[])
+      .filter((cle) => !categorie || METADONNEES[cle].categorie === categorie)
+      .map((cle) => {
+        const meta = METADONNEES[cle];
+        const versions = parCle.get(cle) ?? [];
+        const derniereValide = versions.find((v) => v.statut === "VALIDE") ?? null;
+        const enAttente = versions.filter((v) => v.statut === "BROUILLON");
+        return {
+          cle,
+          categorie: meta.categorie,
+          libelle: meta.libelle,
+          type: meta.type,
+          options: meta.options ?? null,
+          valeurDefaut: REGLES_DEFAUT[cle],
+          // Valeur effective GLOBALE : les portées fines sont résolues au calcul.
+          valeurEffective: derniereValide?.valeur ?? REGLES_DEFAUT[cle],
+          surchargee: Boolean(derniereValide),
+          derniereModification: derniereValide
+            ? { valeur: derniereValide.valeur, dateEffet: derniereValide.dateEffet, validePar: derniereValide.validePar, valideAt: derniereValide.valideAt, motif: derniereValide.motif, version: derniereValide.version }
+            : null,
+          enAttenteValidation: enAttente.map((v) => ({ id: v.id, valeur: v.valeur, portee: v.portee, porteeId: v.porteeId, dateEffet: v.dateEffet, saisiPar: v.saisiPar, motif: v.motif, version: v.version })),
+        };
+      });
+
+    res.json({ regles, total: regles.length });
+  } catch (err) { next(err); }
+});
+
+/** POST /api/parametrage/regles — nouvelle demande (ou nouvelle version) en BROUILLON. */
+parametrageRouter.post("/regles", requireRole("ADMIN", "DAF"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const erreurs = validerDemande(req.body ?? {}, new Date());
+    if (erreurs.length) throw new ApiError(400, erreurs.join(" ; "));
+
+    const cle = String(req.body.cle) as CleRegles;
+    const meta = METADONNEES[cle];
+    const portee = String(req.body.portee ?? "GLOBAL");
+    const porteeId = portee === "GLOBAL" ? "" : String(req.body.porteeId).trim();
+    const dateEffet = req.body.dateEffet ? new Date(String(req.body.dateEffet)) : new Date();
+
+    // Nouvelle version = incrément sur la version la plus haute de même portée.
+    const derniere = await prisma.regleGestion.findFirst({
+      where: { cle, portee, porteeId },
+      orderBy: { version: "desc" },
+      select: { version: true },
+    });
+
+    const creee = await prisma.regleGestion.create({
+      data: {
+        cle,
+        categorie: meta.categorie,
+        libelle: meta.libelle,
+        type: meta.type,
+        options: (meta.options ?? undefined) as never,
+        portee,
+        porteeId,
+        valeur: String(req.body.valeur ?? "").trim(),
+        valeurDefaut: REGLES_DEFAUT[cle],
+        dateEffet,
+        statut: "BROUILLON",
+        saisiPar: req.user!.id,
+        motif: String(req.body.motif).trim(),
+        version: (derniere?.version ?? 0) + 1,
+      },
+    });
+
+    await logAudit({
+      userId: req.user!.id,
+      action: "CREATE",
+      entityType: "RegleGestion",
+      entityId: creee.id,
+      after: { cle, portee, porteeId, valeur: creee.valeur, dateEffet, motif: creee.motif, statut: "BROUILLON" },
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json(creee);
+  } catch (err) { next(err); }
+});
+
+/** POST /api/parametrage/regles/:id/valider — quatre yeux, puis mise en vigueur. */
+parametrageRouter.post("/regles/:id/valider", requireRole("ADMIN", "DAF"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const regle = await prisma.regleGestion.findUnique({ where: { id: req.params.id } });
+    if (!regle) throw new ApiError(404, "Règle introuvable");
+    if (regle.statut !== "BROUILLON") throw new ApiError(409, `Seule une règle en brouillon peut être validée (statut actuel : ${regle.statut})`);
+
+    const verdict = peutValiderRegle(req.user!.role, req.user!.id, regle.saisiPar);
+    if (!verdict.ok) throw new ApiError(403, verdict.motif!);
+
+    // Valeur en vigueur avant ce changement, pour la pièce d'audit.
+    const precedente = await prisma.regleGestion.findFirst({
+      where: { cle: regle.cle, portee: regle.portee, porteeId: regle.porteeId, statut: "VALIDE" },
+      orderBy: [{ dateEffet: "desc" }, { version: "desc" }],
+      select: { valeur: true },
+    });
+
+    const [validee] = await prisma.$transaction([
+      prisma.regleGestion.update({
+        where: { id: regle.id },
+        data: { statut: "VALIDE", validePar: req.user!.id, valideAt: new Date() },
+      }),
+      prisma.regleGestionHistorique.create({
+        data: {
+          regleId: regle.id,
+          cle: regle.cle,
+          ancienne: precedente?.valeur ?? regle.valeurDefaut,
+          nouvelle: regle.valeur,
+          dateEffet: regle.dateEffet,
+          saisiPar: regle.saisiPar ?? req.user!.id,
+          validePar: req.user!.id,
+          motif: regle.motif,
+        },
+      }),
+    ]);
+
+    await logAudit({
+      userId: req.user!.id,
+      action: "APPROVE",
+      entityType: "RegleGestion",
+      entityId: regle.id,
+      before: { statut: "BROUILLON", valeur: precedente?.valeur ?? regle.valeurDefaut },
+      after: { statut: "VALIDE", valeur: regle.valeur, dateEffet: regle.dateEffet, motif: regle.motif },
+      ipAddress: req.ip,
+    });
+
+    // Le cache de résolution porte des valeurs devenues fausses.
+    invaliderCacheRegles();
+
+    res.json(validee);
   } catch (err) { next(err); }
 });

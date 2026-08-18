@@ -21,6 +21,104 @@
 
 ---
 
+## RELAIS N°5 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L0.2)
+
+### Rapport de fin de lot — L0.2 « API CRUD + 4 yeux »
+
+**Contexte.** L0.2 n'avait jamais ete livre : le programme est passe de L0.1 a
+L0.3. Consequence, le registre de regles etait inatteignable — tables creees,
+moteur de resolution en place, calcul et simulateur les consommant, mais aucun
+moyen de creer ni de valider une regle. C'est ce trou que ce lot comble.
+
+**Branche** : `feat/regles-l02-api` depuis master.
+
+**Livre.**
+- `modules/parametrage/regles.catalogue.ts` — metadonnees des 28 cles
+  (categorie, libelle, type, options) et validation PURE : `validerValeur`,
+  `validerDemande`, `peutValiderRegle`. Aucune base, aucune horloge implicite.
+- 3 routes dans le module parametrage (requireAuth au routeur + ADMIN/DAF) :
+  - `GET  /api/parametrage/regles?categorie=&portee=` — defauts fusionnes avec
+    les surcharges, derniere modification et demandes en attente ;
+  - `POST /api/parametrage/regles` — creation/nouvelle version en BROUILLON,
+    versionnement automatique par (cle, portee, porteeId) ;
+  - `POST /api/parametrage/regles/:id/valider` — quatre yeux, passage VALIDE,
+    ecriture de `regle_gestion_historique` dans la MEME transaction que la mise
+    a jour, `logAudit` (CREATE / APPROVE), puis `invaliderCacheRegles()`.
+- `regles.catalogue.test.ts` — 22 cas : matrice de rejets (cle inconnue, motif
+  court, type incoherent par type ENUM/NUMBER/BOOLEAN/MULTI/JSON, portee sans
+  porteeId, portee inconnue, date d'effet passee, date illisible), exhaustivite
+  du catalogue, validite des defauts eux-memes, et quatre yeux (auto-validation
+  refusee y compris pour ADMIN et DAF, roles tiers refuses).
+
+**Verification.** `npx tsc --noEmit` : 0 erreur. `node scripts/run-tests.mjs` :
+**119/119** (97 avant ce lot). Comportement par defaut inchange : tant qu'aucune
+regle n'est VALIDE, le moteur retombe sur REGLES_DEFAUT.
+
+### ⚠️ Incident corrige pendant ce lot — a lire avant toute nouvelle migration
+
+`2026-08-18-regles-gestion.sql` creait les colonnes en **snake_case**
+(`portee_id`, `date_effet`, `saisi_par`...) alors que les modeles Prisma
+`RegleGestion` / `RegleGestionHistorique` ne portent aucun `@map` : Prisma
+interroge donc `"porteeId"`, `"dateEffet"`, etc.
+
+Toute lecture echouait par `column "porteeId" does not exist`. Comme
+`chargerRegles()` est appele par les decomptes, le circuit financier, la
+conformite et les circuits de roles, **le coeur de l'ERP etait casse en
+production** des l'application de cette migration (deploiement v2026.08.5).
+
+Corrige : colonnes renommees en camelCase sur la base de production (tables
+vides, aucun risque de donnee), et fichier SQL reecrit en camelCase avec un
+bloc de rattrapage idempotent pour les bases ayant recu la premiere version.
+Verifie avec le client Prisma du conteneur en service : les deux tables se
+lisent.
+
+**Lecon pour les prochains lots** : le controle « concordance SQL ↔
+schema.prisma » du protocole §2 doit se faire en executant une requete portant
+les noms de colonnes que Prisma emet, pas en relisant les deux fichiers.
+
+### PROMPT pour la DSI (humain) — fusion
+
+```bash
+git fetch origin
+git checkout master && git pull --ff-only origin master
+git merge --no-ff origin/feat/regles-l02-api -m "merge: L0.2 API CRUD regles + quatre yeux"
+git push origin master
+```
+
+Aucune migration SQL nouvelle dans ce lot. Le correctif de
+`2026-08-18-regles-gestion.sql` est deja applique en production ; il est
+idempotent et sans effet si rejoue.
+
+### PROMPT pour le relecteur — lot L0.2
+
+```text
+Tu es relecteur du lot L0.2 du programme de parametrage A1-A10 de l'ERP
+AGEROUTE. References : PLAN-TRAVAIL-AGENT-PARAMETRAGE.md (protocole §2),
+PLAN-DEV-PARAMETRAGE-A1-A10.md §1.1/1.3, JOURNAL-RELAIS.md (RELAIS N°5).
+Objet : branche feat/regles-l02-api, base master.
+
+1. git fetch && git checkout feat/regles-l02-api
+2. Relecture selon la checklist du protocole §2 :
+   a. DoD : cd backend && npx tsc (0 erreur) ; node scripts/run-tests.mjs
+      (119/119) — rejoue dans un conteneur node:20-slim AVEC openssl
+      (conditions du Dockerfile), sinon Prisma echoue sur libssl ;
+   b. Securite : les 3 routes exigent ADMIN ou DAF ; verifie qu'aucun chemin
+      ne permet a un saisisseur de valider sa propre regle, que l'historique
+      est ecrit dans la meme transaction que le passage VALIDE (pas de
+      validation sans trace), et que invaliderCacheRegles() est bien appele
+      APRES la transaction ;
+   c. Concordance : les colonnes lues par Prisma existent reellement — execute
+      une requete SELECT portant les noms camelCase sur la base, ne te contente
+      pas de relire schema.prisma ;
+   d. Coherence : REGLES_DEFAUT ↔ METADONNEES (exhaustivite dans les deux
+      sens, deja couverte par test) ; les valeurs par defaut passent leur
+      propre validation.
+3. Verdict : APPROUVE (avec remarques) ou REFUS motive.
+4. Consigne le RELAIS N°6 : rapport de relecture + prompt du lot suivant.
+```
+
+---
+
 ## RELAIS N°4 — 18/08/2026 — de ZCode → Claude (relecture L1.2 ; L0.2 spec update)
 
 ### Rapport de fin de lot — L1.2 « Snapshot + gel » (ZCode)
