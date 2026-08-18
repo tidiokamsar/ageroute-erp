@@ -1,21 +1,51 @@
+/**
+ * Pièces jointes — dépôt et téléchargement authentifiés (P0-2 REVUE-2026-08-13).
+ *
+ * Modèle (réconcilié le 18/08/2026 — fusion du correctif serveur cc77489 et
+ * de l'intégration frontend) :
+ *   1. POST /api/uploads            — authentifié + au moins un module
+ *                                     documentaire ; multer 20 Mo, types
+ *                                     filtrés, nom opaque, octets magiques
+ *                                     vérifiés, dépôt journalisé ;
+ *   2. GET  /api/uploads/sign/:f    — authentifié : périmètre vérifié PAR
+ *                                     DOCUMENT (module, isolation entreprise,
+ *                                     affectations) puis délivrance d'une URL
+ *                                     signée HMAC-SHA-256 valable 15 minutes ;
+ *   3. GET  /api/uploads/files/:f   — accessible sans en-tête Authorization
+ *                                     (le frontend ouvre par navigation :
+ *                                     window.open / <a> / <img>) mais token
+ *                                     HMAC + expiration obligatoires.
+ *
+ * Le périmètre est contrôlé à la SIGNATURE : c'est le moment où l'utilisateur
+ * est authentifié. Pendant les 15 minutes de validité du lien, le fichier
+ * reste accessible au porteur du token — fenêtre courte, assumée.
+ */
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { mkdirSync } from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import multer from "multer";
 import { prisma } from "../../lib/prisma";
 import { env } from "../../config/env";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { ApiError } from "../../middleware/error.middleware";
+import { logAudit } from "../../lib/audit";
 import { getEffectiveModules } from "../../lib/modules.catalog";
 import { getMarchesAffectes } from "../../lib/affectations";
 import { entrepriseIdOf } from "../../lib/scope";
 import { ALLOWED_MIME_TYPES, buildStoredFilename, isSafeStoredFilename } from "./uploads.security";
 
 export const uploadsRouter = Router();
-uploadsRouter.use(requireAuth);
+// Pas de requireAuth au niveau du routeur : /files/:filename doit rester
+// joignable par navigation (sans en-tête Authorization) — sa protection est
+// le token HMAC ; les deux autres routes portent requireAuth individuellement.
 
 const DOCUMENT_MODULES = ["attachements", "decomptes", "receptions", "entreprises", "financements"];
 mkdirSync(env.UPLOAD_DIR, { recursive: true });
+
+const LINK_TTL_MS = 15 * 60 * 1000;
+const EXT_MIME = new Map([...ALLOWED_MIME_TYPES.entries()].map(([mime, ext]) => [ext, mime]));
 
 async function requireDocumentModule(req: Request, _res: Response, next: NextFunction) {
   try {
@@ -38,19 +68,80 @@ const upload = multer({
   fileFilter: (_req, file, callback) => callback(null, ALLOWED_MIME_TYPES.has(file.mimetype)),
 });
 
-uploadsRouter.post("/", requireDocumentModule, upload.single("file"), (req: Request, res: Response, next: NextFunction) => {
+// Signatures magiques — le contenu doit correspondre au type déclaré
+// (un « PDF » renommé contenant un exécutable doit être refusé).
+const MAGIC_BYTES: Record<string, number[]> = {
+  "application/pdf": [0x25, 0x50, 0x44, 0x46],                                    // %PDF
+  "image/png":       [0x89, 0x50, 0x4e, 0x47],                                    // \x89PNG
+  "image/jpeg":      [0xff, 0xd8, 0xff],                                          // \xff\xd8\xff
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       [0x50, 0x4b, 0x03, 0x04], // ZIP
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [0x50, 0x4b, 0x03, 0x04],
+  "application/vnd.ms-excel": [0xd0, 0xcf, 0x11, 0xe0],                          // OLE2
+  "application/msword":       [0xd0, 0xcf, 0x11, 0xe0],
+};
+
+function signatureConforme(filePath: string, mimeType: string): boolean {
+  const attendu = MAGIC_BYTES[mimeType];
+  if (!attendu) return true; // type non couvert : le filtre MIME reste le seul contrôle
+  let fd: number | undefined;
   try {
-    if (!req.file) throw new ApiError(400, "Fichier absent ou type non autorisé");
+    fd = fs.openSync(filePath, "r");
+    const buf = Buffer.alloc(attendu.length);
+    const lus = fs.readSync(fd, buf, 0, attendu.length, 0);
+    if (lus < attendu.length) return false;
+    return attendu.every((b, i) => buf[i] === b);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* ignore */ } }
+  }
+}
+
+function signToken(filename: string, expires: number): string {
+  return crypto.createHmac("sha256", env.JWT_SECRET).update(`${filename}:${expires}`).digest("hex");
+}
+
+function verifyToken(filename: string, expires: number, token: string): boolean {
+  const expected = signToken(filename, expires);
+  const a = Buffer.from(expected);
+  const b = Buffer.from(token);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// ─── POST /api/uploads — dépôt d'une pièce jointe ─────────────────────────────
+uploadsRouter.post("/", requireAuth, requireDocumentModule, (req: Request, res: Response, next: NextFunction) => {
+  upload.single("file")(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+        return next(new ApiError(400, "Fichier trop volumineux — maximum 20 Mo"));
+      }
+      return next(new ApiError(400, "Fichier absent ou type non autorisé"));
+    }
+    const file = req.file;
+    if (!file) return next(new ApiError(400, "Aucun fichier reçu (champ attendu : file)"));
+    if (!signatureConforme(file.path, file.mimetype)) {
+      try { fs.unlinkSync(file.path); } catch { /* ignore */ }
+      return next(new ApiError(400, "Le contenu du fichier ne correspond pas à son type déclaré"));
+    }
+    // Journalisation non bloquante — ne doit jamais faire échouer le dépôt
+    logAudit({
+      userId: req.user!.id,
+      action: "CREATE",
+      entityType: "Upload",
+      entityId: file.filename,
+      after: { originalName: file.originalname, mimeType: file.mimetype, size: file.size },
+    }).catch(() => {});
     res.status(201).json({
-      url: "/api/uploads/files/" + req.file.filename,
-      filename: req.file.filename,
-      originalName: req.file.originalname,
-      mimeType: req.file.mimetype,
-      size: req.file.size,
+      url: "/api/uploads/files/" + file.filename,
+      filename: file.filename,
+      originalName: file.originalname,
+      mimeType: file.mimetype,
+      size: file.size,
     });
-  } catch (error) { next(error); }
+  });
 });
 
+// ─── Résolution du périmètre par document (correctif serveur cc77489) ─────────
 type FileReference = { moduleKey: string; marcheId?: string; entrepriseId?: string };
 
 async function findReferences(url: string): Promise<FileReference[]> {
@@ -86,8 +177,7 @@ async function canReadReference(req: Request, reference: FileReference, modules:
   if (!req.user || !modules.includes(reference.moduleKey)) return false;
   if (req.user.role === "ENTREPRISE") {
     // Le jeton ne porte pas l'entreprise : on la résout en base, comme le fait
-    // déjà le module portail (lib/scope.ts). Sans cela le test comparait à
-    // undefined et refusait à toute entreprise l'accès à ses propres pièces.
+    // déjà le module portail (lib/scope.ts).
     const entrepriseId = await entrepriseIdOf(req.user.id);
     return Boolean(entrepriseId && reference.entrepriseId === entrepriseId);
   }
@@ -95,17 +185,54 @@ async function canReadReference(req: Request, reference: FileReference, modules:
   return marches === null || Boolean(reference.marcheId && marches.includes(reference.marcheId));
 }
 
-uploadsRouter.get("/files/:filename", async (req: Request, res: Response, next: NextFunction) => {
+// ─── GET /api/uploads/sign/:filename — URL signée après contrôle du périmètre ─
+uploadsRouter.get("/sign/:filename", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const filename = req.params.filename;
     if (!isSafeStoredFilename(filename)) throw new ApiError(404, "Fichier introuvable");
+    if (!fs.existsSync(path.join(env.UPLOAD_DIR, filename))) throw new ApiError(404, "Fichier introuvable");
+
+    // Périmètre vérifié ICI, utilisateur authentifié : le fichier doit être
+    // référencé par une entité accessible à l'utilisateur (module + isolation
+    // entreprise + affectations). Un fichier non référencé n'est pas délivré.
     const url = "/api/uploads/files/" + filename;
     const [references, modules] = await Promise.all([findReferences(url), getEffectiveModules(req.user!.id, req.user!.role)]);
     const decisions = await Promise.all(references.map((reference) => canReadReference(req, reference, modules)));
-    if (!decisions.some(Boolean)) throw new ApiError(404, "Fichier introuvable");
-    res.setHeader("Cache-Control", "private, no-store");
-    res.sendFile(path.resolve(env.UPLOAD_DIR, filename), (error) => {
-      if (error && !res.headersSent) next(new ApiError(404, "Fichier introuvable"));
+    if (references.length === 0 || !decisions.some(Boolean)) throw new ApiError(404, "Fichier introuvable");
+
+    const expires = Date.now() + LINK_TTL_MS;
+    const token = signToken(filename, expires);
+    res.json({
+      url: `/api/uploads/files/${filename}?expires=${expires}&token=${token}`,
+      expires: new Date(expires).toISOString(),
     });
-  } catch (error) { next(error); }
+  } catch (err) { next(err); }
+});
+
+// ─── GET /api/uploads/files/:filename — téléchargement par URL signée ────────
+uploadsRouter.get("/files/:filename", (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const filename = req.params.filename;
+    if (!isSafeStoredFilename(filename)) throw new ApiError(404, "Fichier introuvable");
+
+    const expires = Number(req.query.expires);
+    const token = String(req.query.token ?? "");
+    if (!Number.isFinite(expires) || expires < Date.now()) {
+      throw new ApiError(401, "Lien expiré — rechargez la page et réessayez");
+    }
+    if (!token || !verifyToken(filename, expires, token)) {
+      throw new ApiError(403, "Lien de téléchargement invalide");
+    }
+
+    const filePath = path.resolve(env.UPLOAD_DIR, filename);
+    if (!filePath.startsWith(path.resolve(env.UPLOAD_DIR) + path.sep) || !fs.existsSync(filePath)) {
+      throw new ApiError(404, "Fichier introuvable");
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+    res.setHeader("Content-Type", EXT_MIME.get(ext) ?? "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.sendFile(filePath);
+  } catch (err) { next(err); }
 });
