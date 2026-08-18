@@ -131,7 +131,7 @@ d'observation d'une quinzaine avant ouverture de l'exploitation réelle.
 |---|---|---|---|---|
 | L0.1 Socle données + moteur | `feat/regles-p0-socle` @ `7e79de3` | ZCode | Claude | **RÉALISÉ — relais N°1 consigné (JOURNAL-RELAIS.md), en attente de relecture** |
 | L0.2 API CRUD + 4 yeux | — | Codex | ZCode | À faire |
-| L0.3 Simulateur | — | ZCode | Claude | À faire |
+| L0.3 Simulateur | `feat/regles-l03-simulateur` @ `28555b8` | ZCode | Claude | **RÉALISÉ — relais N°2 consigné, en attente de relecture** |
 | L0.4 UI Règles financières | — | Codex | ZCode | À faire (après L0.2) |
 | L1.1 Calcul paramétré | — | ZCode | Claude | À faire (après L0.1) |
 | L1.2 Snapshot + gel | — | ZCode | Codex | À faire |
