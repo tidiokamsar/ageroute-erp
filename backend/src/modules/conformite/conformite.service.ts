@@ -14,6 +14,7 @@
  */
 
 import { prisma } from "../../lib/prisma";
+import { chargerRegles, nombreRegles, resoudreRegles, type ReglesEffectives } from "../../lib/regles";
 
 interface CritereResult {
   code: string;
@@ -37,7 +38,18 @@ function dateExpiree(d: Date | null | undefined): boolean {
   return new Date(d) < new Date();
 }
 
-export function calculerScoreDetail(e: {
+// L3.1 — poids des critères paramétrables (CF_SCORE_PONDERATIONS)
+interface Poids { NIF: number; TVA: number; FISC: number; SOC: number; DOCS: number; CAUTION: number; }
+const POIDS_DEFAUT: Poids = { NIF: 15, TVA: 15, FISC: 20, SOC: 15, DOCS: 20, CAUTION: 15 };
+
+function poidsDepuisRegles(regles: ReglesEffectives): Poids {
+  try {
+    const brut = JSON.parse(regles.CF_SCORE_PONDERATIONS) as Partial<Poids>;
+    return { ...POIDS_DEFAUT, ...brut };
+  } catch { return POIDS_DEFAUT; }
+}
+
+export function calculerScoreDetailAvecRegles(e: {
   nif: string | null;
   numerotva: string | null;
   assujettTVA: boolean;
@@ -50,7 +62,8 @@ export function calculerScoreDetail(e: {
   cautionBancaire: boolean;
   estRadie: boolean;
   autoriseContracterEtat: boolean;
-}): ScoreDetail {
+}, regles?: ReglesEffectives): ScoreDetail {
+  const poids = poidsDepuisRegles(regles ?? resoudreRegles([]));
   // Blocage absolu
   if (e.estRadie) {
     return {
@@ -71,12 +84,12 @@ export function calculerScoreDetail(e: {
 
   // NIF valide (15 pts)
   const nifOk = !!(e.nif && e.nif.trim().length >= 6);
-  criteres.push({ code: "NIF", libelle: "NIF valide et renseigné", poids: 15, obtenu: nifOk ? 15 : 0, ok: nifOk,
+  criteres.push({ code: "NIF", libelle: "NIF valide et renseigné", poids: poids.NIF, obtenu: nifOk ? poids.NIF : 0, ok: nifOk,
     detail: nifOk ? `NIF : ${e.nif}` : "NIF absent ou invalide (min 6 caractères)" });
 
   // TVA (15 pts si assujetti ; crédit si non assujetti)
   let tvaOk = false;
-  let tvaPoids = 15;
+  let tvaPoids = poids.TVA;
   if (e.assujettTVA) {
     tvaOk = !!(e.numerotva && e.numerotva.trim().length >= 4);
     criteres.push({ code: "TVA", libelle: "Numéro TVA (assujetti)", poids: tvaPoids, obtenu: tvaOk ? tvaPoids : 0, ok: tvaOk,
@@ -90,32 +103,37 @@ export function calculerScoreDetail(e: {
 
   // Régularité fiscale (20 pts)
   const fiscOk = e.regulariteFiscale && !dateExpiree(e.attestationFiscaleExpire);
-  criteres.push({ code: "FISC", libelle: "Régularité fiscale + attestation valide", poids: 20, obtenu: fiscOk ? 20 : (e.regulariteFiscale ? 10 : 0), ok: fiscOk,
+  criteres.push({ code: "FISC", libelle: "Régularité fiscale + attestation valide", poids: poids.FISC, obtenu: fiscOk ? poids.FISC : (e.regulariteFiscale ? Math.round(poids.FISC / 2) : 0), ok: fiscOk,
     detail: !e.regulariteFiscale ? "Régularité fiscale non confirmée" :
       dateExpiree(e.attestationFiscaleExpire) ? "Attestation fiscale expirée" : "OK" });
 
   // Régularité sociale (15 pts)
   const socOk = e.regulariteSociale && !dateExpiree(e.attestationSocialeExpire);
-  criteres.push({ code: "SOC", libelle: "Régularité sociale + attestation valide", poids: 15, obtenu: socOk ? 15 : (e.regulariteSociale ? 7 : 0), ok: socOk,
+  criteres.push({ code: "SOC", libelle: "Régularité sociale + attestation valide", poids: poids.SOC, obtenu: socOk ? poids.SOC : (e.regulariteSociale ? Math.round(poids.SOC / 2) : 0), ok: socOk,
     detail: !e.regulariteSociale ? "Régularité sociale non confirmée" :
       dateExpiree(e.attestationSocialeExpire) ? "Attestation sociale expirée" : "OK" });
 
   // Documents légaux valides (20 pts)
   const docsOk = e.attestationValide;
-  criteres.push({ code: "DOCS", libelle: "Documents légaux (RCCM, agréments, pièces)", poids: 20, obtenu: docsOk ? 20 : 0, ok: docsOk,
+  criteres.push({ code: "DOCS", libelle: "Documents légaux (RCCM, agréments, pièces)", poids: poids.DOCS, obtenu: docsOk ? poids.DOCS : 0, ok: docsOk,
     detail: docsOk ? "Documents valides" : "Documents légaux manquants ou non vérifiés" });
 
   // Caution bancaire (15 pts)
   const cautionOk = e.cautionBancaire;
-  criteres.push({ code: "CAUTION", libelle: "Caution / garantie bancaire valide", poids: 15, obtenu: cautionOk ? 15 : 0, ok: cautionOk,
+  criteres.push({ code: "CAUTION", libelle: "Caution / garantie bancaire valide", poids: poids.CAUTION, obtenu: cautionOk ? poids.CAUTION : 0, ok: cautionOk,
     detail: cautionOk ? "Caution bancaire valide" : "Caution bancaire absente ou expirée" });
 
   const score = criteres.reduce((s, c) => s + c.obtenu, 0);
+  const seuilConforme = nombreRegles(regles ?? resoudreRegles([]), "CF_SEUIL_CONFORME" as never) || 70;
+  const seuilRegulariser = nombreRegles(regles ?? resoudreRegles([]), "CF_SEUIL_REGULARISER" as never) || 40;
   const statut: "CONFORME" | "A_REGULARISER" | "BLOQUE" =
-    score >= 70 ? "CONFORME" : score >= 40 ? "A_REGULARISER" : "BLOQUE";
+    score >= seuilConforme ? "CONFORME" : score >= seuilRegulariser ? "A_REGULARISER" : "BLOQUE";
 
   return { score, statut, bloquantAbsolu: false, criteres };
 }
+
+// Alias rétro-compatibilité
+export { calculerScoreDetailAvecRegles as calculerScoreDetail };
 
 export async function recalculerConformiteEntreprise(
   entrepriseId: string,
@@ -125,7 +143,8 @@ export async function recalculerConformiteEntreprise(
   const e = await prisma.entreprise.findUniqueOrThrow({ where: { id: entrepriseId } });
 
   const ancien = { score: e.scoreConformite, statut: e.statut as string };
-  const detail = calculerScoreDetail(e);
+  const regles = await chargerRegles();
+  const detail = calculerScoreDetailAvecRegles(e, regles);
   const motif = detail.bloquantAbsolu ? detail.raisonBlocage :
     detail.criteres.filter(c => !c.ok).map(c => c.libelle).join("; ") || undefined;
 

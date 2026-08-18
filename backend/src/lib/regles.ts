@@ -48,7 +48,9 @@ export const REGLES_DEFAUT = {
   ETQ_MAPPINGS: "{}",
   // A10 — Conformité entreprise (consommé au lot L3.1)
   CF_CRITERES: "{}",
-  CF_SCORE_PONDERATIONS: "{}",
+  CF_SCORE_PONDERATIONS: '{"NIF":15,"TVA":15,"FISC":20,"SOC":15,"DOCS":20,"CAUTION":15}',
+  CF_SEUIL_CONFORME: "70",
+  CF_SEUIL_REGULARISER: "40",
   CF_CURE_JOURS: "0",
 } as const;
 

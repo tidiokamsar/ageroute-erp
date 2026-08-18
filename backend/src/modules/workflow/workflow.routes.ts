@@ -13,6 +13,8 @@ import { ApiError } from "../../middleware/error.middleware";
 import { notifyWorkflowStep } from "../notifications/notifications.service";
 import { assertEntrepriseConforme } from "../conformite/conformite.service";
 import { rolesEffectifs } from "../../lib/delegations";
+import { roleAutorise } from "../../lib/roles-circuit";
+import { chargerRegles } from "../../lib/regles";
 import { etapesCircuitFinancier } from "../../lib/circuit-definitions";
 import { z } from "zod";
 
@@ -135,6 +137,13 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
     // Pour APPROUVE/REJETE/CORRECTION/COMPLEMENT : vérifier le rôle de l'étape
     if (!["SUSPENDRE","AUDIT"].includes(decision) && !isAdmin && !mesRoles.includes(etapeCourante.roleRequis)) {
       throw new ApiError(403, `Étape "${etapeCourante.nom}" réservée au rôle ${etapeCourante.roleRequis} (vous êtes ${req.user.role})`);
+    }
+
+    // L2.1 — matrice de rôles : la LIQUIDATION (validation d'étape) exige
+    // que le rôle soit autorisé par la règle WF_ROLES_LIQUIDATION
+    const reglesCircuit = await chargerRegles({ marcheId: instance.decompte?.marcheId });
+    if (!roleAutorise(req.user.role, "LIQUIDATION", reglesCircuit)) {
+      throw new ApiError(403, `Votre rôle ${req.user.role} n'est pas autorisé à liquider (matrice WF_ROLES_LIQUIDATION)`);
     }
 
     // Un traitement suspendu bloque toute décision, sauf levée par la DG/ADMIN
