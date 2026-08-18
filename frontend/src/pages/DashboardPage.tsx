@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 import { StatutDecompteBadge } from "../components/ui/Badge";
+import { libelleStatut } from "../lib/etiquettes";
+import { useEtiquettes } from "../lib/useEtiquettes";
 
 const FIN_LABELS: Record<string,string> = {
   BANQUE_MONDIALE:"BM", BAD:"BAD", BUDGET_NATIONAL:"Budget", FER:"FER",
@@ -380,12 +382,8 @@ function DashboardGeneral({ data }: {
   };
 }) {
   const d = data.decomptes;
+  const etiquettes = useEtiquettes();
   const statuts = Object.entries(d.byStatut ?? {}).map(([statut, count]) => ({ statut, count }));
-  const STATUT_LABELS: Record<string, string> = {
-    BROUILLON: "Brouillon", DEPOSE: "Déposé", EN_CONTROLE: "En contrôle", EN_CORRECTION: "Correction",
-    EN_VALIDATION: "Validation", VALIDE_DG: "Validé DG", EN_CIRCUIT_FINANCIER: "Circuit paiement",
-    ORDONNANCE: "Ordonnancé", VALIDE: "Validé", REJETE: "Rejeté", PAYE: "Payé",
-  };
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -407,7 +405,7 @@ function DashboardGeneral({ data }: {
           {statuts.length > 0 ? (
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={statuts} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <XAxis dataKey="statut" tick={{ fontSize: 9 }} tickFormatter={(v) => STATUT_LABELS[v]?.split(" ")[0] ?? v}/>
+                <XAxis dataKey="statut" tick={{ fontSize: 9 }} tickFormatter={(v) => libelleStatut("DECOMPTE", v, etiquettes).split(" ")[0]}/>
                 <YAxis tick={{ fontSize: 10 }}/>
                 <Tooltip formatter={(value: number) => [value, "Décomptes"]}/>
                 <Bar dataKey="count" radius={[4, 4, 0, 0]}>

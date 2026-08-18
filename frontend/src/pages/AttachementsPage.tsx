@@ -16,6 +16,8 @@ import { Button } from "../components/ui/Button";
 import { Input, Select, FormField, Textarea } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { toast } from "../components/ui/Toast";
+import { libelleStatut } from "../lib/etiquettes";
+import { useEtiquettes } from "../lib/useEtiquettes";
 import { SecureFileLink, SecureImg } from "../components/ui/SecureFile";
 import {
   Plus, Paperclip, Check, X, MapPin, Trash2, Image as ImageIcon,
@@ -146,26 +148,30 @@ interface Attachement {
 
 // ===== STATUT CONFIG =====
 
-const STATUT_CFG: Record<StatutAtt, { label: string; color: string; bg: string; Icon: React.ElementType }> = {
-  BROUILLON:             { label: "Brouillon",          color: "#6B7280", bg: "#F3F4F6", Icon: FileText },
-  SOUMIS:                { label: "Soumis",             color: "#1D4ED8", bg: "#DBEAFE", Icon: Send },
-  EN_CONTROLE_MISSION:   { label: "Contrôle Mission",   color: "#D97706", bg: "#FEF3C7", Icon: Eye },
-  EN_CONTROLE_TECHNIQUE: { label: "Contrôle Technique", color: "#7C3AED", bg: "#EDE9FE", Icon: Shield },
-  DEMANDE_CORRECTION:    { label: "Correction requise", color: "#DC2626", bg: "#FEE2E2", Icon: AlertTriangle },
-  VALIDE:                { label: "Validé",             color: "#16A34A", bg: "#DCFCE7", Icon: CheckCircle },
-  REJETE:                { label: "Rejeté",             color: "#991B1B", bg: "#FEE2E2", Icon: XCircle },
+// L2.2 — les libellés viennent de lib/etiquettes.ts ; ne restent ici que la
+// charte graphique et l'icône, qui ne sont pas du paramétrage métier.
+const STATUT_CFG: Record<StatutAtt, { color: string; bg: string; Icon: React.ElementType }> = {
+  BROUILLON:             { color: "#6B7280", bg: "#F3F4F6", Icon: FileText },
+  SOUMIS:                { color: "#1D4ED8", bg: "#DBEAFE", Icon: Send },
+  EN_CONTROLE_MISSION:   { color: "#D97706", bg: "#FEF3C7", Icon: Eye },
+  EN_CONTROLE_TECHNIQUE: { color: "#7C3AED", bg: "#EDE9FE", Icon: Shield },
+  DEMANDE_CORRECTION:    { color: "#DC2626", bg: "#FEE2E2", Icon: AlertTriangle },
+  VALIDE:                { color: "#16A34A", bg: "#DCFCE7", Icon: CheckCircle },
+  REJETE:                { color: "#991B1B", bg: "#FEE2E2", Icon: XCircle },
 };
 
 function StatutBadge({ statut }: { statut: StatutAtt }) {
-  const cfg = STATUT_CFG[statut] ?? { label: statut, color: "#6B7280", bg: "#F3F4F6", Icon: Clock };
+  const etiquettes = useEtiquettes();
+  const cfg = STATUT_CFG[statut] ?? { color: "#6B7280", bg: "#F3F4F6", Icon: Clock };
   const { Icon } = cfg;
+  const libelle = libelleStatut("ATTACHEMENT", statut, etiquettes);
   return (
     <span
       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
       style={{ color: cfg.color, background: cfg.bg }}
     >
       <Icon className="h-3 w-3" />
-      {cfg.label}
+      {libelle}
     </span>
   );
 }
@@ -240,7 +246,7 @@ function imprimerFiche(att: Attachement) {
       </div>
       <div style="text-align:right;font-size:11px;color:#555">
         <div>Date d'impression : ${fmtDate(new Date().toISOString())}</div>
-        <div>Statut : <strong style="color:${att.statut === "VALIDE" ? "#16a34a" : "#1B2A4A"}">${STATUT_CFG[att.statut]?.label ?? att.statut}</strong></div>
+        <div>Statut : <strong style="color:${att.statut === "VALIDE" ? "#16a34a" : "#1B2A4A"}">${libelleStatut("ATTACHEMENT", att.statut)}</strong></div>
         <div>Version : v${att.version}</div>
       </div>
     </div>
@@ -1100,7 +1106,7 @@ export function AttachementsPage() {
         <Modal
           open={!!detailId}
           onClose={() => setDetailId(null)}
-          title={detail ? `${detail.code ?? "Attachement"} — ${STATUT_CFG[detail.statut as StatutAtt]?.label ?? detail.statut}` : "Chargement..."}
+          title={detail ? `${detail.code ?? "Attachement"} — ${libelleStatut("ATTACHEMENT", detail.statut)}` : "Chargement..."}
           size="xl"
         >
           {detailLoading ? (

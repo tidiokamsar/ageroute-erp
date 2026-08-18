@@ -7,7 +7,7 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
-import { REGLES_DEFAUT, invaliderCacheRegles, type CleRegles } from "../../lib/regles";
+import { REGLES_DEFAUT, chargerRegles, invaliderCacheRegles, type CleRegles } from "../../lib/regles";
 import { logAudit } from "../../lib/audit";
 import { METADONNEES, peutValiderRegle, validerDemande } from "./regles.catalogue";
 import { simulerAvecSurcharges } from "./simulateur";
@@ -332,5 +332,25 @@ parametrageRouter.get("/regles/:cle/historique", requireRole("ADMIN", "DAF"), as
         createdAt: l.createdAt,
       })),
     });
+  } catch (err) { next(err); }
+});
+
+/**
+ * GET /api/parametrage/regles/effectives — lot L2.2 (A9).
+ *
+ * Les libellés d'états sont nécessaires à TOUT utilisateur pour lire l'écran :
+ * cette route est donc ouverte à tout compte authentifié, mais elle ne livre
+ * alors que les étiquettes. Le jeu complet — seuils de conformité, matrices de
+ * rôles — reste réservé aux profils de paramétrage.
+ */
+parametrageRouter.get("/regles/effectives", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { bailleur, typeMarche, marcheId } = req.query as Record<string, string | undefined>;
+    const regles = await chargerRegles({ bailleur, typeMarche, marcheId });
+
+    const complet = req.user?.role === "ADMIN" || req.user?.role === "DAF";
+    if (complet) return res.json({ regles, portee: "COMPLET" });
+
+    res.json({ regles: { ETQ_MAPPINGS: regles.ETQ_MAPPINGS }, portee: "ETIQUETTES" });
   } catch (err) { next(err); }
 });

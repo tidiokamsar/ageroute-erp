@@ -21,6 +21,95 @@
 
 ---
 
+## RELAIS N°8 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L2.2)
+
+### Rapport de fin de lot — L2.2 « Libellés d'états officiels » (A9)
+
+**Branche** : `feat/regles-l02-api`.
+**Vérification** : backend `tsc` 0 erreur, `run-tests.mjs` **151/151** (144 avant)
+sous `node:20-slim` avec openssl ; front `docker build ./frontend` **réussi**.
+
+### Défaut découvert et corrigé
+
+Les libellés d'états étaient recopiés dans **quatre** fichiers — `Badge.tsx`,
+`BiPage`, `DashboardPage`, `AttachementsPage` — avec des tables **incomplètes** :
+
+- `Badge.tsx` ne connaissait que **6 des 14** statuts de décompte. Les états
+  `DEPOSE`, `EN_CONTROLE`, `EN_CORRECTION`, `VISA_DAF`, `VISA_DG`, `VALIDE_DG`,
+  `EN_CIRCUIT_FINANCIER`, `ORDONNANCE` s'affichaient donc en **code brut**.
+- Le même fichier ignorait **BADEA, AFD et KfW** : trois bailleurs réels
+  affichés « BADEA » au lieu de leur nom.
+- Sa table des statuts de marché ignorait 6 des 13 valeurs.
+
+Ce n'était pas visible en recette parce que le pilote ne contient que des
+décomptes en début de circuit. Cela le serait devenu dès la première mise en
+paiement réelle.
+
+### Livré
+
+- `frontend/src/lib/etiquettes.ts` — **source unique**. Défauts exhaustifs au
+  regard des énumérations Prisma (6 domaines : DECOMPTE, MARCHE, ENTREPRISE,
+  TYPE_DECOMPTE, FINANCEMENT, ATTACHEMENT) et fonction PURE `libelleStatut()`.
+  Ordre de résolution : surcharge de l'agence → libellé livré → code brut. Le
+  repli sur le code garantit qu'un état ajouté au schéma reste lisible plutôt
+  que d'afficher une case vide.
+- `frontend/src/lib/useEtiquettes.ts` — une requête pour toute l'application,
+  cache 15 min, `retry: false`. En cas d'échec, l'affichage retombe sur les
+  libellés livrés : une règle injoignable ne vide jamais l'écran.
+- `GET /api/parametrage/regles/effectives` — ouvert à tout compte authentifié
+  car **tout le monde a besoin des libellés pour lire l'écran**, mais il ne
+  livre alors que `ETQ_MAPPINGS`. Le jeu complet (seuils de conformité,
+  matrices de rôles) reste réservé à ADMIN/DAF.
+- Les quatre fichiers ne portent plus que **couleurs et icônes** — charte
+  graphique, pas paramétrage métier.
+- Validation stricte de `ETQ_MAPPINGS` à la saisie (7 nouveaux tests) : domaine
+  inconnu, libellé vide ou non textuel, tableau, chaîne, domaine non-objet.
+  Un JSON mal formé afficherait sinon « [object Object] » partout **sans erreur
+  serveur**.
+
+### Reste à faire
+
+Vérification visuelle des badges non effectuée : elle demande une session
+authentifiée, et je ne saisis pas de mot de passe dans un formulaire. À faire
+au premier déploiement — c'est le point 3 du DoD de ce lot.
+
+### PROMPT pour la DSI (humain) — fusion
+
+```bash
+git fetch origin
+git checkout master && git pull --ff-only origin master
+git merge --no-ff origin/feat/regles-l02-api -m "merge: L0.2 API regles, L0.4 UI, L1.3 matrice, L2.2 libelles"
+git push origin master
+```
+
+Aucune migration SQL. Comportement par défaut strictement inchangé tant
+qu'aucune règle `ETQ_MAPPINGS` n'est validée.
+
+### PROMPT pour le relecteur — lot L2.2
+
+```text
+Tu es relecteur du lot L2.2 du programme de paramétrage A1-A10.
+Références : PLAN-TRAVAIL-AGENT-PARAMETRAGE.md §3, JOURNAL-RELAIS.md (RELAIS
+N°8). Objet : branche feat/regles-l02-api.
+
+1. git fetch && git checkout feat/regles-l02-api
+2. Checklist :
+   a. DoD : backend `npx tsc` + `node scripts/run-tests.mjs` 151/151 dans
+      node:20-slim AVEC openssl ; `docker build ./frontend` ;
+   b. Exhaustivité : compare ETIQUETTES_DEFAUT aux énumérations de
+      schema.prisma — tout code affichable doit avoir un libellé. Le lot a été
+      motivé par ce défaut, ne le réintroduis pas ;
+   c. Fuite : vérifie que /regles/effectives ne livre PAS les seuils de
+      conformité ni les matrices de rôles à un compte non ADMIN/DAF ;
+   d. Robustesse : une règle ETQ_MAPPINGS invalide en base doit laisser
+      l'écran lisible (parserEtiquettes renvoie {} sans lever) ;
+   e. VÉRIFICATION VISUELLE des badges sur une session authentifiée — point
+      explicite du DoD, non couvert par les tests.
+3. Verdict : APPROUVÉ (avec remarques) ou REFUS motivé. Consigne le RELAIS N°9.
+```
+
+---
+
 ## RELAIS N°7 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L1.3)
 
 ### Rapport de fin de lot — L1.3 « Tests de matrice complets »

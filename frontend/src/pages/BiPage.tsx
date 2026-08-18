@@ -8,12 +8,9 @@ import { api, fmtGnf } from "../lib/api";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line } from "recharts";
 import { Download, TrendingUp, BarChart2, PieChart as PieIcon, Activity } from "lucide-react";
 import { Button } from "../components/ui/Button";
+import { libelleStatut } from "../lib/etiquettes";
+import { useEtiquettes } from "../lib/useEtiquettes";
 
-const STATUT_LABELS: Record<string,string> = {
-  BROUILLON:"Brouillon", DEPOSE:"Déposé", EN_CONTROLE:"En contrôle", EN_CORRECTION:"En correction",
-  EN_VALIDATION:"En validation", VALIDE_DG:"Validé DG", EN_CIRCUIT_FINANCIER:"Circuit financier",
-  ORDONNANCE:"Ordonnancé", VALIDE:"Validé", REJETE:"Rejeté", PAYE:"Payé",
-};
 
 const FINANCEMENT_COLORS: Record<string,string> = {
   BANQUE_MONDIALE:"#1565C0", BAD:"#E65100", BUDGET_NATIONAL:"#1B5E20", FER:"#4A148C",
@@ -53,14 +50,15 @@ export function BiPage() {
     queryKey: ["bi-analytics"],
     queryFn: () => api.get("/dashboard/analytics").then(r => r.data),
   });
+  const etiquettes = useEtiquettes();
   const { data: recepSynth } = useQuery({
     queryKey: ["receptions-synthese"],
     queryFn: () => api.get("/receptions/dashboard/synthese").then(r => r.data),
   });
 
-  // Graphique statuts
+  // Graphique statuts — libellés paramétrables (L2.2)
   const byStatutData = Object.entries((general?.decomptes?.byStatut ?? {})).map(([statut, count]) => ({
-    statut: STATUT_LABELS[statut] ?? statut,
+    statut: libelleStatut("DECOMPTE", statut, etiquettes),
     count: count as number,
     statut_raw: statut,
   }));

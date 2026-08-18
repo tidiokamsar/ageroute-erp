@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { REGLES_DEFAUT } from "../../lib/regles";
 import {
+  DOMAINES_ETIQUETTES,
   METADONNEES,
   MOTIF_LONGUEUR_MIN,
   estCleConnue,
   peutValiderRegle,
   validerDemande,
+  validerEtiquettes,
   validerValeur,
 } from "./regles.catalogue";
 
@@ -168,4 +170,54 @@ test("quatre yeux — les autres rôles ne valident pas", () => {
 test("quatre yeux — saisiPar absent (règle importée) : le rôle décide seul", () => {
   assert.equal(peutValiderRegle("DAF", "user-2", null).ok, true);
   assert.equal(peutValiderRegle("DMC", "user-2", null).ok, false);
+});
+
+// ─── A9 — Étiquettes d'états officiels (lot L2.2) ────────────────────────────
+
+test("étiquettes — forme conforme acceptée", () => {
+  assert.equal(validerEtiquettes({ DECOMPTE: { VALIDE: "Décompte visé" } }), null);
+  assert.equal(validerEtiquettes({}), null, "aucune surcharge = valide");
+});
+
+test("étiquettes — un domaine inconnu est refusé", () => {
+  const message = validerEtiquettes({ FACTURE: { PAYE: "Réglée" } });
+  assert.match(String(message), /Domaine d'étiquette inconnu : FACTURE/);
+});
+
+test("étiquettes — tous les domaines déclarés sont acceptés", () => {
+  for (const domaine of DOMAINES_ETIQUETTES) {
+    assert.equal(validerEtiquettes({ [domaine]: { CODE: "Libellé" } }), null, domaine);
+  }
+});
+
+test("étiquettes — un libellé vide ou non textuel est refusé", () => {
+  assert.match(String(validerEtiquettes({ DECOMPTE: { VALIDE: "" } })), /Libellé vide/);
+  assert.match(String(validerEtiquettes({ DECOMPTE: { VALIDE: "   " } })), /Libellé vide/);
+  assert.match(String(validerEtiquettes({ DECOMPTE: { VALIDE: 42 } })), /non textuel/);
+  assert.match(String(validerEtiquettes({ DECOMPTE: { VALIDE: null } })), /Libellé vide/);
+});
+
+test("étiquettes — structure aberrante refusée (tableau, chaîne, domaine non objet)", () => {
+  assert.match(String(validerEtiquettes([])), /doivent être un objet/);
+  assert.match(String(validerEtiquettes("VALIDE=Visé")), /doivent être un objet/);
+  assert.match(String(validerEtiquettes(null)), /doivent être un objet/);
+  assert.match(String(validerEtiquettes({ DECOMPTE: "Visé" })), /doit contenir un objet/);
+  assert.match(String(validerEtiquettes({ DECOMPTE: ["Visé"] })), /doit contenir un objet/);
+});
+
+test("étiquettes — ETQ_MAPPINGS est validé au passage par validerValeur", () => {
+  assert.equal(validerValeur("ETQ_MAPPINGS", '{"DECOMPTE":{"VALIDE":"Décompte visé"}}'), null);
+  assert.match(String(validerValeur("ETQ_MAPPINGS", '{"FACTURE":{"X":"Y"}}')), /Domaine d'étiquette inconnu/);
+  assert.match(String(validerValeur("ETQ_MAPPINGS", "pas du json")), /JSON valide/);
+});
+
+test("étiquettes — une demande complète est recevable de bout en bout", () => {
+  const erreurs = validerDemande({
+    cle: "ETQ_MAPPINGS",
+    valeur: '{"DECOMPTE":{"ORDONNANCE":"Mandaté"}}',
+    portee: "BAILLEUR",
+    porteeId: "BAD",
+    motif: "Terminologie imposée par la Banque africaine de développement",
+  }, AUJOURDHUI);
+  assert.deepEqual(erreurs, []);
 });

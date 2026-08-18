@@ -71,6 +71,36 @@ export function estCleConnue(cle: string): cle is CleRegles {
   return Object.prototype.hasOwnProperty.call(REGLES_DEFAUT, cle);
 }
 
+/**
+ * Domaines d'étiquettes admis (A9 — lot L2.2). Un domaine inconnu serait
+ * silencieusement ignoré par l'affichage : autant le refuser à la saisie.
+ */
+export const DOMAINES_ETIQUETTES = ["DECOMPTE", "MARCHE", "ENTREPRISE", "TYPE_DECOMPTE", "FINANCEMENT", "ATTACHEMENT"] as const;
+
+/**
+ * Forme attendue : { DOMAINE: { CODE_TECHNIQUE: "Libellé officiel" } }.
+ * Renvoie null si conforme, sinon le motif de rejet.
+ */
+export function validerEtiquettes(valeur: unknown): string | null {
+  if (valeur === null || typeof valeur !== "object" || Array.isArray(valeur)) {
+    return "Les étiquettes doivent être un objet { DOMAINE: { CODE: \"libellé\" } }";
+  }
+  for (const [domaine, codes] of Object.entries(valeur as Record<string, unknown>)) {
+    if (!DOMAINES_ETIQUETTES.includes(domaine as (typeof DOMAINES_ETIQUETTES)[number])) {
+      return `Domaine d'étiquette inconnu : ${domaine} (admis : ${DOMAINES_ETIQUETTES.join(", ")})`;
+    }
+    if (codes === null || typeof codes !== "object" || Array.isArray(codes)) {
+      return `Le domaine ${domaine} doit contenir un objet { CODE: "libellé" }`;
+    }
+    for (const [code, libelle] of Object.entries(codes as Record<string, unknown>)) {
+      if (typeof libelle !== "string" || libelle.trim() === "") {
+        return `Libellé vide ou non textuel pour ${domaine}.${code}`;
+      }
+    }
+  }
+  return null;
+}
+
 /** Valide une valeur au regard du type et des options de la clé. */
 export function validerValeur(cle: CleRegles, valeur: string): string | null {
   const meta = METADONNEES[cle];
@@ -105,12 +135,17 @@ export function validerValeur(cle: CleRegles, valeur: string): string | null {
       return inconnus.length === 0 ? null : `Valeurs inconnues : ${inconnus.join(", ")}`;
     }
     case "JSON": {
+      let parse: unknown;
       try {
-        JSON.parse(brut);
-        return null;
+        parse = JSON.parse(brut);
       } catch {
         return "La valeur doit être un JSON valide";
       }
+      // A9 — la forme d'ETQ_MAPPINGS est contrainte : un mauvais JSON ici
+      // afficherait des libellés vides ou « [object Object] » dans toute
+      // l'application, sans erreur visible côté serveur.
+      if (cle === "ETQ_MAPPINGS") return validerEtiquettes(parse);
+      return null;
     }
   }
 }

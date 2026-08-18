@@ -1,4 +1,6 @@
 import { clsx } from "clsx";
+import { libelleStatut } from "../../lib/etiquettes";
+import { useEtiquettes } from "../../lib/useEtiquettes";
 
 type BadgeColor = "green" | "amber" | "red" | "blue" | "navy" | "gray" | "teal";
 
@@ -18,66 +20,55 @@ export function Badge({ label, color = "gray" }: { label: string; color?: BadgeC
   );
 }
 
-const STATUT_ENTREPRISE: Record<string, { label: string; color: BadgeColor }> = {
-  CONFORME: { label: "Conforme", color: "green" },
-  A_REGULARISER: { label: "À régulariser", color: "amber" },
-  BLOQUE: { label: "Bloqué", color: "red" },
+// L2.2 — les LIBELLÉS vivent dans lib/etiquettes.ts (source unique, surchargeable
+// par la règle ETQ_MAPPINGS). Ici ne restent que les couleurs, qui relèvent de
+// la charte graphique et non du paramétrage métier.
+const COULEUR_ENTREPRISE: Record<string, BadgeColor> = {
+  EN_ATTENTE: "gray", A_REGULARISER: "amber", CONFORME: "green", AUTORISE: "green",
+  ALERTE: "amber", BLOQUE: "red", SUSPENDU: "amber", ARCHIVE: "gray",
 };
 
-const STATUT_MARCHE: Record<string, { label: string; color: BadgeColor }> = {
-  EN_PREPARATION: { label: "En préparation", color: "gray" },
-  ACTIF: { label: "Actif", color: "green" },
-  SUSPENDU: { label: "Suspendu", color: "amber" },
-  RESILIE: { label: "Résilié", color: "red" },
-  SOLDE: { label: "Soldé", color: "teal" },
-  CLOTURE: { label: "Clôturé", color: "navy" },
+const COULEUR_MARCHE: Record<string, BadgeColor> = {
+  BROUILLON: "gray", EN_PREPARATION: "gray", SIGNE: "blue", NOTIFIE: "blue",
+  EN_EXECUTION: "green", ACTIF: "green", SUSPENDU: "amber", EN_AVENANT: "amber",
+  EN_RECEPTION_PROVISOIRE: "teal", EN_RECEPTION_DEFINITIVE: "teal",
+  RESILIE: "red", SOLDE: "teal", CLOTURE: "navy",
 };
 
-const STATUT_DECOMPTE: Record<string, { label: string; color: BadgeColor }> = {
-  BROUILLON: { label: "Brouillon", color: "gray" },
-  SOUMIS: { label: "Soumis", color: "blue" },
-  EN_VALIDATION: { label: "En validation", color: "amber" },
-  VALIDE: { label: "Validé", color: "teal" },
-  REJETE: { label: "Rejeté", color: "red" },
-  PAYE: { label: "Payé", color: "green" },
+const COULEUR_DECOMPTE: Record<string, BadgeColor> = {
+  BROUILLON: "gray", SOUMIS: "blue", DEPOSE: "blue", EN_CONTROLE: "amber",
+  EN_CORRECTION: "amber", EN_VALIDATION: "amber", VISA_DAF: "teal", VISA_DG: "teal",
+  VALIDE_DG: "teal", EN_CIRCUIT_FINANCIER: "blue", ORDONNANCE: "navy",
+  VALIDE: "teal", REJETE: "red", PAYE: "green",
 };
 
-const TYPE_DECOMPTE: Record<string, string> = {
-  AVANCE: "Avance", PROVISOIRE: "Provisoire", PARTIEL: "Partiel",
-  INTERMEDIAIRE: "Intermédiaire", FINAL: "Final", CLOTURE: "Clôture", APRES_AVENANT: "Après avenant",
-};
-
-const FINANCEMENT: Record<string, { label: string; color: BadgeColor }> = {
-  BANQUE_MONDIALE: { label: "Banque Mondiale", color: "blue" },
-  BAD: { label: "BAD", color: "teal" },
-  BUDGET_NATIONAL: { label: "Budget National", color: "navy" },
-  FER: { label: "FER", color: "amber" },
-  BOAD: { label: "BOAD", color: "green" },
-  BID: { label: "BID", color: "blue" },
-  UE: { label: "UE", color: "teal" },
-  AUTRE: { label: "Autre", color: "gray" },
+const COULEUR_FINANCEMENT: Record<string, BadgeColor> = {
+  BANQUE_MONDIALE: "blue", BAD: "teal", BUDGET_NATIONAL: "navy", FER: "amber",
+  BOAD: "green", BID: "blue", UE: "teal", BADEA: "navy", AFD: "blue",
+  KFW: "gray", AUTRE: "gray",
 };
 
 export function StatutEntrepriseBadge({ statut }: { statut: string }) {
-  const s = STATUT_ENTREPRISE[statut] ?? { label: statut, color: "gray" as BadgeColor };
-  return <Badge label={s.label} color={s.color} />;
+  const etiquettes = useEtiquettes();
+  return <Badge label={libelleStatut("ENTREPRISE", statut, etiquettes)} color={COULEUR_ENTREPRISE[statut] ?? "gray"} />;
 }
 
 export function StatutMarcheBadge({ statut }: { statut: string }) {
-  const s = STATUT_MARCHE[statut] ?? { label: statut, color: "gray" as BadgeColor };
-  return <Badge label={s.label} color={s.color} />;
+  const etiquettes = useEtiquettes();
+  return <Badge label={libelleStatut("MARCHE", statut, etiquettes)} color={COULEUR_MARCHE[statut] ?? "gray"} />;
 }
 
 export function StatutDecompteBadge({ statut }: { statut: string }) {
-  const s = STATUT_DECOMPTE[statut] ?? { label: statut, color: "gray" as BadgeColor };
-  return <Badge label={s.label} color={s.color} />;
+  const etiquettes = useEtiquettes();
+  return <Badge label={libelleStatut("DECOMPTE", statut, etiquettes)} color={COULEUR_DECOMPTE[statut] ?? "gray"} />;
 }
 
 export function TypeDecompteBadge({ type }: { type: string }) {
-  return <Badge label={TYPE_DECOMPTE[type] ?? type} color="navy" />;
+  const etiquettes = useEtiquettes();
+  return <Badge label={libelleStatut("TYPE_DECOMPTE", type, etiquettes)} color="navy" />;
 }
 
 export function FinancementBadge({ financement }: { financement: string }) {
-  const s = FINANCEMENT[financement] ?? { label: financement, color: "gray" as BadgeColor };
-  return <Badge label={s.label} color={s.color} />;
+  const etiquettes = useEtiquettes();
+  return <Badge label={libelleStatut("FINANCEMENT", financement, etiquettes)} color={COULEUR_FINANCEMENT[financement] ?? "gray"} />;
 }
