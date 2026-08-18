@@ -5,6 +5,8 @@ import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { entrepriseIdOf } from "../../lib/scope";
+import { roleAutorise } from "../../lib/roles-circuit";
+import { chargerRegles } from "../../lib/regles";
 import { z } from "zod";
 
 export const paiementsRouter = Router();
@@ -74,6 +76,13 @@ paiementsRouter.post("/", requireRole("ADMIN", "DAF"), async (req: Request, res:
       }
     }
 
+    // L2.1 — matrice de rôles : l'ORDONNANCEMENT (préparation du paiement)
+    // exige que le rôle soit autorisé par WF_ROLES_ORDONNANCEMENT
+    const reglesPaiement = await chargerRegles();
+    if (!roleAutorise(req.user.role, "ORDONNANCEMENT", reglesPaiement)) {
+      throw new ApiError(403, `Votre rôle ${req.user.role} n'est pas autorisé à ordonnancer (matrice WF_ROLES_ORDONNANCEMENT)`);
+    }
+
     const p = await prisma.paiement.create({ data });
 
     // Mettre à jour le statut : PAYE seulement si le cumul atteint le net
@@ -99,6 +108,13 @@ paiementsRouter.post("/:id/confirmation-bcrg", requireRole("ADMIN", "BCRG"), asy
     const paiement = await prisma.paiement.findFirst({ where: { id: req.params.id, deletedAt: null } });
     if (!paiement) throw new ApiError(404, "Paiement introuvable");
     if (paiement.confirmeAt) throw new ApiError(400, "Ce paiement a déjà été confirmé par la BCRG");
+
+    // L2.1 — matrice PAIEMENT : la confirmation bancaire (BCRG) exige
+    // que le rôle soit autorisé par WF_ROLES_PAIEMENT
+    const reglesConfirmation = await chargerRegles();
+    if (!roleAutorise(req.user.role, "PAIEMENT", reglesConfirmation)) {
+      throw new ApiError(403, `Votre rôle ${req.user.role} n'est pas autorisé à confirmer le paiement (matrice WF_ROLES_PAIEMENT)`);
+    }
 
     // Le montant réel ne peut pas être nul ni dévier de plus de 1% du montant ordonnancé
     const ecart = body.montantReelGnf > paiement.montantGnf

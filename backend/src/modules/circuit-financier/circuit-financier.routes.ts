@@ -17,6 +17,8 @@ circuitFinancierRouter.use(requireAuth);
 
 // F12 — définitions unifiées : voir lib/circuit-definitions.ts
 import { etapesCircuitFinancier, type EtapeCircuit } from "../../lib/circuit-definitions";
+import { roleAutorise } from "../../lib/roles-circuit";
+import { chargerRegles } from "../../lib/regles";
 function etapesPourFinancement(financement: string, bailleurNom?: string): EtapeCircuit[] {
   return etapesCircuitFinancier(financement);
 }
@@ -90,6 +92,13 @@ circuitFinancierRouter.post("/:circuitId/etape", async (req: Request, res: Respo
     const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
     if (req.user.role !== "ADMIN" && !mesRoles.includes(etapeCourante.roleOuService as string)) {
       throw new ApiError(403, `Cette étape requiert le service ${etapeCourante.roleOuService}`);
+    }
+
+    // L2.1 — matrice de rôles : chaque étape du circuit financier est une
+    // LIQUIDATION (validation intermédiaire) — contrôle par WF_ROLES_LIQUIDATION
+    const reglesEtape = await chargerRegles();
+    if (!roleAutorise(req.user.role, "LIQUIDATION", reglesEtape)) {
+      throw new ApiError(403, `Votre rôle ${req.user.role} n'est pas autorisé à valider cette étape (matrice WF_ROLES_LIQUIDATION)`);
     }
 
     // Mettre à jour l'étape courante
