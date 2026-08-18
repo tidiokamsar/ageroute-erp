@@ -1602,3 +1602,53 @@ model MarcheAffectation {
   @@map("marche_affectations")
   @@index([userId])
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RÈGLES DE GESTION PARAMÉTRABLES (A1-A10 — PLAN-DEV-PARAMETRAGE-A1-A10.md)
+// Registre daté, porté (GLOBAL > BAILLEUR > TYPE_MARCHE > MARCHE), validé en
+// quatre yeux. Les valeurs par défaut (lib/regles.ts) reproduisent le
+// comportement historique : aucun changement effectif tant que la DAF n'a pas
+// arbitré. Historique append-only en table dédiée (exigence d'audit §19).
+// ═══════════════════════════════════════════════════════════════════════════
+model RegleGestion {
+  id           String   @id @default(uuid())
+  cle          String
+  categorie    String   // FINANCE | WORKFLOW | ETATS | CONFORMITE
+  libelle      String
+  description  String?
+  type         String   // ENUM | NUMBER | BOOLEAN | MULTI | JSON
+  options      Json?
+  portee       String   @default("GLOBAL")
+  porteeId     String   @default("")
+  valeur       String
+  valeurDefaut String
+  dateEffet    DateTime @default(now())
+  statut       String   @default("BROUILLON") // BROUILLON | VALIDE | ARCHIVE
+  saisiPar     String?
+  validePar    String?
+  valideAt     DateTime?
+  motif        String   @default("")
+  version      Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([cle, portee, porteeId, dateEffet, version])
+  @@index([cle, portee, porteeId, dateEffet(sort: Desc)])
+  @@map("regle_gestion")
+}
+
+model RegleGestionHistorique {
+  id         String   @id @default(uuid())
+  regleId    String
+  cle        String
+  ancienne   String?
+  nouvelle   String
+  dateEffet  DateTime
+  saisiPar   String
+  validePar  String?
+  motif      String
+  createdAt  DateTime @default(now())
+
+  @@index([cle])
+  @@map("regle_gestion_historique")
+}
