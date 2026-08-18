@@ -13,6 +13,7 @@ const schema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().default("noreply@ageroute.gov.gn"),
   GEOPORTAIL_URL: z.string().default("https://carte.ageroute.gov.gn"),
+  UPLOAD_DIR: z.string().default("/app/uploads"),
 });
 
 export const env = schema.parse(process.env);

@@ -6,6 +6,8 @@ import { marchesService } from "./marches.service";
 import { ApiError } from "../../middleware/error.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
+import { entrepriseIdOf } from "../../lib/scope";
+import { getMarchesAffectes } from "../../lib/affectations";
 import { z } from "zod";
 import { StatutMarche } from "@prisma/client";
 
@@ -16,14 +18,18 @@ marchesRouter.use(requireAuth);
 
 marchesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètres : isolation des comptes ENTREPRISE + affectations terrain
+    const entrepriseScope = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    const affectes = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
     res.json(await marchesService.list({
       page: Number(req.query.page) || 1,
       pageSize: Number(req.query.pageSize) || 20,
       search: req.query.search as string,
       statut: req.query.statut as string,
       financement: req.query.financement as string,
-      entrepriseId: req.query.entrepriseId as string,
+      entrepriseId: entrepriseScope ?? (req.query.entrepriseId as string),
       retard: req.query.retard === "true",
+      marcheIds: affectes ?? undefined,
     }));
   } catch (err) { next(err); }
 });
@@ -424,7 +430,7 @@ marchesRouter.get("/:id/paiements", async (req: Request, res: Response, next: Ne
       select: { id: true },
     });
     const paiements = await prisma.paiement.findMany({
-      where: { decompteId: { in: decomptes.map(d => d.id) } },
+      where: { decompteId: { in: decomptes.map(d => d.id) }, deletedAt: null },
       include: { decompte: { select: { reference: true, type: true } } },
       orderBy: { createdAt: "desc" },
     });

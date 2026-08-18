@@ -4,6 +4,8 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { decompteCreateSchema, decompteUpdateSchema } from "./decomptes.schema";
 import { decomptesService } from "./decomptes.service";
 import { ApiError } from "../../middleware/error.middleware";
+import { entrepriseIdOf } from "../../lib/scope";
+import { getMarchesAffectes } from "../../lib/affectations";
 import { z } from "zod";
 
 export const decomptesRouter = Router();
@@ -11,12 +13,16 @@ decomptesRouter.use(requireAuth);
 
 decomptesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètres : isolation des comptes ENTREPRISE + affectations terrain
+    const entrepriseScope = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    const affectes = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
     res.json(await decomptesService.list({
       page: Number(req.query.page) || 1,
       pageSize: Number(req.query.pageSize) || 20,
       marcheId: req.query.marcheId as string,
       statut: req.query.statut as string,
-      entrepriseId: req.query.entrepriseId as string,
+      entrepriseId: entrepriseScope ?? (req.query.entrepriseId as string),
+      marcheIds: affectes ?? undefined,
       aTraiter: req.query.aTraiter === "1" || req.query.aTraiter === "true",
       role: req.user?.role,
     }));
@@ -28,7 +34,14 @@ decomptesRouter.get("/stats", async (_req: Request, res: Response, next: NextFun
 });
 
 decomptesRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await decomptesService.getById(req.params.id)); } catch (err) { next(err); }
+  try {
+    const d = await decomptesService.getById(req.params.id);
+    // Isolation entreprise : un décompte d'une autre entreprise est « introuvable »
+    if (req.user?.role === "ENTREPRISE" && d.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
+      throw new ApiError(404, "Décompte introuvable");
+    }
+    res.json(d);
+  } catch (err) { next(err); }
 });
 
 // §5 CDC — dépôt du décompte — VÉRIFICATION CONFORMITÉ ENTREPRISE AVANT CRÉATION
@@ -39,6 +52,15 @@ decomptesRouter.post("/", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), asy
     // Récupérer l'entreprise via le marché
     const { prisma } = await import("../../lib/prisma");
     const marche = await prisma.marche.findFirst({ where: { id: (body as never as { marcheId: string }).marcheId, deletedAt: null } });
+    // Isolation entreprise : le marché (et l'entreprise déclarée) doivent être les siens
+    if (req.user.role === "ENTREPRISE") {
+      const mienne = await entrepriseIdOf(req.user.id);
+      const entrepriseDeclaree = (body as never as { entrepriseId?: string }).entrepriseId;
+      if (!marche || marche.entrepriseId !== mienne || (entrepriseDeclaree && entrepriseDeclaree !== mienne)) {
+        throw new ApiError(403, "Ce marché n'appartient pas à votre entreprise");
+      }
+      (body as never as { entrepriseId?: string }).entrepriseId = mienne;
+    }
     if (marche) {
       const { checkEligibilite } = await import("../entreprises/entreprises.service");
       const { eligible, raisons } = await checkEligibilite(marche.entrepriseId);
@@ -56,7 +78,7 @@ decomptesRouter.put("/:id", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), a
 });
 
 // §6 CDC — pièces obligatoires
-decomptesRouter.patch("/:id/pieces", async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.patch("/:id/pieces", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const pieces = z.object({
@@ -126,25 +148,28 @@ decomptesRouter.get("/:id/lignes", async (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 });
 
-decomptesRouter.post("/:id/lignes", async (req: Request, res: Response, next: NextFunction) => {
+// Schéma commun de saisie d'une ligne BPU (création et mise à jour complète)
+const ligneSchema = z.object({
+  codeArticle:       z.string().min(1),
+  designation:       z.string().min(2),
+  unite:             z.string().min(1),
+  quantiteContrat:   z.number().positive(),
+  quantitePrecedent: z.number().min(0).default(0),
+  quantiteCourante:  z.number().min(0),
+  prixUnitaire:      z.number().positive(),
+  tauxTva:           z.number().min(0).default(18),
+  tauxRetenue:       z.number().min(0).default(5),
+  tauxAvance:        z.number().min(0).default(0),
+  montantPenalite:   z.number().min(0).default(0),
+  motifPenalite:     z.string().optional(),
+  attachementLigneId:z.string().optional(),
+  observations:      z.string().optional(),
+});
+
+decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const body = z.object({
-      codeArticle:       z.string().min(1),
-      designation:       z.string().min(2),
-      unite:             z.string().min(1),
-      quantiteContrat:   z.number().positive(),
-      quantitePrecedent: z.number().min(0).default(0),
-      quantiteCourante:  z.number().min(0),
-      prixUnitaire:      z.number().positive(),
-      tauxTva:           z.number().min(0).default(18),
-      tauxRetenue:       z.number().min(0).default(5),
-      tauxAvance:        z.number().min(0).default(0),
-      montantPenalite:   z.number().min(0).default(0),
-      motifPenalite:     z.string().optional(),
-      attachementLigneId:z.string().optional(),
-      observations:      z.string().optional(),
-    }).parse(req.body);
+    const body = ligneSchema.parse(req.body);
 
     const { prisma } = await import("../../lib/prisma");
     const decompte = await prisma.decompte.findUnique({ where: { id: req.params.id }, include: { marche: true } });
@@ -227,17 +252,18 @@ decomptesRouter.post("/:id/lignes", async (req: Request, res: Response, next: Ne
   } catch (err) { next(err); }
 });
 
-decomptesRouter.put("/:id/lignes/:ligneId", async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.put("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const body = ligneSchema.parse(req.body);
     const { prisma } = await import("../../lib/prisma");
     const ligne = await prisma.decompteLigne.findFirst({ where: { id: req.params.ligneId, decompteId: req.params.id } });
     if (!ligne) throw new ApiError(404, "Ligne introuvable");
-    const updated = await prisma.decompteLigne.update({ where: { id: req.params.ligneId }, data: req.body as never });
+    const updated = await prisma.decompteLigne.update({ where: { id: req.params.ligneId }, data: body as never });
     res.json(updated);
   } catch (err) { next(err); }
 });
 
-decomptesRouter.delete("/:id/lignes/:ligneId", async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.delete("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { prisma } = await import("../../lib/prisma");
     await prisma.decompteLigne.delete({ where: { id: req.params.ligneId } });
@@ -246,7 +272,7 @@ decomptesRouter.delete("/:id/lignes/:ligneId", async (req: Request, res: Respons
 });
 
 // POST /:id/calculate — recalcule total depuis lignes (avec taux custom)
-decomptesRouter.post("/:id/calculate", async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.post("/:id/calculate", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = z.object({
       applyVat:            z.boolean().default(true),

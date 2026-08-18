@@ -4,6 +4,7 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
+import { entrepriseIdOf } from "../../lib/scope";
 import { z } from "zod";
 
 export const paiementsRouter = Router();
@@ -21,8 +22,15 @@ const schema = z.object({
 
 paiementsRouter.get("/decompte/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Isolation entreprise : les paiements d'un décompte d'autrui sont « introuvables »
+    if (req.user?.role === "ENTREPRISE") {
+      const dec = await prisma.decompte.findUnique({ where: { id: req.params.decompteId }, select: { entrepriseId: true } });
+      if (!dec || dec.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
+        throw new ApiError(404, "Décompte introuvable");
+      }
+    }
     const paiements = await prisma.paiement.findMany({
-      where: { decompteId: req.params.decompteId },
+      where: { decompteId: req.params.decompteId, deletedAt: null },
       orderBy: { createdAt: "desc" },
     });
     res.json(paiements);
@@ -48,8 +56,11 @@ paiementsRouter.post("/", requireRole("ADMIN", "DAF"), async (req: Request, res:
 paiementsRouter.delete("/:id", requireRole("ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
-    await prisma.paiement.delete({ where: { id: req.params.id } });
-    await logAudit({ userId: req.user.id, action: "DELETE", entityType: "Paiement", entityId: req.params.id });
+    // §3.4 AGENTS.md — soft delete uniquement, avec trace de l'état avant suppression
+    const before = await prisma.paiement.findUnique({ where: { id: req.params.id } });
+    if (!before) throw new ApiError(404, "Paiement introuvable");
+    await prisma.paiement.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
+    await logAudit({ userId: req.user.id, action: "DELETE", entityType: "Paiement", entityId: req.params.id, before });
     res.status(204).send();
   } catch (err) { next(err); }
 });

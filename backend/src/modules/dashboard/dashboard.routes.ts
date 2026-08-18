@@ -4,13 +4,14 @@
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
 
-// §21 — Tableau de bord général (adapté par rôle)
-dashboardRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
+// §21 — Tableau de bord général (adapté par rôle) — servi sur / et /stats (alias)
+async function generalDashboard(req: Request, res: Response, next: NextFunction) {
   try {
     const role = req.user?.role ?? "ADMIN";
     const entrepriseFilter: Record<string,unknown> = {};
@@ -70,10 +71,66 @@ dashboardRouter.get("/", async (req: Request, res: Response, next: NextFunction)
       alertes: { nonEnvoyees: alertesNonEnvoyees },
     });
   } catch (err) { next(err); }
+}
+dashboardRouter.get("/", generalDashboard);
+dashboardRouter.get("/stats", generalDashboard);
+
+// §21 — File d'attente par étape du circuit de validation (vue DG)
+// Le frontend attend { pipeline: [{role, label, nb, montantTotal, dossiers[]}] }
+dashboardRouter.get("/pipeline", requireRole("ADMIN", "DG"), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const instances = await prisma.workflowInstance.findMany({
+      where: { statut: "EN_COURS" },
+      include: {
+        definition: { include: { etapes: { orderBy: { ordre: "asc" } } } },
+        decompte: {
+          select: {
+            id: true, reference: true, statut: true, netAPayer: true, createdAt: true,
+            marche: { select: { reference: true, financement: true } },
+            entreprise: { select: { raisonSociale: true } },
+          },
+        },
+      },
+    });
+
+    const CHAINE: Array<{ role: string; label: string }> = [
+      { role: "MISSION",   label: "Mission contrôle" },
+      { role: "TECHNIQUE", label: "Direction Technique" },
+      { role: "UGP",       label: "Unité de gestion" },
+      { role: "DMC",       label: "Direction des marchés" },
+      { role: "DAF",       label: "Visa financier" },
+      { role: "DG",        label: "Approbation finale" },
+    ];
+    const parRole = new Map<string, { role: string; label: string; nb: number; montantTotal: number; dossiers: unknown[] }>(
+      CHAINE.map((c) => [c.role, { ...c, nb: 0, montantTotal: 0, dossiers: [] }])
+    );
+
+    for (const inst of instances) {
+      const etape = inst.definition.etapes[inst.etapeActuelle];
+      const d = inst.decompte;
+      if (!etape?.roleRequis || !d) continue;
+      let step = parRole.get(etape.roleRequis);
+      if (!step) { // étape avec un rôle hors chaîne standard (ex. délégation service)
+        step = { role: etape.roleRequis, label: etape.nom, nb: 0, montantTotal: 0, dossiers: [] };
+        parRole.set(etape.roleRequis, step);
+      }
+      step.nb++;
+      step.montantTotal += Number(d.netAPayer);
+      if (step.dossiers.length < 5) {
+        step.dossiers.push({
+          id: d.id, reference: d.reference, statut: d.statut,
+          netAPayer: d.netAPayer.toString(), createdAt: d.createdAt.toISOString(),
+          marche: d.marche, entreprise: d.entreprise,
+        });
+      }
+    }
+
+    res.json({ pipeline: [...parRole.values()] });
+  } catch (err) { next(err); }
 });
 
 // §21 — Vue DAF : engagements, visas, ordonnancements, circuit financier
-dashboardRouter.get("/daf", async (_req: Request, res: Response, next: NextFunction) => {
+dashboardRouter.get("/daf", requireRole("ADMIN", "DAF", "DG"), async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const [enAttenteVisa, visaAccorde, visaRefuse, ordonnances, montantOrdonnanceRaw] = await Promise.all([
       prisma.decompte.count({ where: { deletedAt: null, statut: "EN_VALIDATION", visaFinancier: null } }),
@@ -95,7 +152,7 @@ dashboardRouter.get("/daf", async (_req: Request, res: Response, next: NextFunct
 });
 
 // §21 — Vue DMC : décomptes en cours, corrections, rejets
-dashboardRouter.get("/dmc", async (_req: Request, res: Response, next: NextFunction) => {
+dashboardRouter.get("/dmc", requireRole("ADMIN", "DMC", "DG"), async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const [enAnalyse, avecAnalyse, corrections, rejets] = await Promise.all([
       prisma.decompte.count({ where: { deletedAt: null, statut: "EN_VALIDATION", analyseDmc: null } }),
@@ -114,7 +171,7 @@ dashboardRouter.get("/dmc", async (_req: Request, res: Response, next: NextFunct
 });
 
 // §21 — Vue DG : encours, montants, retards, dossiers bloqués
-dashboardRouter.get("/dg", async (_req: Request, res: Response, next: NextFunction) => {
+dashboardRouter.get("/dg", requireRole("ADMIN", "DG"), async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const [suspendus, avecAudit, enAttenteDg, montantEncours] = await Promise.all([
       prisma.decompte.count({ where: { deletedAt: null, traitementSuspendu: true } }),
@@ -137,7 +194,7 @@ dashboardRouter.get("/dg", async (_req: Request, res: Response, next: NextFuncti
 });
 
 // §21 — Vue UGP : demandes décaissement bailleurs
-dashboardRouter.get("/ugp", async (_req: Request, res: Response, next: NextFunction) => {
+dashboardRouter.get("/ugp", requireRole("ADMIN", "UGP", "DG"), async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const circuitsBailleur = await prisma.circuitFinancier.findMany({
       where: { type: "BAILLEUR", statut: "EN_COURS" },

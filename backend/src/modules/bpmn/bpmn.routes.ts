@@ -5,11 +5,14 @@
  * Compatible avec Prisma $queryRaw (tables hors schéma Prisma)
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { Prisma } from "@prisma/client";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { notifyNextStep, notifyDecision, notifyApprouve } from "../../lib/mailer";
+import { rolesEffectifs } from "../../lib/delegations";
+import { entrepriseIdOf } from "../../lib/scope";
 import { z } from "zod";
 
 export const bpmnRouter = Router();
@@ -183,6 +186,17 @@ bpmnRouter.post("/soumettre/:moduleType/:entityId", async (req: Request, res: Re
 bpmnRouter.get("/instance/:moduleType/:entityId", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const mt = req.params.moduleType.toUpperCase();
+
+    // Isolation entreprise : un compte ENTREPRISE ne voit que les instances
+    // BPMN des décomptes de sa propre entreprise (les autres modules sont
+    // internes — pas de visibilité).
+    if (req.user?.role === "ENTREPRISE") {
+      if (mt !== "DECOMPTE") return res.json(null);
+      const monEntreprise = await entrepriseIdOf(req.user.id);
+      const dec = await prisma.decompte.findUnique({ where: { id: req.params.entityId }, select: { entrepriseId: true } });
+      if (!dec || dec.entrepriseId !== monEntreprise) return res.json(null);
+    }
+
     const instance = await getInstance(mt, req.params.entityId);
     if (!instance) return res.json(null);
 
@@ -224,15 +238,20 @@ bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next:
     const etapeCourante = steps[instance.etape_actuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante");
 
+    // Rôles effectifs : rôle propre + rôles délégués actifs (délégation d'intérim)
+    const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
     const isAdmin  = req.user.role === "ADMIN";
-    const isDg     = req.user.role === "DG";
-    const isSuperv = isAdmin || isDg;
+    const isSuperv = isAdmin || mesRoles.includes("DG");
 
     if (["SUSPENDRE","AUDIT"].includes(decision) && !isSuperv) {
       throw new ApiError(403, "Seule la Direction Générale peut suspendre ou demander un audit");
     }
+    // Une instance suspendue bloque toute décision, sauf superviseur (levée)
+    if (instance.suspended && !isSuperv) {
+      throw new ApiError(403, "Instance suspendue par la Direction Générale — aucune action possible");
+    }
     if (!["SUSPENDRE","AUDIT"].includes(decision) && !isAdmin) {
-      if (etapeCourante.role_requis && req.user.role !== etapeCourante.role_requis) {
+      if (etapeCourante.role_requis && !mesRoles.includes(etapeCourante.role_requis)) {
         // Les étapes SERVICE_TASK ne nécessitent pas de rôle spécifique
         if (etapeCourante.type_tache !== "SERVICE_TASK") {
           throw new ApiError(403, `Étape "${etapeCourante.nom}" requiert le rôle ${etapeCourante.role_requis}`);
@@ -368,6 +387,7 @@ bpmnRouter.patch("/:instanceId/lever-suspension", async (req: Request, res: Resp
     if (!req.user) throw new ApiError(401, "Non authentifié");
     if (!ROLES_SUPERV.includes(req.user.role)) throw new ApiError(403, "Réservé à la DG/ADMIN");
     await prisma.$executeRaw`UPDATE bpmn_instances SET suspended=false, updated_at=NOW() WHERE id=${req.params.instanceId}`;
+    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "BpmnInstance", entityId: req.params.instanceId, after: { suspended: false } });
     res.json({ message: "Suspension levée" });
   } catch (err) { next(err); }
 });
@@ -376,7 +396,8 @@ bpmnRouter.patch("/:instanceId/lever-suspension", async (req: Request, res: Resp
 bpmnRouter.get("/mes-taches", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const isSuperv = ROLES_SUPERV.includes(req.user.role);
+    const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
+    const isSuperv = req.user.role === "ADMIN" || mesRoles.includes("DG");
 
     let instances: (BpmnInstance & { def_nom: string; step_nom: string; step_role: string; step_ordre: number })[];
 
@@ -390,12 +411,14 @@ bpmnRouter.get("/mes-taches", async (req: Request, res: Response, next: NextFunc
         ORDER BY bi.created_at ASC
       `;
     } else {
+      // Étapes courantes dont le rôle requis est porté par l'utilisateur
+      // (rôle propre ou rôle délégué actif) — requête paramétrée.
       instances = await prisma.$queryRaw`
         SELECT bi.*, bd.nom as def_nom, bs.nom as step_nom, bs.role_requis as step_role, bs.ordre as step_ordre
         FROM bpmn_instances bi
         JOIN bpmn_definitions bd ON bd.id = bi.definition_id
         JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle + 1
-        WHERE bi.statut = 'EN_COURS' AND bs.role_requis = ${req.user.role}
+        WHERE bi.statut = 'EN_COURS' AND bs.role_requis IN (${Prisma.join(mesRoles)})
         ORDER BY bi.created_at ASC
       `;
     }
@@ -407,7 +430,7 @@ bpmnRouter.get("/mes-taches", async (req: Request, res: Response, next: NextFunc
       `;
       const debut = lastAction[0] ? new Date(lastAction[0].created_at) : new Date(inst.created_at);
       const joursEnCours = Math.floor((Date.now() - debut.getTime()) / 86400000);
-      return { ...inst, joursEnCours, peutAgir: isSuperv || inst.step_role === req.user!.role };
+      return { ...inst, joursEnCours, peutAgir: isSuperv || mesRoles.includes(inst.step_role) };
     }));
 
     res.json(enriched);

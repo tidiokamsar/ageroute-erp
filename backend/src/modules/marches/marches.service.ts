@@ -5,7 +5,7 @@ import { ApiError } from "../../middleware/error.middleware";
 const include = { entreprise: true, lots: true, avenants: true, garanties: true };
 
 export const marchesService = {
-  async list(params: { page?: number; pageSize?: number; search?: string; statut?: string; financement?: string; entrepriseId?: string; retard?: boolean }) {
+  async list(params: { page?: number; pageSize?: number; search?: string; statut?: string; financement?: string; entrepriseId?: string; retard?: boolean; marcheIds?: string[] }) {
     const page = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(100, params.pageSize ?? 20);
     const where: Record<string, unknown> = { deletedAt: null };
@@ -18,6 +18,7 @@ export const marchesService = {
     if (params.statut)      where.statut       = params.statut;
     if (params.financement) where.financement   = params.financement;
     if (params.entrepriseId)where.entrepriseId  = params.entrepriseId;
+    if (params.marcheIds)   where.id             = { in: params.marcheIds }; // périmètre d'affectation
     if (params.retard)      where.AND = [
       { statut: { in: ["EN_EXECUTION","ACTIF"] } },
       { dateFinPrevue: { lt: new Date() } },

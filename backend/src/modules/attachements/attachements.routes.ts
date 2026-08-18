@@ -9,6 +9,8 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
+import { entrepriseIdOf } from "../../lib/scope";
+import { getMarchesAffectes } from "../../lib/affectations";
 import { z } from "zod";
 
 export const attachementsRouter = Router();
@@ -81,13 +83,23 @@ attachementsRouter.get("/stats", async (_req: Request, res: Response, next: Next
 
 attachementsRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { decompteId, statut, typeAttachement, page = "1", pageSize = "20" } = req.query as Record<string, string>;
-    const skip = (Number(page) - 1) * Number(pageSize);
+    const { decompteId, statut, typeAttachement } = req.query as Record<string, string>;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
+    const skip = (page - 1) * pageSize;
 
     const where: Record<string, unknown> = {};
     if (decompteId) where.decompteId = decompteId;
     if (statut) where.statut = statut;
     if (typeAttachement) where.typeAttachement = typeAttachement;
+
+    // Périmètres : isolation ENTREPRISE + affectations terrain (via le décompte)
+    if (req.user?.role === "ENTREPRISE") {
+      where.decompte = { entrepriseId: await entrepriseIdOf(req.user.id), deletedAt: null };
+    } else if (req.user) {
+      const affectes = await getMarchesAffectes(req.user.id, req.user.role);
+      if (affectes) where.decompte = { marcheId: { in: affectes }, deletedAt: null };
+    }
 
     const [data, total] = await Promise.all([
       prisma.attachement.findMany({
@@ -102,12 +114,12 @@ attachementsRouter.get("/", async (req: Request, res: Response, next: NextFuncti
         },
         orderBy: { createdAt: "desc" },
         skip,
-        take: Number(pageSize),
+        take: pageSize,
       }),
       prisma.attachement.count({ where }),
     ]);
 
-    res.json({ data, total, page: Number(page), pageSize: Number(pageSize) });
+    res.json({ data, total, page, pageSize });
   } catch (err) { next(err); }
 });
 
@@ -117,6 +129,13 @@ attachementsRouter.get("/:id", async (req: Request, res: Response, next: NextFun
   try {
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id }, include: includeAll });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    // Isolation entreprise : via le décompte parent
+    if (req.user?.role === "ENTREPRISE") {
+      const dec = await prisma.decompte.findUnique({ where: { id: att.decompteId }, select: { entrepriseId: true } });
+      if (!dec || dec.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
+        throw new ApiError(404, "Attachement non trouvé");
+      }
+    }
     res.json(att);
   } catch (err) { next(err); }
 });
@@ -225,6 +244,13 @@ attachementsRouter.post("/:id/soumettre", async (req: Request, res: Response, ne
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id }, include: { lignes: true, medias: true } });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    // Isolation entreprise : seul le propriétaire peut soumettre son attachement
+    if (req.user.role === "ENTREPRISE") {
+      const dec = await prisma.decompte.findUnique({ where: { id: att.decompteId }, select: { entrepriseId: true } });
+      if (!dec || dec.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
+        throw new ApiError(403, "Cet attachement n'appartient pas à votre entreprise");
+      }
+    }
     if (att.statut !== "BROUILLON" && att.statut !== "DEMANDE_CORRECTION") {
       throw new ApiError(400, `Statut ${att.statut} ne peut pas être soumis`);
     }

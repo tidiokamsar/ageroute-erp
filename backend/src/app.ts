@@ -27,7 +27,16 @@ import { conformiteRouter } from "./modules/conformite/conformite.routes";
 import { garantiesRouter } from "./modules/garanties/garanties.routes";
 import { receptionsRouter } from "./modules/receptions/receptions.routes";
 import { bpmnRouter } from "./modules/bpmn/bpmn.routes";
+import { delegationsRouter } from "./modules/delegations/delegations.routes";
+import { exportRouter } from "./modules/export/export.routes";
+import { fundingRouter } from "./modules/funding/funding.routes";
+import { portailRouter } from "./modules/portail/portail.routes";
+import { revisionRouter } from "./modules/revision/revision.routes";
+import { searchRouter } from "./modules/search/search.routes";
+import { signatureAuditRouter } from "./modules/signature-audit/signature-audit.routes";
+import { uploadsRouter } from "./modules/uploads/uploads.routes";
 import { requireAuth } from "./middleware/auth.middleware";
+import { checkModuleAccess } from "./middleware/moduleAccess.middleware";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 import { prisma } from "./lib/prisma";
 import { logAudit } from "./lib/audit";
@@ -40,6 +49,16 @@ export function createApp() {
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
   app.use(express.json({ limit: "10mb" }));
   app.use(morgan(env.NODE_ENV === "development" ? "dev" : "combined"));
+
+  // Garde-fou global — plafond d'appels API par adresse IP (anti-abus,
+  // anti-énumération). Le /api/auth/login conserve sa limite stricte dédiée.
+  app.use("/api", rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 500,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Trop de requêtes — réessayez plus tard" },
+  }));
 
   app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: "Trop de tentatives" } }));
 
@@ -70,34 +89,56 @@ export function createApp() {
   });
 
   app.use("/api/auth", authRouter);
-  app.use("/api/entreprises", entreprisesRouter);
-  app.use("/api/marches", marchesRouter);
-  app.use("/api/marches/:marcheId/bpu", bpuRouter);
-  app.use("/api/marches/:marcheId/os", osRouter);
-  app.use("/api/decomptes", decomptesRouter);
-  app.use("/api/attachements", attachementsRouter);
-  app.use("/api/dashboard", dashboardRouter);
+
+  // ─── Contrôle d'accès par module (override administrateur, §P0-4 AGENTS.md) ──
+  // Piège documenté : requireAuth doit TOUJOURS précéder checkModuleAccess,
+  // sinon req.user est indéfini et tout le monde reçoit 401.
+  // checkModuleAccess ne bloque que les retraits explicites (non régressif) ;
+  // le rôle continue de décider par défaut, l'ADMIN n'est jamais bloqué.
+  app.use("/api/entreprises", requireAuth, checkModuleAccess("entreprises"), entreprisesRouter);
+  app.use("/api/marches", requireAuth, checkModuleAccess("marches"), marchesRouter);
+  app.use("/api/marches/:marcheId/bpu", requireAuth, checkModuleAccess("marches"), bpuRouter);
+  app.use("/api/marches/:marcheId/os", requireAuth, checkModuleAccess("marches"), osRouter);
+  app.use("/api/decomptes", requireAuth, checkModuleAccess("decomptes"), decomptesRouter);
+  app.use("/api/attachements", requireAuth, checkModuleAccess("attachements"), attachementsRouter);
+  app.use("/api/dashboard", requireAuth, checkModuleAccess("dashboard"), dashboardRouter);
+  // users : ADMIN exigé au niveau du routeur (aucune clé de module nécessaire)
   app.use("/api/users", usersRouter);
-  app.use("/api/workflow", workflowRouter);
+  app.use("/api/workflow", requireAuth, checkModuleAccess("workflow"), workflowRouter);
+  // bpmn = même espace fonctionnel « workflow » (tâches + supervision)
+  app.use("/api/bpmn", requireAuth, checkModuleAccess("workflow"), bpmnRouter);
+  // notifications : personnelles, authentification seule
   app.use("/api/notifications", notificationsRouter);
-  app.use("/api/routier", routierRouter);
-  app.use("/api/paiements", paiementsRouter);
-  app.use("/api/signature", signatureRouter);
+  app.use("/api/routier", requireAuth, checkModuleAccess("routier"), routierRouter);
+  app.use("/api/paiements", requireAuth, checkModuleAccess("paiements"), paiementsRouter);
+  app.use("/api/signature", requireAuth, checkModuleAccess("signatures"), signatureRouter);
+  app.use("/api/signature-audit", requireAuth, checkModuleAccess("signatures"), signatureAuditRouter);
   // §6 CDC — référentiels projets + avenants
-  app.use("/api/projets", projetsRouter);
-  app.use("/api/avenants", avenantsRouter);
+  app.use("/api/projets", requireAuth, checkModuleAccess("projets"), projetsRouter);
+  app.use("/api/avenants", requireAuth, checkModuleAccess("avenants"), avenantsRouter);
   // §16 CDC — circuits financiers post-DG
-  app.use("/api/circuit-financier", circuitFinancierRouter);
+  app.use("/api/circuit-financier", requireAuth, checkModuleAccess("financier"), circuitFinancierRouter);
   // §22 CDC — paramétrage métier
-  app.use("/api/parametrage", parametrageRouter);
-  // §CDC — Conformité entreprise (score, blocage, historique)
-  app.use("/api/conformite", conformiteRouter);
+  app.use("/api/parametrage", requireAuth, checkModuleAccess("parametrage"), parametrageRouter);
+  // §CDC — Conformité entreprise (score, blocage, historique) — rôles en route
+  app.use("/api/conformite", requireAuth, conformiteRouter);
   // Gestion des Garanties marchés
-  app.use("/api/garanties", garantiesRouter);
+  app.use("/api/garanties", requireAuth, checkModuleAccess("garanties"), garantiesRouter);
   // Gestion des Réceptions OPR / Provisoire / Définitive
-  app.use("/api/receptions", receptionsRouter);
-  // Moteur BPMN générique — 5 modules (Projet/Marché/Attachement/Décompte/Conformité)
-  app.use("/api/bpmn", bpmnRouter);
+  app.use("/api/receptions", requireAuth, checkModuleAccess("receptions"), receptionsRouter);
+  // ─── Modules restaurés le 17/08/2026 ─────────────────────────────────────────
+  // Présents dans la source mais non montés dans l'import du 13/08 (features 404).
+  app.use("/api/delegations", requireAuth, checkModuleAccess("delegations"), delegationsRouter);
+  // export : transversal (lecture multi-modules), authentification seule
+  app.use("/api/export", requireAuth, exportRouter);
+  app.use("/api/funding", requireAuth, checkModuleAccess("financements"), fundingRouter);
+  // portail entreprise : rôle contrôlé en routeur (entrepriseOnly)
+  app.use("/api/portail", portailRouter);
+  app.use("/api/revision", requireAuth, checkModuleAccess("revision"), revisionRouter);
+  // recherche globale : authentification + périmètre d'affectation vérifiés en handler
+  app.use("/api/search", searchRouter);
+  // Pièces jointes : dépôt authentifié + téléchargement par URL signée éphémère (P0-2)
+  app.use("/api/uploads", uploadsRouter);
   // Résumé public agrégé pour l'intégration SharePoint (SIGTIR) — lecture seule, sans auth.
   // N'expose que des agrégats et quelques décomptes récents (déjà consultable via /api/public/marche/:numContrat).
   app.get("/api/public/sigtir-summary", async (_req, res, next) => {
@@ -166,13 +207,26 @@ export function createApp() {
     } catch (err) { next(err); }
   });
 
-  // Audit log endpoint
-  app.get("/api/audit", requireAuth, async (req, res, next) => {
+  // Audit log endpoint — filtres optionnels (action, entité, utilisateur, période)
+  app.get("/api/audit", requireAuth, checkModuleAccess("audit"), async (req, res, next) => {
     try {
+      const where: Record<string, unknown> = {};
+      if (req.query.action)     where.action     = String(req.query.action);
+      if (req.query.entityType) where.entityType = String(req.query.entityType);
+      if (req.query.entityId)   where.entityId   = String(req.query.entityId);
+      if (req.query.userId)     where.userId     = String(req.query.userId);
+      if (req.query.du || req.query.au) {
+        where.createdAt = {
+          ...(req.query.du ? { gte: new Date(String(req.query.du)) } : {}),
+          ...(req.query.au ? { lte: new Date(`${String(req.query.au)}T23:59:59.999Z`) } : {}),
+        };
+      }
+      const take = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
       const logs = await prisma.auditLog.findMany({
+        where,
         include: { user: { select: { nomComplet: true, email: true } } },
         orderBy: { createdAt: "desc" },
-        take: Number(req.query.limit) || 100,
+        take,
       });
       res.json(logs);
     } catch (err) { next(err); }

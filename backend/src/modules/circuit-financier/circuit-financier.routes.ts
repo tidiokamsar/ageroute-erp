@@ -9,6 +9,7 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
+import { rolesEffectifs } from "../../lib/delegations";
 import { z } from "zod";
 
 export const circuitFinancierRouter = Router();
@@ -112,8 +113,9 @@ circuitFinancierRouter.post("/:circuitId/etape", async (req: Request, res: Respo
     const etapeCourante = circuit.etapes[circuit.etapeActuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante");
 
-    // Vérifier que l'utilisateur a le bon rôle (ou ADMIN)
-    if (req.user.role !== "ADMIN" && req.user.role !== etapeCourante.roleOuService as never) {
+    // Vérifier que l'utilisateur a le bon rôle (ou ADMIN) — délégations actives incluses
+    const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
+    if (req.user.role !== "ADMIN" && !mesRoles.includes(etapeCourante.roleOuService as string)) {
       throw new ApiError(403, `Cette étape requiert le service ${etapeCourante.roleOuService}`);
     }
 
