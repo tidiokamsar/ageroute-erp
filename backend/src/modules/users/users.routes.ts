@@ -80,3 +80,55 @@ usersRouter.delete("/:id", async (req: Request, res: Response, next: NextFunctio
     res.status(204).send();
   } catch (err) { next(err); }
 });
+
+// ─── Affectations marchés (périmètre de visibilité MISSION/TECHNIQUE/BAILLEUR) ─
+// Sans affectation, ces rôles voient TOUS les marchés — l'administrateur
+// restreint ici leur périmètre aux marchés concernés.
+usersRouter.get("/:id/affectations", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, role: true, nomComplet: true } });
+    if (!user) throw new ApiError(404, "Utilisateur introuvable");
+    const affectations = await prisma.marcheAffectation.findMany({
+      where: { userId: req.params.id },
+      select: { id: true, marcheId: true, marche: { select: { reference: true, intitule: true, financement: true, statut: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+    res.json({ user, scopable: ["MISSION", "TECHNIQUE", "BAILLEUR"].includes(user.role), affectations });
+  } catch (err) { next(err); }
+});
+
+usersRouter.put("/:id/affectations", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentification requise");
+    const { marcheIds } = z.object({ marcheIds: z.array(z.string().uuid()).max(500) }).parse(req.body);
+
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, role: true } });
+    if (!user) throw new ApiError(404, "Utilisateur introuvable");
+    if (!["MISSION", "TECHNIQUE", "BAILLEUR"].includes(user.role)) {
+      throw new ApiError(400, `Le rôle ${user.role} n'est pas soumis au périmètre d'affectation (concernés : MISSION, TECHNIQUE, BAILLEUR)`);
+    }
+    if (marcheIds.length > 0) {
+      const existants = await prisma.marche.count({ where: { id: { in: marcheIds }, deletedAt: null } });
+      if (existants !== marcheIds.length) throw new ApiError(400, "Un ou plusieurs marchés sont introuvables");
+    }
+
+    const avant = await prisma.marcheAffectation.findMany({ where: { userId: req.params.id }, select: { marcheId: true } });
+    const ancienneListe = avant.map((a) => a.marcheId);
+
+    await prisma.$transaction([
+      prisma.marcheAffectation.deleteMany({ where: { userId: req.params.id, marcheId: { notIn: marcheIds } } }),
+      prisma.marcheAffectation.createMany({
+        data: marcheIds
+          .filter((mid) => !ancienneListe.includes(mid))
+          .map((marcheId) => ({ userId: req.params.id, marcheId })),
+        skipDuplicates: true,
+      }),
+    ]);
+
+    await logAudit({
+      userId: req.user.id, action: "UPDATE", entityType: "UserAffectations", entityId: req.params.id,
+      before: { marcheIds: ancienneListe }, after: { marcheIds },
+    });
+    res.json({ message: `${marcheIds.length} marché(s) affecté(s) — périmètre de visibilité mis à jour` });
+  } catch (err) { next(err); }
+});

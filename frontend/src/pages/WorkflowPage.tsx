@@ -5,6 +5,7 @@
  * DG/ADMIN : vue superviseur avec toutes les instances en cours
  */
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, parseApiError, fmtGnf } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -154,6 +155,7 @@ function AuditTimeline({ actions }: { actions: WorkflowAction[] }) {
 
 export default function WorkflowPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const role = user?.role ?? "";
   // ROLES_SUPERV est défini au niveau module — l'ancienne référence à une constante
@@ -335,6 +337,7 @@ export default function WorkflowPage() {
                         <tr key={inst.id} className={`hover:bg-gray-50/50 transition-colors ${retard ? "bg-red-50/30" : suspended ? "bg-purple-50/30" : ""}`}>
                           <td className="px-4 py-3">
                             <span className="font-mono font-bold text-navy">{inst.decompte?.reference ?? "—"}</span>
+                            {(inst as unknown as { source?: string }).source === "BPMN" && <span className="ml-1 text-[9px] text-blue-600 bg-blue-50 px-1 py-0.5 rounded" title="Déposé via le portail entreprise — à traiter depuis la fiche décompte">Portail</span>}
                             {suspended && <span className="ml-1 text-[9px] text-purple-600 bg-purple-50 px-1 py-0.5 rounded">Suspendu</span>}
                           </td>
                           <td className="px-4 py-3 text-gray-600 max-w-[120px] truncate">{inst.decompte?.marche.reference}</td>
@@ -356,7 +359,13 @@ export default function WorkflowPage() {
                           <td className="px-4 py-3"><StatutBadge statut={inst.statut} /></td>
                           <td className="px-4 py-3">
                             <div className="flex gap-1">
-                              <Button size="sm" variant="ghost" onClick={() => setSelected({ ...inst, peutAgir: false })}>
+                              <Button size="sm" variant="ghost" onClick={() => {
+                                if ((inst as unknown as { source?: string }).source === "BPMN") {
+                                  navigate(`/decomptes?id=${(inst as unknown as { decompte?: { id?: string } }).decompte?.id ?? ""}`);
+                                } else {
+                                  setSelected({ ...inst, peutAgir: false });
+                                }
+                              }}>
                                 <Eye className="h-3.5 w-3.5" />
                               </Button>
                               {inst.peutAgir && (
