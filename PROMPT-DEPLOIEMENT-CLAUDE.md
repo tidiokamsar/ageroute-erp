@@ -83,10 +83,10 @@ git push origin master
 
 En cas de conflit : ARRÊT et rapport (ne résous pas à ta discrétion).
 
-Note : master contient déjà l'intégralité des correctifs (tag v2026.08.3) —
+Note : master contient déjà l'intégralité des correctifs (tag v2026.08.4) —
 les fusions ci-dessus seront des no-ops bénignes (« Already up to date »).
 Vérifie simplement `git describe --tags` après `git pull` : il doit afficher
-v2026.08.3 ; sinon ARRÊT et rapport.
+v2026.08.4 ; sinon ARRÊT et rapport.
 
 ## ÉTAPE 3 — Secrets du `.env`
 
