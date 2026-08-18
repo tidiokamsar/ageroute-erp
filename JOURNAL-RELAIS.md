@@ -21,6 +21,53 @@
 
 ---
 
+---
+
+## RELAIS N°5 — 18/08/2026 — de ZCode → Claude (relecture FIX-1 périmètres, hors programme mais prioritaire — retour utilisateur réel)
+
+### Rapport de fin de lot — FIX-1 « Vues à traiter + double moteur + périmètres » (ZCode)
+
+- **Branche** : `fix/perimetres-roles` (base master, indépendante des branches
+  regles — fusionnable dans n'importe quel ordre, zones de code disjointes
+  dans decomptes.service.ts)
+- **Problèmes constatés en recette** :
+  1. DG voyait TOUS les décomptes en « À traiter » (exemption superviseur) ;
+  2. Mission/DAF voyaient parfois AUCUNE tâche — les dépôts du PORTAIL
+     entreprise alimentent bpmn_instances, jamais workflow_instances : les
+     deux moteurs ne parlaient pas aux mêmes listes ;
+  3. BAILLEUR et MISSION voyaient des marchés non concernés — BAILLEUR n'était
+     pas scopé, et AUCUNE route ne permettait de gérer les affectations.
+- **Correctifs** : DG filtré comme les autres (ADMIN seul global) ;
+  fusion des deux moteurs dans « À traiter » et « Mes tâches » (badge
+  « Portail », traitement via fiche décompte) ; ROLES_SCOPES += BAILLEUR ;
+  GET/PUT /api/users/:id/affectations (ADMIN, transactionnel, audité).
+- **Vérifications** : tsc 0 erreur ; 42/42 sur master (les 79 des branches
+  regles restent vertes sur leurs branches) ; build frontend OK.
+
+### PROMPT pour CLAUDE — relecture FIX-1 (prioritaire : retour utilisateur)
+
+```text
+Tu es relecteur du correctif FIX-1 de l'ERP AGEROUTE (retour de recette
+utilisateur sur les vues par rôle). Référence : JOURNAL-RELAIS.md relais N°5.
+
+Objet : branche fix/perimetres-roles (depuis master).
+
+1. git fetch && git checkout fix/perimetres-roles
+2. Relecture :
+   a. DoD : cd backend && npx tsc ; node scripts/run-tests.mjs (42/42) ;
+      cd frontend && npm run build ;
+   b. Double moteur : vérifier la cohérence ordre/etape entre les deux
+      requêtes brutes (bs.ordre = bi.etape_actuelle + 1, is_system exclu) ;
+      vérifier que le fallback try/catch des tables bpmn ne masque pas
+      d'erreur de logique (catch limité aux tables absentes) ;
+   c. Affectations PUT : transaction, validation des marchés, audit
+      avant/après, refus des rôles non scopables ;
+   d. WorkflowPage : navigation BPMN → /decomptes?id=... sans casser la
+      modale des instances workflow classiques.
+3. Verdict + consigne du RELAIS suivant (en tête du journal) : rappel de
+   l'ordre de fusion global (regles empilées PUIS fix/perimetres-roles, ou
+   l'inverse — zones disjointes) + mise à jour du tableau §4 (ligne FIX-1).
+```
 ## RELAIS N°4 — 18/08/2026 — de ZCode → Claude (relecture L1.2 ; L0.2 spec update)
 
 ### Rapport de fin de lot — L1.2 « Snapshot + gel » (ZCode)
