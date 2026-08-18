@@ -1632,23 +1632,29 @@ model RegleGestion {
   valeur       String
   valeurDefaut String
   dateEffet    DateTime @default(now())
-  statut       String   @default("BROUILLON") // BROUILLON | VALIDE | ARCHIVE
+  statut       String   @default("BROUILLON") // BROUILLON | SOUMISE | APPROUVEE | REJETEE | GELEE | ARCHIVE
   saisiPar     String?
   validePar    String?
   valideAt     DateTime?
   motif        String   @default("")
+  motifRejet   String?  @map("motifRejet")
+  soumisAt     DateTime? @map("soumisAt")
+  soumisPar    String?  @map("soumisPar")
   version      Int      @default(1)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  historiques  RegleGestionHistorique[]
 
   @@unique([cle, portee, porteeId, dateEffet, version])
   @@index([cle, portee, porteeId, dateEffet(sort: Desc)])
+  @@index([statut, portee, porteeId])
   @@map("regle_gestion")
 }
 
 model RegleGestionHistorique {
   id         String   @id @default(uuid())
   regleId    String
+  regle      RegleGestion @relation(fields: [regleId], references: [id])
   cle        String
   ancienne   String?
   nouvelle   String

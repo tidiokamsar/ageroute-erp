@@ -9,10 +9,12 @@ import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
 import { REGLES_DEFAUT, type CleRegles } from "../../lib/regles";
 import { simulerAvecSurcharges } from "./simulateur";
+import { reglesCrudRouter } from "./regles-crud.routes";
 import { z } from "zod";
 
 export const parametrageRouter = Router();
 parametrageRouter.use(requireAuth);
+parametrageRouter.use("/", reglesCrudRouter);
 
 // Paramètres par défaut (initialisés si absents)
 const DEFAULTS: { cle: string; valeur: string; type: string; categorie: string; libelle: string }[] = [
