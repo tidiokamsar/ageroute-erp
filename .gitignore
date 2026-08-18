@@ -6,6 +6,8 @@ build/
 !.env.example
 *.tar.gz
 *.dump
-uploads/
+# Televersements a l'execution — surtout PAS le module source backend/src/modules/uploads/
+/backend/uploads/
+/uploads/
 .DS_Store
 *.log
