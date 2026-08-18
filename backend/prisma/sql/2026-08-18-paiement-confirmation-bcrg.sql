@@ -14,5 +14,5 @@ ALTER TABLE paiements ADD COLUMN IF NOT EXISTS "confirmeAt" TIMESTAMP(3);
 
 COMMENT ON COLUMN paiements."montantReelGnf" IS 'F10 — montant réel transféré par la BCRG (peut différer du montant ordonnancé)';
 COMMENT ON COLUMN paiements."dateReelleTransfert" IS 'F10 — date réelle du virement bancaire (confirmée par la BCRG)';
-COMMENT ON COLUMN paiements."confirmePar" IS 'F10 — email de l\'agent BCRG qui confirme le virement';
+COMMENT ON COLUMN paiements."confirmePar" IS 'F10 — email de l''agent BCRG qui confirme le virement';
 COMMENT ON COLUMN paiements."confirmeAt" IS 'F10 — horodatage de la confirmation bancaire';
