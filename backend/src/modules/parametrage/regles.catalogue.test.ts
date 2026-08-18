@@ -9,6 +9,7 @@ import {
   peutValiderRegle,
   validerDemande,
   validerEtiquettes,
+  validerPonderations,
   validerValeur,
 } from "./regles.catalogue";
 
@@ -220,4 +221,41 @@ test("étiquettes — une demande complète est recevable de bout en bout", () =
     motif: "Terminologie imposée par la Banque africaine de développement",
   }, AUJOURDHUI);
   assert.deepEqual(erreurs, []);
+});
+
+// ─── A10 — Pondérations du score de conformité (lot L3.2) ────────────────────
+
+test("pondérations — le jeu par défaut totalise 100 et passe la validation", () => {
+  assert.equal(validerPonderations({ NIF: 15, TVA: 15, FISC: 20, SOC: 15, DOCS: 20, CAUTION: 15 }), null);
+  assert.equal(validerValeur("CF_SCORE_PONDERATIONS", REGLES_DEFAUT.CF_SCORE_PONDERATIONS), null);
+});
+
+test("pondérations — un critère inconnu est refusé (sinon ignoré en silence)", () => {
+  // Le service applique { ...defaut, ...saisie } : une clé mal orthographiée
+  // n'aurait aucun effet et le score resterait au défaut sans alerte.
+  const message = validerPonderations({ NIF: 15, ANCIENNETE: 10 });
+  assert.match(String(message), /Critère de conformité inconnu : ANCIENNETE/);
+});
+
+test("pondérations — un poids hors bornes ou non numérique est refusé", () => {
+  assert.match(String(validerPonderations({ NIF: -5 })), /entre 0 et 100/);
+  assert.match(String(validerPonderations({ NIF: 120 })), /entre 0 et 100/);
+  assert.match(String(validerPonderations({ NIF: "quinze" })), /entre 0 et 100/);
+});
+
+test("pondérations — un jeu complet ne totalisant pas 100 est refusé", () => {
+  const message = validerPonderations({ NIF: 10, TVA: 10, FISC: 10, SOC: 10, DOCS: 10, CAUTION: 10 });
+  assert.match(String(message), /doit faire 100 \(actuellement 60\)/);
+});
+
+test("pondérations — un jeu PARTIEL est accepté (complété par les défauts)", () => {
+  // Ne remonter qu'un critère est un usage légitime : le service complète le
+  // reste. On ne peut donc pas exiger un total de 100 dans ce cas.
+  assert.equal(validerPonderations({ FISC: 25 }), null);
+});
+
+test("pondérations — structure aberrante refusée", () => {
+  assert.match(String(validerPonderations([])), /doivent être un objet/);
+  assert.match(String(validerPonderations("NIF=15")), /doivent être un objet/);
+  assert.match(String(validerPonderations(null)), /doivent être un objet/);
 });

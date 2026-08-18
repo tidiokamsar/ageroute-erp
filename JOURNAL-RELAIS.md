@@ -21,6 +21,99 @@
 
 ---
 
+## RELAIS N°9 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L3.2)
+
+### Rapport de fin de lot — L3.2 « UI onglets Circuits & états + Conformité »
+
+**Branche** : `feat/regles-l02-api`.
+**Vérification** : backend `tsc` 0 erreur, `run-tests.mjs` **157/157** (151 avant)
+sous `node:20-slim` avec openssl ; front `docker build ./frontend` **réussi**.
+
+### Constat de départ
+
+Les quatre catégories étaient déjà affichées par l'écran L0.4. Ce qui manquait,
+c'est que les trois règles **composites** — libellés d'états, matrices de rôles,
+pondérations du score — s'y éditaient en **JSON brut**. Demander à la DAF
+d'écrire des accolades, c'est transformer un arbitrage métier en erreur
+technique dès la première virgule oubliée.
+
+### Livré — `frontend/src/pages/ReglesEditeurs.tsx`
+
+- **A9, libellés d'états** : un dépliant par domaine, une ligne par code, avec
+  le libellé livré en repère et un champ de surcharge. Champ vidé = retour au
+  défaut. Compteur de personnalisations par domaine.
+- **A10, pondérations** : un champ par critère, **total calculé en direct** et
+  encadré en rouge tant qu'il ne fait pas 100 — avec l'explication : un total
+  différent rendrait les scores incomparables d'une entreprise à l'autre et
+  fausserait les seuils.
+- **A8, matrices de rôles** : pastilles cliquables, et surtout l'affichage
+  **en regard des deux autres fonctions du circuit**, avec un avertissement
+  nommant les rôles qui cumuleraient ordonnancement et paiement. La séparation
+  ordonnateur/comptable devient visible au moment de la décision, pas au
+  moment du refus. Alerte également si la liste est vidée.
+
+Chaque éditeur produit exactement la même chaîne que la saisie manuelle et la
+renvoie au parcours normal (BROUILLON → quatre yeux) : **un seul chemin
+d'écriture, donc un seul endroit à auditer**.
+
+### Garde-fous ajoutés côté serveur
+
+L'écran ne suffit pas : l'API doit refuser ce que l'écran empêche.
+
+- **`CF_SCORE_PONDERATIONS`** : critère inconnu refusé. Le service applique
+  `{ ...défaut, ...saisie }` — une clé mal orthographiée serait donc **ignorée
+  en silence**, le score resterait au défaut et personne ne le saurait. Poids
+  bornés à [0, 100]. Total exigé à 100 **uniquement si le jeu est complet** :
+  ne remonter qu'un critère est un usage légitime, complété par les défauts.
+- **`CF_SEUIL_CONFORME` / `CF_SEUIL_REGULARISER`** : cohérence croisée. Elle ne
+  peut pas se vérifier règle par règle, donc la valeur proposée est confrontée
+  à celle **effectivement en vigueur** pour l'autre seuil. Un seuil « conforme »
+  inférieur ou égal au seuil « à régulariser » est rejeté avec les deux valeurs
+  dans le message.
+- 6 tests supplémentaires sur les pondérations.
+
+### Reste à faire
+
+Vérification visuelle non effectuée — session authentifiée requise, et je ne
+saisis pas de mot de passe dans un formulaire. À couvrir au déploiement, en
+même temps que celle du lot L2.2.
+
+### PROMPT pour la DSI (humain) — fusion
+
+```bash
+git fetch origin
+git checkout master && git pull --ff-only origin master
+git merge --no-ff origin/feat/regles-l02-api -m "merge: L0.2 API, L0.4 UI, L1.3 matrice, L2.2 libelles, L3.2 editeurs"
+git push origin master
+```
+
+Aucune migration SQL. Comportement par défaut inchangé.
+
+### PROMPT pour le relecteur — lot L3.2
+
+```text
+Tu es relecteur du lot L3.2 du programme de paramétrage A1-A10.
+Références : PLAN-TRAVAIL-AGENT-PARAMETRAGE.md §3, JOURNAL-RELAIS.md (RELAIS
+N°9). Objet : branche feat/regles-l02-api.
+
+1. git fetch && git checkout feat/regles-l02-api
+2. Checklist :
+   a. DoD : backend `npx tsc` + `run-tests.mjs` 157/157 dans node:20-slim AVEC
+      openssl ; `docker build ./frontend` ;
+   b. Chemin unique : vérifie qu'aucun éditeur n'écrit en base directement —
+      tous doivent passer par POST /regles puis la validation à quatre yeux ;
+   c. Garde-fous serveur : tente via curl (session ADMIN) un CF_SCORE_
+      PONDERATIONS avec un critère inventé, un total à 60, puis un
+      CF_SEUIL_CONFORME inférieur au seuil « à régulariser » — les trois
+      doivent être refusés par l'API, pas seulement par l'écran ;
+   d. A8 : l'avertissement de cumul se déclenche-t-il quand un rôle non-ADMIN
+      figure à la fois en ordonnancement et en paiement ?
+   e. VÉRIFICATION VISUELLE sur session authentifiée (avec L2.2).
+3. Verdict : APPROUVÉ (avec remarques) ou REFUS motivé. Consigne le RELAIS N°10.
+```
+
+---
+
 ## RELAIS N°8 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L2.2)
 
 ### Rapport de fin de lot — L2.2 « Libellés d'états officiels » (A9)

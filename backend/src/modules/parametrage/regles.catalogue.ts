@@ -101,6 +101,36 @@ export function validerEtiquettes(valeur: unknown): string | null {
   return null;
 }
 
+/**
+ * Critères du score de conformité (A10 — lot L3.1). Le service applique
+ * `{ ...POIDS_DEFAUT, ...saisie }` : une clé mal orthographiée serait donc
+ * ignorée en silence et le score resterait au défaut sans que personne ne le
+ * sache. On refuse à la saisie plutôt que de laisser passer.
+ */
+export const CRITERES_CONFORMITE = ["NIF", "TVA", "FISC", "SOC", "DOCS", "CAUTION"] as const;
+
+export function validerPonderations(valeur: unknown): string | null {
+  if (valeur === null || typeof valeur !== "object" || Array.isArray(valeur)) {
+    return "Les pondérations doivent être un objet { CRITERE: nombre }";
+  }
+  const entrees = Object.entries(valeur as Record<string, unknown>);
+  for (const [critere, poids] of entrees) {
+    if (!CRITERES_CONFORMITE.includes(critere as (typeof CRITERES_CONFORMITE)[number])) {
+      return `Critère de conformité inconnu : ${critere} (admis : ${CRITERES_CONFORMITE.join(", ")})`;
+    }
+    if (typeof poids !== "number" || !Number.isFinite(poids) || poids < 0 || poids > 100) {
+      return `Pondération invalide pour ${critere} : un nombre entre 0 et 100 est attendu`;
+    }
+  }
+  // Un total différent de 100 rendrait le score incomparable d'une entreprise
+  // à l'autre et fausserait les seuils CF_SEUIL_*.
+  if (entrees.length === CRITERES_CONFORMITE.length) {
+    const total = entrees.reduce((s, [, p]) => s + (p as number), 0);
+    if (Math.round(total) !== 100) return `Le total des pondérations doit faire 100 (actuellement ${total})`;
+  }
+  return null;
+}
+
 /** Valide une valeur au regard du type et des options de la clé. */
 export function validerValeur(cle: CleRegles, valeur: string): string | null {
   const meta = METADONNEES[cle];
@@ -145,6 +175,7 @@ export function validerValeur(cle: CleRegles, valeur: string): string | null {
       // afficherait des libellés vides ou « [object Object] » dans toute
       // l'application, sans erreur visible côté serveur.
       if (cle === "ETQ_MAPPINGS") return validerEtiquettes(parse);
+      if (cle === "CF_SCORE_PONDERATIONS") return validerPonderations(parse);
       return null;
     }
   }

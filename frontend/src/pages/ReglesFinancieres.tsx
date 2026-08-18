@@ -18,6 +18,7 @@ import { Modal } from "../components/ui/Modal";
 import { Badge } from "../components/ui/Badge";
 import { toast } from "../components/ui/Toast";
 import { ChevronDown, ChevronRight, Check, FlaskConical, History, Send } from "lucide-react";
+import { EditeurEtiquettes, EditeurPonderations, EditeurRoles } from "./ReglesEditeurs";
 
 interface OptionsRegle { choix?: string[]; min?: number; max?: number; valeurs?: string[] }
 interface DemandeEnAttente {
@@ -159,7 +160,7 @@ export function ReglesFinancieres() {
                 <div className="space-y-4 border-t border-gray-100 bg-gray-50 p-4">
                   <div className="grid gap-3 md:grid-cols-2">
                     <FormField label="Nouvelle valeur" required>
-                      <SaisieValeur regle={regle} valeur={b.valeur} onChange={(v) => majBrouillon(regle.cle, regle.valeurEffective, "valeur", v)} />
+                      <SaisieValeur regle={regle} valeur={b.valeur} toutesRegles={data?.regles} onChange={(v) => majBrouillon(regle.cle, regle.valeurEffective, "valeur", v)} />
                     </FormField>
 
                     <FormField label="Portée">
@@ -294,7 +295,20 @@ export function ReglesFinancieres() {
 }
 
 /** Saisie adaptée au type déclaré par le catalogue (L0.2). */
-function SaisieValeur({ regle, valeur, onChange }: { regle: Regle; valeur: string; onChange: (v: string) => void }) {
+function SaisieValeur({ regle, valeur, onChange, toutesRegles }: { regle: Regle; valeur: string; onChange: (v: string) => void; toutesRegles?: Regle[] }) {
+  // L3.2 — éditeurs dédiés pour les règles qui portent une structure.
+  if (regle.cle === "ETQ_MAPPINGS") return <EditeurEtiquettes valeur={valeur} onChange={onChange} />;
+  if (regle.cle === "CF_SCORE_PONDERATIONS") return <EditeurPonderations valeur={valeur} onChange={onChange} />;
+  if (regle.cle.startsWith("WF_ROLES_")) {
+    const autres = (toutesRegles ?? [])
+      .filter((r) => r.cle.startsWith("WF_ROLES_") && r.cle !== regle.cle)
+      .map((r) => ({
+        libelle: r.libelle,
+        roles: r.valeurEffective.split(",").map((x) => x.trim()).filter(Boolean),
+      }));
+    return <EditeurRoles valeur={valeur} onChange={onChange} autresFonctions={autres} />;
+  }
+
   if (regle.type === "ENUM") {
     return (
       <Select value={valeur} onChange={(e) => onChange(e.target.value)}>

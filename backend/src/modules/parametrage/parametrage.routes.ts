@@ -201,6 +201,20 @@ parametrageRouter.post("/regles", requireRole("ADMIN", "DAF"), async (req: Reque
     if (erreurs.length) throw new ApiError(400, erreurs.join(" ; "));
 
     const cle = String(req.body.cle) as CleRegles;
+
+    // Cohérence entre les deux seuils de conformité (A10). Elle ne peut pas se
+    // vérifier règle par règle : on confronte la valeur proposée à celle qui
+    // est effectivement en vigueur pour l'autre seuil.
+    if (cle === "CF_SEUIL_CONFORME" || cle === "CF_SEUIL_REGULARISER") {
+      const effectives = await chargerRegles();
+      const propose = Number(req.body.valeur);
+      const conforme = cle === "CF_SEUIL_CONFORME" ? propose : Number(effectives.CF_SEUIL_CONFORME);
+      const regulariser = cle === "CF_SEUIL_REGULARISER" ? propose : Number(effectives.CF_SEUIL_REGULARISER);
+      if (Number.isFinite(conforme) && Number.isFinite(regulariser) && conforme <= regulariser) {
+        throw new ApiError(400, `Le seuil « conforme » (${conforme}) doit rester strictement supérieur au seuil « à régulariser » (${regulariser})`);
+      }
+    }
+
     const meta = METADONNEES[cle];
     const portee = String(req.body.portee ?? "GLOBAL");
     const porteeId = portee === "GLOBAL" ? "" : String(req.body.porteeId).trim();
