@@ -5,7 +5,7 @@ import { ApiError } from "./error.middleware";
 declare global {
   namespace Express {
     interface Request {
-      user?: { id: string; email: string; role: string };
+      user?: { id: string; email: string; role: string; nomComplet?: string };
     }
   }
 }
