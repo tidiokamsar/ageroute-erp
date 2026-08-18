@@ -6,7 +6,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "node scripts/run-tests.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:sql": "bash -c 'for f in prisma/sql/*.sql; do [ -e \"$f\" ] || continue; echo \"-- $f\"; psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f \"$f\"; done'",
