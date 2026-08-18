@@ -1,0 +1,121 @@
+# Journal des relais — programme de paramétrage A1 → A10
+
+> **PROTOCOLE DE RELAIS (obligatoire — cf. PLAN-TRAVAIL-AGENT-PARAMETRAGE.md §2.7)**
+> À la FIN de chaque lot, l'agent qui livre consigne dans CE fichier, dans le
+> même commit que sa livraison (ou que la fusion) :
+> 1. **son rapport de fin de lot** — ce qui est fait, branche/commit, résultats
+>    de vérification (tsc, tests Node 20, build), ce qui reste à faire ;
+> 2. **le prompt du prochain lot** pour l'agent suivant — autoportant, prêt à
+>    coller, démarrant uniquement du dépôt et de ce journal.
+>
+> L'entrée suivante s'ajoute EN TÊTE (plus récente en premier). Une entrée
+> consignée n'est jamais réécrite — on la corrige par une nouvelle entrée.
+> Le tableau de suivi (§4 du plan de travail) est mis à jour dans le même
+> commit.
+
+---
+
+## RELAIS N°1 — 18/08/2026 — de ZCode → Claude (relecture), puis DSI (fusion), puis Codex (L0.2)
+
+### Rapport de fin de lot — L0.1 « Socle données + moteur » (ZCode)
+
+- **Branche** : `feat/regles-p0-socle` · **commit** `7e79de3` · base `master@ca0e5bc`
+- **Livré** :
+  - `backend/prisma/sql/2026-08-18-regles-gestion.sql` — tables `regle_gestion`
+    (portée GLOBAL/BAILLEUR/TYPE_MARCHE/MARCHE, date d'effet, statut
+    BROUILLON→VALIDE, motif obligatoire, version, CHECK) et
+    `regle_gestion_historique` (append-only) ;
+  - modèles Prisma `RegleGestion` / `RegleGestionHistorique` (schéma à jour,
+    client régénéré) ;
+  - `backend/src/lib/regles.ts` — registre `REGLES_DEFAUT` (24 clés, valeurs =
+    comportement actuel), `resoudreRegles()` pure (portée → date → version ;
+    BROUILLON/ARCHIVE et dates futures ignorés ; clés inconnues ignorées),
+    `chargerRegles()` avec cache 60 s + `invaliderCacheRegles()`, accès typés
+    `nombreRegles`/`booleenRegles` avec repli sur défaut ;
+  - `backend/src/lib/regles.test.ts` — 9 tests dont l'invariant du programme.
+- **Vérifications** : `npx tsc` 0 erreur · `npm test` **50/50** (41 + 9) sous
+  Node 24 (le lanceur `run-tests.mjs` garantit l'équivalence Node 20).
+- **NON fait (volontairement, hors périmètre L0.1)** : aucune route API, aucune
+  UI, aucune consommation par le moteur de calcul (L1.1), aucune écriture en
+  base — la table vide ne change aucun comportement.
+- **Point d'attention relecteur** : concordance SQL ↔ `schema.prisma`
+  (contrainte unique à cinq colonnes, `portee_id` non nul `DEFAULT ''`).
+
+### PROMPT pour CLAUDE — relecture croisée de L0.1 (à exécuter maintenant)
+
+```text
+Tu es relecteur du lot L0.1 du programme de paramétrage A1-A10 de l'ERP
+AGEROUTE. Références dans le dépôt : PLAN-TRAVAIL-AGENT-PARAMETRAGE.md
+(protocole §2, lot L0.1), PLAN-DEV-PARAMETRAGE-A1-A10.md (architecture §1),
+JOURNAL-RELAIS.md (relais N°1 = rapport de livraison).
+
+Objet : branche feat/regles-p0-socle (commit 7e79de3), base master.
+
+1. git fetch && git checkout feat/regles-p0-socle
+2. Relecture selon la checklist du protocole §2 :
+   a. DoD : cd backend && npx tsc (0 erreur) ; node scripts/run-tests.mjs
+      (50/50) — rejoue-les dans un conteneur node:20-slim avec openssl
+      (conditions du Dockerfile) comme tu sais le faire ;
+   b. Sécurité : rien n'est exposé (aucune route), aucune régression
+      possible table vide ; vérifie l'absence d'évaluation dynamique,
+      de fuite d'information dans les logs, et que le cache n'introduit
+      pas de partage d'état entre requêtes ;
+   c. Concordance : backend/prisma/sql/2026-08-18-regles-gestion.sql ↔
+      modèles du schema.prisma (colonnes, contraintes, index) ;
+   d. Cohérence architecture : lib/regles.ts vs PLAN-DEV §1.2 (résolution,
+      cache, invalidation) ; invariant : REGLES_DEFAUT = constantes
+      historiques de decomptes.service (comparer ligne à ligne).
+3. Verdict : APPROUVÉ (avec remarques éventuelles) ou REFUS (motivé).
+4. Consigne le RELAIS N°2 dans JOURNAL-RELAIS.md (en tête, jamais réécrire) :
+   rapport de relecture + PROMPT pour la DSI (commandes de fusion de la
+   branche dans master après ton approbation, application SQL différée au
+   prochain déploiement avec pg_dump préalable — jamais db push) + PROMPT
+   pour Codex (lot L0.2, spécification autoportante dans le plan §3).
+   Commit sur master et pousse.
+```
+
+### PROMPT pour CODEX — lot L0.2 « API CRUD + 4 yeux » (à exécuter APRÈS fusion de L0.1 dans master)
+
+```text
+Tu réalises le lot L0.2 du programme de paramétrage A1-A10 de l'ERP AGEROUTE.
+Point d'entrée : JOURNAL-RELAIS.md (dernier relais), PLAN-TRAVAIL-AGENT-
+PARAMETRAGE.md (protocole §2 + spécification L0.2 §3), PLAN-DEV-
+PARAMETRAGE-A1-A10.md §1.1/1.3 (modèle et contrat API).
+
+Branche : feat/regles-l02-api depuis master à jour. Interdits absolus :
+prisma db push ; formule financière modifiée sans passer par une règle ;
+suppression d'audit ; messages non français.
+
+À implémenter dans le module parametrage (router-level requireAuth + ADMIN) :
+- GET  /api/parametrage/regles?categorie=&portee= — liste des règles
+  (défauts fusionnés avec les valeurs en base) + dernière modification ;
+- POST /api/parametrage/regles — création ou nouvelle version → statut
+  BROUILLON ; motif ≥ 10 caractères obligatoire ; validation zod : type
+  cohérent avec options (ENUM dans les choix, NUMBER dans min/max,
+  BOOLEAN true/false, MULTI liste de rôles valides) ; portee/porteeId
+  cohérents (portée ≠ GLOBAL ⇒ porteeId requis) ; dateEffet ≥ aujourd'hui ;
+  cle doit exister dans REGLES_DEFAUT (sinon 400) ;
+- POST /api/parametrage/regles/:id/valider — rôle DAF, ou ADMIN différent
+  du saisiPar (quatre yeux) ; passage VALIDE + validePar/valideAt ;
+  écriture simultanée de la ligne regle_gestion_historique (append-only,
+  ancienne valeur, motif) ; logAudit systématique ;
+  appel invaliderCacheRegles() après validation ;
+- Rejets testés : auto-validation, motif court, type incohérent, clé
+  inconnue, date d'effet passée, portée sans porteeId.
+
+DoD : cd backend && npx tsc (0 erreur) ; node scripts/run-tests.mjs (tout
+vert, tests nouveaux inclus) ; comportement par défaut inchangé (aucune
+consommation par le moteur de calcul — c'est L1.1).
+
+À la fin : consigne le RELAIS suivant dans JOURNAL-RELAIS.md — ton rapport
+de fin de lot + le PROMPT pour ZCode (lot L0.3 simulateur, spécification
+§3 du plan) ; même commit que ta livraison ; branche poussée ; mets à jour
+le tableau de suivi §4 du plan.
+```
+
+### Action DSI (humain) — après approbation Claude
+
+Fusionner la branche dans master (`git merge --no-ff feat/regles-p0-socle`),
+mettre à jour le tableau §4, pousser. Le SQL `2026-08-18-regles-gestion.sql`
+sera appliqué en production **au prochain déploiement** uniquement, selon le
+runbook (pg_dump préalable, psql, jamais db push).
