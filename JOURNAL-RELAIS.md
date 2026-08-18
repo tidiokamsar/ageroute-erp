@@ -17,6 +17,74 @@
 
 ---
 
+---
+
+## RELAIS N°3 — 18/08/2026 — de ZCode → Claude (relecture L1.1, cumulable L0.1/L0.3)
+
+### Rapport de fin de lot — L1.1 « Moteur de calcul paramétré » (ZCode)
+
+- **Branche** : `feat/regles-l11-moteur` · **commit** `4e07e7a` · base
+  `feat/regles-l03-simulateur@28555b8` (L0.1 + L0.3 incluses)
+- **Livré** :
+  - `decomptes.calc.regles.ts` : moteur entier pur paramétré A1-A7
+    (assiettes, formule précompte, ARMP, plancher net, pénalités
+    SAISIE/FORMULE plafonnées, avances, arrondis, plafond d'avance) ;
+    résultat aux noms EXACTS des colonnes du modèle Decompte ;
+  - service : copie inline flottante retirée — elle renvoyait des champs
+    inconnus de Prisma (bug préexistant « Unknown arg » sur create/update,
+    corrigé par construction) ; 2 sites → moteur + chargerRegles(portée
+    marché) ;
+  - routes : cascade inline de POST /:id/lignes → moteur ; totaux en
+    BigInt (fin des Number() sur montants) ; net borné selon A4 ;
+  - `lib/regles.ts` : clé RG_PENALITE_ASSIETTE ajoutée (défaut HT).
+- **Vérifications** : `npx tsc` 0 erreur · `npm test` **73/73**.
+- **Preuves clés** : parité BIT À BIT avec la référence officielle
+  `decomptes.calc.ts` (4 cas fixes dont 25 Md GNF + propriété 300 cas
+  aléatoires reproductibles LCG seedé) ; matrice A1×A2×A3 (12) ;
+  équivalences FORMULE↔SAISIE ; la référence officielle est INCHANGÉE.
+- **SIGNALÉ POUR ARBITRAGE DAF (non touché, §3.3)** : `POST /:id/calculate`
+  applique une formule simplifiée divergente (retenue sur HT brut, sans
+  ARMP ni précompte) — harmonisation à décider (lot L1.2/L1.3).
+- **NON fait** : snapshot des règles par décompte et gel (L1.2) ; UI (L0.4).
+
+### PROMPT pour CLAUDE — relecture croisée de L1.1 (cumulable L0.1/L0.3)
+
+```text
+Tu es relecteur du lot L1.1 du programme de paramétrage A1-A10 de l'ERP
+AGEROUTE. Références : JOURNAL-RELAIS.md (relais N°3 = rapport), PLAN-
+TRAVAIL-AGENT-PARAMETRAGE.md (protocole §2 + spécif L1.1), PLAN-DEV-
+PARAMETRAGE-A1-A10.md §1.2.
+
+Objet : branche feat/regles-l11-moteur (commit 4e07e7a), base
+feat/regles-l03-simulateur (L0.1+L0.3 déjà livrées).
+
+1. git fetch && git checkout feat/regles-l11-moteur
+2. Relecture :
+   a. DoD : cd backend && npx tsc (0 erreur) ; node scripts/run-tests.mjs
+      (73/73) — rejouer en conteneur node:20-slim + openssl ;
+   b. PREUVE CENTRALE : parité moteur ↔ decomptes.calc.ts (référence
+      officielle, NON modifiée — vérifier que le fichier est identique au
+      master) ; recalculer à la main un cas (1 000 000 GNF, 18/5/20) ;
+      exécuter la propriété 300 cas et vérifier le caractère reproductible
+      du générateur (LCG seedé 20260818) ;
+   c. Sécurité/cohérence du rebranchement : service et routes chargent les
+      règles via chargerRegles (portée marcheId/bailleur=financement/
+      typeMarche) — vérifier l'absence de boucle d'invalidation du cache,
+      et que create/update du service n'étalent plus de champs inconnus ;
+   d. Vérifier l'anomalie signalée (POST /:id/calculate formule divergente)
+      n'a PAS été modifiée — signalée pour arbitrage DAF uniquement.
+3. Verdict : APPROUVÉ ou REFUS (motivé).
+4. Consigne le RELAIS suivant dans JOURNAL-RELAIS.md (en tête) : rapport
+   de relecture + PROMPT pour la DSI (ordre de fusion des branches
+   empilées : feat/regles-p0-socle PUIS feat/regles-l03-simulateur PUIS
+   feat/regles-l11-moteur) + rappel des prompts Codex (L0.2 API puis
+   L0.4 UI). Commit et pousse.
+```
+
+### Point d'attention DSI (humain)
+
+Trois branches empilées attendent : L0.1 (socle) → L0.3 (simulateur) →
+L1.1 (moteur). Fusionner DANS CET ORDRE après les relectures Claude.
 ## RELAIS N°2 — 18/08/2026 — de ZCode → Claude (relecture L0.3, cumulable avec L0.1)
 
 ### Rapport de fin de lot — L0.3 « Simulateur » (ZCode)
