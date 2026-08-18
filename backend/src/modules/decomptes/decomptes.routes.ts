@@ -8,6 +8,7 @@ import { entrepriseIdOf } from "../../lib/scope";
 import { getMarchesAffectes } from "../../lib/affectations";
 import { chargerRegles, nombreRegles } from "../../lib/regles";
 import { calcDecompteRegles } from "./decomptes.calc.regles";
+import { construireSnapshot, rejouerCalcul, lireSnapshot } from "./decomptes.regles.audit";
 import { z } from "zod";
 
 export const decomptesRouter = Router();
@@ -250,6 +251,8 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
         avanceRecuperee: totalAvance,
         penalites:       totalPen,
         netAPayer:       totalNet,
+        // L1.2 — règles figées ayant servi à la combinaison du net (rejeu)
+        reglesSnapshot:  construireSnapshot(reglesTotaux, "LIGNES") as never,
       },
     });
 
@@ -308,6 +311,44 @@ decomptesRouter.post("/:id/calculate", requireRole("ADMIN", "DMC", "MISSION", "E
     });
 
     res.json({ totalBrut, tva, retenue, avance, penalites: body.penaltyAmount, netAPayer: net, lignesCount: lignes.length });
+  } catch (err) { next(err); }
+});
+
+// ── L1.2 — REJEU D'AUDIT : recalculer un décompte avec SES règles figées ─────
+decomptesRouter.get("/:id/recalcul-audit", requireRole("ADMIN", "DAF", "DG", "AUDITEUR"), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { prisma } = await import("../../lib/prisma");
+    const d = await prisma.decompte.findFirst({ where: { id: req.params.id, deletedAt: null } });
+    if (!d) throw new ApiError(404, "Décompte introuvable");
+    const marche = await prisma.marche.findUnique({ where: { id: d.marcheId } });
+    if (!marche) throw new ApiError(404, "Marché introuvable");
+
+    const resultat = rejouerCalcul(
+      {
+        montantPeriodeHtGnf: d.montantPeriodeHtGnf,
+        cumulPrecedentHtGnf: d.cumulPrecedentHtGnf,
+        penalites: d.penalites,
+        revisionPrix: d.revisionPrix,
+        tva: d.tva,
+        montantArmpGnf: d.montantArmpGnf,
+        montantTtcGnf: d.montantTtcGnf,
+        precompteTvaGnf: d.precompteTvaGnf,
+        retenueGarantie: d.retenueGarantie,
+        avanceRecuperee: d.avanceRecuperee,
+        netAPayer: d.netAPayer,
+      },
+      { tauxTva: marche.tauxTva, tauxRetenueGarantie: marche.tauxRetenueGarantie, tauxAvance: marche.tauxAvance },
+      lireSnapshot(d.reglesSnapshot),
+    );
+
+    if (resultat.erreur) return res.status(422).json({ erreur: resultat.erreur, reference: d.reference });
+    res.json({
+      reference: d.reference,
+      ...resultat,
+      message: resultat.concordance
+        ? "Concordance — les montants enregistrés correspondent exactement au recalcul avec les règles figées."
+        : "ÉCART DÉTECTÉ — les montants enregistrés divergent du rejeu avec les règles figées. À examiner (audit).",
+    });
   } catch (err) { next(err); }
 });
 

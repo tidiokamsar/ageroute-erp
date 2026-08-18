@@ -30,10 +30,11 @@ const include = {
 // inconnus de Prisma : armp/ttc/precompteTva → erreur « Unknown arg »).
 import { chargerRegles } from "../../lib/regles";
 import { calcDecompteRegles, type CalcReglesInput } from "./decomptes.calc.regles";
+import { construireSnapshot } from "./decomptes.regles.audit";
 
 async function calculerDecompte(data: CalcReglesInput, marche: { id: string; financement: string; type: string }) {
   const regles = await chargerRegles({ marcheId: marche.id, bailleur: marche.financement, typeMarche: marche.type });
-  return calcDecompteRegles(data, regles);
+  return { result: calcDecompteRegles(data, regles), snapshot: construireSnapshot(regles, "GLOBAL") };
 }
 
 // §10 CDC — contrôles automatiques
@@ -236,7 +237,7 @@ export const decomptesService = {
       rapportAvancement: false, photosChantier: false, pvContradictoire: false,
     };
 
-    const calculated = await calculerDecompte({
+    const { result: calculated, snapshot } = await calculerDecompte({
       ...(data as object),
       tauxTva: marche.tauxTva,
       tauxRetenueGarantie: marche.tauxRetenueGarantie,
@@ -244,7 +245,7 @@ export const decomptesService = {
     } as CalcReglesInput, marche);
 
     const created = await prisma.decompte.create({
-      data: { ...(data as object), reference, numeroDossier, dateDepot, piecesObligatoires, ...calculated } as never,
+      data: { ...(data as object), reference, numeroDossier, dateDepot, piecesObligatoires, ...calculated, reglesSnapshot: snapshot as never } as never,
       include,
     });
 
@@ -293,14 +294,14 @@ export const decomptesService = {
     const before = await prisma.decompte.findUnique({ where: { id }, include: { marche: true } });
     if (!before) throw new ApiError(404, "Décompte introuvable");
     if (before.statut === "PAYE") throw new ApiError(400, "Décompte payé, modification impossible");
-    const calculated = await calculerDecompte({
+    const { result: calculated, snapshot } = await calculerDecompte({
       ...before,
       ...(data as object),
       tauxTva: before.marche.tauxTva,
       tauxRetenueGarantie: before.marche.tauxRetenueGarantie,
       tauxAvance: before.marche.tauxAvance,
     } as CalcReglesInput, before.marche);
-    const updated = await prisma.decompte.update({ where: { id }, data: { ...(data as object), ...calculated } as never });
+    const updated = await prisma.decompte.update({ where: { id }, data: { ...(data as object), ...calculated, reglesSnapshot: snapshot as never } as never });
     await logAudit({ userId, action: "UPDATE", entityType: "Decompte", entityId: id, before, after: updated });
     return updated;
   },
