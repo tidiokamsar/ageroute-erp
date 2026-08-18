@@ -43,11 +43,17 @@ invalidation), tests de résolution.
 > `POST /api/parametrage/regles` (création/modification → BROUILLON, motif
 > obligatoire ≥ 10 caractères, validation zod du type et des bornes options),
 > `POST /api/parametrage/regles/:id/valider` (rôle DAF ou ADMIN **différent du
-> saisisseur** → VALIDE ; écrit la ligne d'historique append-only),
+> saisisseur** → VALIDE ; écrit la ligne d'historique append-only).
+> **Gel financier (fourni par L1.2 — à brancher ici)** : avant de passer VALIDE
+> une règle de catégorie FINANCE, appeler
+> `compterDecomptesEnCircuit(regle.portee, regle.porteeId)` puis
+> `verifierGelFinancier(regle.categorie, n)` (module
+> `backend/src/modules/decomptes/decomptes.regles.audit.ts`) ; si non autorisé
+> → 409 avec le message. Après validation : `invaliderCacheRegles()`,
 > conformément à PLAN-DEV-PARAMETRAGE §1.3. `requireAuth` + ADMIN sur tout le
 > routeur, `logAudit` à chaque écriture, messages français. Ne rien appliquer
 > au moteur de calcul (consommation = L1.1). DoD §2 + tests des rejets
-> (motif court, auto-validation, type incohérent).
+> (motif court, auto-validation, type incohérent, **gel 409**).
 
 **L0.3 Simulateur**
 > **PROMPT DU LOT L0.3** — `POST /api/parametrage/regles/simuler` : corps
