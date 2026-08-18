@@ -6,12 +6,17 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
+import { checkModuleAccess } from "../../middleware/moduleAccess.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
 import { z } from "zod";
 
 export const fundingRouter = Router();
-fundingRouter.use(requireAuth);
+// Ce routeur définit des chemins de premier niveau (/fundings, /funding-documents,
+// /funding-envelopes) : il se monte donc à la racine /api, pas sous un préfixe.
+// Le contrôle d'accès au module est porté ici plutôt qu'au montage, pour ne pas
+// s'appliquer aux routes voisines.
+fundingRouter.use(requireAuth, checkModuleAccess("financements"));
 
 const WRITE_ROLES = ["ADMIN", "DAF", "DG"] as const;
 

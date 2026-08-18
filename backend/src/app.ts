@@ -131,7 +131,12 @@ export function createApp() {
   app.use("/api/delegations", requireAuth, checkModuleAccess("delegations"), delegationsRouter);
   // export : transversal (lecture multi-modules), authentification seule
   app.use("/api/export", requireAuth, exportRouter);
-  app.use("/api/funding", requireAuth, checkModuleAccess("financements"), fundingRouter);
+  // Monté à la RACINE /api : ses chemins sont /fundings, /funding-documents et
+  // /funding-envelopes, et c'est ce que le frontend appelle. Un montage sous
+  // /api/funding donnait /api/funding/fundings — la page Financements tombait
+  // en 404. Doit rester APRÈS toutes les routes spécifiques.
+  // Auth et contrôle de module sont portés par le routeur lui-même.
+  app.use("/api", fundingRouter);
   // portail entreprise : rôle contrôlé en routeur (entrepriseOnly)
   app.use("/api/portail", portailRouter);
   app.use("/api/revision", requireAuth, checkModuleAccess("revision"), revisionRouter);
