@@ -9,6 +9,8 @@ import { Button } from "../components/ui/Button";
 import { Input, FormField } from "../components/ui/Input";
 import { toast } from "../components/ui/Toast";
 import { Settings, Save, RefreshCw, ChevronDown, ChevronRight, Plus } from "lucide-react";
+import { ReglesFinancieres } from "../components/parametrage/ReglesFinancieres";
+import { Settings2 } from "lucide-react";
 
 interface Param { cle: string; valeur: string; type: string; categorie: string; libelle: string; }
 
@@ -51,6 +53,7 @@ export function ParametragePage() {
   });
 
   const [showAdd, setShowAdd] = useState(false);
+  const [onglet, setOnglet] = useState<"parametres" | "regles">("parametres");
   const [np, setNp] = useState<Record<string,string>>({ type:"STRING", categorie:"GENERAL" });
   const upsertMut = useMutation({
     mutationFn: (b: object) => api.post("/parametrage/upsert", b),
@@ -82,6 +85,24 @@ export function ParametragePage() {
 
   return (
     <div className="space-y-4">
+      {/* Onglets */}
+      <div className="flex gap-0.5 border-b border-gray-200">
+        <button
+          onClick={() => setOnglet("parametres")}
+          className={`px-4 py-2 text-sm font-semibold rounded-t-lg transition-colors ${onglet === "parametres" ? "bg-navy text-white" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"}`}>
+          <Settings size={14} className="inline mr-1.5" /> Paramètres métier
+        </button>
+        <button
+          onClick={() => setOnglet("regles")}
+          className={`px-4 py-2 text-sm font-semibold rounded-t-lg transition-colors ${onglet === "regles" ? "bg-navy text-white" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"}`}>
+          <Settings2 size={14} className="inline mr-1.5" /> Règles financières (A1-A10)
+        </button>
+      </div>
+
+      {onglet === "regles" && <ReglesFinancieres />}
+
+      {onglet === "parametres" && (
+      <div>
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Settings className="h-4 w-4"/> Paramétrage métier §22</h2>
@@ -201,6 +222,8 @@ export function ParametragePage() {
           <p className="text-sm">Aucun paramètre configuré</p>
           <p className="text-xs mt-1">Cliquez sur "Initialiser" pour créer les paramètres par défaut</p>
         </div>
+      )}
+      </div>
       )}
     </div>
   );
