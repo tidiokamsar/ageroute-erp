@@ -29,6 +29,7 @@ export const REGLES_DEFAUT = {
   RG_REPORT_PENALITES: "false",
   // A5 — Pénalités de retard
   RG_PENALITE_MODE: "SAISIE", // actuel : montant saisi par ligne, pas de formule
+  RG_PENALITE_ASSIETTE: "HT", // assiette du calcul au mode FORMULE (HT ou TTC)
   RG_PENALITE_TAUX_JOURNALIER: "3000", // 1/3000e par jour (usuel, inactif en mode SAISIE)
   RG_PENALITE_PLAFOND_PCT: "100", // 100 = illimité (= comportement actuel)
   // A6 — Avances

@@ -6,6 +6,8 @@ import { decomptesService } from "./decomptes.service";
 import { ApiError } from "../../middleware/error.middleware";
 import { entrepriseIdOf } from "../../lib/scope";
 import { getMarchesAffectes } from "../../lib/affectations";
+import { chargerRegles, nombreRegles } from "../../lib/regles";
+import { calcDecompteRegles } from "./decomptes.calc.regles";
 import { z } from "zod";
 
 export const decomptesRouter = Router();
@@ -177,17 +179,20 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
 
     const qCumulee    = body.quantitePrecedent + body.quantiteCourante;
     const depassement = qCumulee > body.quantiteContrat;
-    // Formule AGEROUTE officielle (modèle fiche d'analyse)
-    const montantBrut    = Math.round(body.quantiteCourante * body.prixUnitaire);  // HT
-    const tauxArmp       = 0.6; // Redevance ARMP fixe 0.6%
-    const montantArmp    = Math.round(montantBrut * tauxArmp / 100);              // ARMP sur HT
-    const montantTva     = Math.round(montantBrut * body.tauxTva / 100);          // TVA sur HT
-    const montantTtc     = montantBrut + montantTva + montantArmp;                 // TTC = HT + TVA + ARMP
-    const precompteTva   = Math.round(montantTtc * 9 / 118);                      // Précompte TVA source
-    const montantRetenue = Math.round(montantTtc * body.tauxRetenue / 100);       // Retenue sur TTC
-    const montantAvanceRecup = Math.round(montantBrut * body.tauxAvance / 100);
+    // Montant brut saisi (quantité × prix) puis cascade fiscale par le moteur
+    // de règles (A1-A7) — lot L1.1, arithmétique entière, mêmes règles que le
+    // calcul global du décompte (portée : ce marché).
+    const montantBrut = Math.round(body.quantiteCourante * body.prixUnitaire); // HT (saisie)
+    const regles = await chargerRegles({ marcheId: decompte.marcheId, bailleur: decompte.marche.financement, typeMarche: decompte.marche.type });
+    const calc = calcDecompteRegles({
+      montantPeriodeHtGnf: BigInt(montantBrut),
+      tauxTva: body.tauxTva,
+      tauxRetenueGarantie: body.tauxRetenue,
+      tauxAvance: body.tauxAvance,
+      penalites: BigInt(body.montantPenalite),
+    }, regles);
+    const tauxArmp = nombreRegles(regles, "RG_TAUX_ARMP");
     const montantPenalite = body.montantPenalite;
-    const montantNet     = montantTtc - precompteTva - montantRetenue - montantArmp - montantAvanceRecup - montantPenalite;
 
     const ligne = await prisma.decompteLigne.create({
       data: {
@@ -202,18 +207,18 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
         prixUnitaire:  BigInt(Math.round(body.prixUnitaire)),
         montantBrut:       BigInt(montantBrut),
         tauxTva:           body.tauxTva,
-        montantTva:        BigInt(montantTva),
+        montantTva:        calc.tva,
         tauxArmp:          tauxArmp,
-        montantArmp:       BigInt(montantArmp),
-        montantTtc:        BigInt(montantTtc),
-        precompteTva:      BigInt(precompteTva),
+        montantArmp:       calc.montantArmpGnf,
+        montantTtc:        calc.montantTtcGnf,
+        precompteTva:      calc.precompteTvaGnf,
         tauxRetenue:       body.tauxRetenue,
-        montantRetenue:    BigInt(montantRetenue),
+        montantRetenue:    calc.retenueGarantie,
         tauxAvance:        body.tauxAvance,
-        montantAvanceRecup:BigInt(montantAvanceRecup),
+        montantAvanceRecup:calc.avanceRecuperee,
         montantPenalite:   BigInt(montantPenalite),
         motifPenalite:     body.motifPenalite,
-        montantNet:        BigInt(montantNet),
+        montantNet:        calc.netAPayer,
         statut:        depassement ? "ALERTE" : "OK",
         depassement,
         attachementLigneId:body.attachementLigneId,
@@ -221,30 +226,30 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
       },
     });
 
-    // Recalcul du décompte global depuis les lignes
+    // Recalcul du décompte global depuis les lignes — sommes en BigInt
+    // (plus aucune conversion flottante) et net borné par les règles (A4)
     const toutesLignes = await prisma.decompteLigne.findMany({ where: { decompteId: req.params.id } });
-    const totalBrut    = toutesLignes.reduce((s, l) => s + Number(l.montantBrut), 0);
-    const totalTva     = toutesLignes.reduce((s, l) => s + Number(l.montantTva), 0);
-    const totalArmp    = toutesLignes.reduce((s, l) => s + Number(l.montantArmp), 0);
-    const totalTtc     = toutesLignes.reduce((s, l) => s + Number(l.montantTtc), 0);
-    const totalPrecomp = toutesLignes.reduce((s, l) => s + Number(l.precompteTva), 0);
-    const totalRetenue = toutesLignes.reduce((s, l) => s + Number(l.montantRetenue), 0);
-    const totalAvance  = toutesLignes.reduce((s, l) => s + Number(l.montantAvanceRecup), 0);
-    const totalPen     = toutesLignes.reduce((s, l) => s + Number(l.montantPenalite), 0);
-    const totalNet     = totalTtc - totalPrecomp - totalRetenue - totalArmp - totalAvance - totalPen;
+    const somme = (champ: "montantBrut" | "montantTva" | "montantArmp" | "montantTtc" | "precompteTva" | "montantRetenue" | "montantAvanceRecup" | "montantPenalite") =>
+      toutesLignes.reduce((s, l) => s + (l[champ] as bigint), 0n);
+    const totalBrut = somme("montantBrut"), totalTva = somme("montantTva"), totalArmp = somme("montantArmp");
+    const totalTtc = somme("montantTtc"), totalPrecomp = somme("precompteTva");
+    const totalRetenue = somme("montantRetenue"), totalAvance = somme("montantAvanceRecup"), totalPen = somme("montantPenalite");
+    const reglesTotaux = await chargerRegles({ marcheId: decompte.marcheId, bailleur: decompte.marche.financement, typeMarche: decompte.marche.type });
+    let totalNet = totalTtc - totalPrecomp - totalRetenue - (reglesTotaux.RG_ARMP_INCLUSE_TTC === "true" ? totalArmp : 0n) - totalAvance - totalPen;
+    if (reglesTotaux.RG_NET_PLANCHER_ZERO === "true" && totalNet < 0n) totalNet = 0n;
 
     await prisma.decompte.update({
       where: { id: req.params.id },
       data: {
-        montantPeriodeHtGnf: BigInt(totalBrut),
-        tva:             BigInt(totalTva),
-        montantArmpGnf:  BigInt(totalArmp),
-        montantTtcGnf:   BigInt(totalTtc),
-        precompteTvaGnf: BigInt(totalPrecomp),
-        retenueGarantie: BigInt(totalRetenue),
-        avanceRecuperee: BigInt(totalAvance),
-        penalites:       BigInt(totalPen),
-        netAPayer:       BigInt(totalNet),
+        montantPeriodeHtGnf: totalBrut,
+        tva:             totalTva,
+        montantArmpGnf:  totalArmp,
+        montantTtcGnf:   totalTtc,
+        precompteTvaGnf: totalPrecomp,
+        retenueGarantie: totalRetenue,
+        avanceRecuperee: totalAvance,
+        penalites:       totalPen,
+        netAPayer:       totalNet,
       },
     });
 
