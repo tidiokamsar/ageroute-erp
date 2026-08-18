@@ -16,30 +16,29 @@ export const circuitFinancierRouter = Router();
 circuitFinancierRouter.use(requireAuth);
 
 // Étapes par type de circuit §16
+// F6 — l'étape "Validation DG" est retirée : le circuit n'est déclenché
+// qu'APRÈS validation DG par le workflow, la DG ne valide pas deux fois.
 const ETAPES_FER = [
-  { ordre:1, nom:"Validation DG",    roleOuService:"DG" },
-  { ordre:2, nom:"FER",              roleOuService:"FER_AGT" },
-  { ordre:3, nom:"Budget / MEF",     roleOuService:"BUDGET" },
-  { ordre:4, nom:"DNTCP",            roleOuService:"TRESOR" },
-  { ordre:5, nom:"BCRG",             roleOuService:"BCRG" },
-  { ordre:6, nom:"Paiement",         roleOuService:"DAF" },
-];
-
-const ETAPES_BUDGET = [
-  { ordre:1, nom:"Validation DG",    roleOuService:"DG" },
+  { ordre:1, nom:"FER",              roleOuService:"FER_AGT" },
   { ordre:2, nom:"Budget / MEF",     roleOuService:"BUDGET" },
   { ordre:3, nom:"DNTCP",            roleOuService:"TRESOR" },
   { ordre:4, nom:"BCRG",             roleOuService:"BCRG" },
   { ordre:5, nom:"Paiement",         roleOuService:"DAF" },
 ];
 
+const ETAPES_BUDGET = [
+  { ordre:1, nom:"Budget / MEF",     roleOuService:"BUDGET" },
+  { ordre:2, nom:"DNTCP",            roleOuService:"TRESOR" },
+  { ordre:3, nom:"BCRG",             roleOuService:"BCRG" },
+  { ordre:4, nom:"Paiement",         roleOuService:"DAF" },
+];
+
 const ETAPES_BAILLEUR = [
-  { ordre:1, nom:"Validation DG",            roleOuService:"DG" },
-  { ordre:2, nom:"UGP",                      roleOuService:"UGP" },
-  { ordre:3, nom:"Demande de décaissement",  roleOuService:"UGP" },
-  { ordre:4, nom:"Non-objection bailleur",   roleOuService:"BAILLEUR" },
-  { ordre:5, nom:"Décaissement",             roleOuService:"BAILLEUR" },
-  { ordre:6, nom:"Paiement",                 roleOuService:"DAF" },
+  { ordre:1, nom:"UGP",                      roleOuService:"UGP" },
+  { ordre:2, nom:"Demande de décaissement",  roleOuService:"UGP" },
+  { ordre:3, nom:"Non-objection bailleur",   roleOuService:"BAILLEUR" },
+  { ordre:4, nom:"Décaissement",             roleOuService:"BAILLEUR" },
+  { ordre:5, nom:"Paiement",                 roleOuService:"DAF" },
 ];
 
 function etapesPourFinancement(financement: string, bailleurNom?: string): typeof ETAPES_FER {
