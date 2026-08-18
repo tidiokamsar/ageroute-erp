@@ -18,6 +18,20 @@ export function GlobalSearch() {
   const [res, setRes] = useState<Results | null>(null);
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Raccourci Ctrl+K (ou Cmd+K) pour focus la recherche
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     if (q.trim().length < 2) { setRes(null); return; }
@@ -60,10 +74,11 @@ export function GlobalSearch() {
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400"/>
         <input
+          ref={inputRef}
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onFocus={() => { if (res) setOpen(true); }}
-          placeholder="Rechercher marché, décompte, entreprise..."
+          placeholder="Rechercher… (Ctrl+K)"
           className="w-full text-xs border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 focus:ring-2 focus:ring-navy/20 focus:border-navy/30 outline-none"
         />
       </div>

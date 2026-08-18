@@ -13,6 +13,9 @@ export function AppLayout() {
 
   useEffect(() => setSidebarOpen(false), [location.pathname]);
 
+  // Titre de l'onglet navigateur synchronisé sur la page courante
+  useEffect(() => { document.title = `${title} · ERP AGEROUTE`; }, [title]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />

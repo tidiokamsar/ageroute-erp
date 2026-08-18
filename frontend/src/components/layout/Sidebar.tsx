@@ -188,11 +188,11 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-// Section portail entreprise (séparée)
+// Section portail entreprise (séparée) — liens profonds vers les onglets du portail
 const PORTAIL_ITEMS: NavItem[] = [
-  { to: "/decomptes",    label: "Mes décomptes",    icon: Receipt,       roles: ["ENTREPRISE"] },
-  { to: "/attachements", label: "Mes attachements", icon: Paperclip,     roles: ["ENTREPRISE"] },
-  { to: "/receptions",   label: "Réceptions / PV",  icon: ClipboardCheck,roles: ["ENTREPRISE"] },
+  { to: "/portail?tab=decomptes",    label: "Mes décomptes",    icon: Receipt,       roles: ["ENTREPRISE"] },
+  { to: "/portail?tab=attachements", label: "Mes attachements", icon: Paperclip,     roles: ["ENTREPRISE"] },
+  { to: "/portail?tab=receptions",   label: "Réceptions / PV",  icon: ClipboardCheck,roles: ["ENTREPRISE"] },
 ];
 
 // Labels lisibles par rôle pour affichage
@@ -259,7 +259,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
           <nav className="flex-1 overflow-y-auto py-3">
             <div className="mb-4">
               <p className="px-4 mb-1.5 text-[9px] font-black tracking-[0.18em] text-white/25 uppercase">MON ESPACE</p>
-              <Item to="/" label="Tableau de bord" Icon={LayoutDashboard} />
+              <Item to="/portail" label="Tableau de bord" Icon={LayoutDashboard} />
               {PORTAIL_ITEMS.map(({ to, label, icon: Icon }) => (
                 <Item key={to} to={to} label={label} Icon={Icon} />
               ))}

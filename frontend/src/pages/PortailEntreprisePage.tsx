@@ -3,6 +3,7 @@
  * Refonte complète : données réelles, statuts cohérents, UI moderne
  */
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth, authStore } from "../lib/auth";
@@ -24,6 +25,7 @@ const IC = {
   tag:         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" /></svg>,
   arrow:       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>,
   workflow:    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" /></svg>,
+  paperclip:   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01a5 5 0 0 1-7.072-7.073" /></svg>,
 };
 
 // ─── TYPES ───────────────────────────────────────────────────────────────────
@@ -145,7 +147,8 @@ interface Profil {
   alertes: Array<{ id: string; message: string; niveau: string }>;
 }
 
-type Tab = "dashboard" | "marches" | "decomptes" | "paiements" | "garanties" | "deposer";
+type Tab = "dashboard" | "marches" | "decomptes" | "attachements" | "paiements" | "garanties" | "receptions" | "deposer";
+const TABS_VALIDES: Tab[] = ["dashboard", "marches", "decomptes", "attachements", "paiements", "garanties", "receptions", "deposer"];
 
 // ─── FORMULAIRE DÉPÔT ─────────────────────────────────────────────────────────
 function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () => void }) {
@@ -375,7 +378,11 @@ function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () 
 // ─── PAGE PRINCIPALE ──────────────────────────────────────────────────────────
 export default function PortailEntreprisePage() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Onglet piloté par l'URL (?tab=...) — liens profonds depuis la barre latérale
+  const tabParam = searchParams.get("tab") as Tab | null;
+  const tab: Tab = tabParam && TABS_VALIDES.includes(tabParam) ? tabParam : "dashboard";
+  const setTab = (t: Tab) => setSearchParams(t === "dashboard" ? {} : { tab: t });
   const [marcheDetail, setMarcheDetail] = useState<string | null>(null);
 
   const profilQ = useQuery<Profil>({ queryKey: ["portail-profil"], queryFn: () => api.get("/portail/profil").then(r => r.data) });
@@ -384,6 +391,7 @@ export default function PortailEntreprisePage() {
   const garantiesQ = useQuery<Garantie[]>({ queryKey: ["portail-garanties"], queryFn: () => api.get("/portail/mes-garanties").then(r => r.data).catch(() => []) });
   const paiementsQ = useQuery<Paiement[]>({ queryKey: ["portail-paiements"], queryFn: () => api.get("/portail/mes-paiements").then(r => r.data).catch(() => []) });
   const receptionsQ = useQuery({ queryKey: ["portail-receptions"], queryFn: () => api.get("/portail/mes-receptions").then(r => r.data).catch(() => []) });
+  const attachementsQ = useQuery<Array<Record<string, any>>>({ queryKey: ["portail-attachements"], queryFn: () => api.get("/portail/mes-attachements").then(r => r.data).catch(() => []) });
 
   const profil = profilQ.data;
   const marches = marchesQ.data ?? [];
@@ -391,6 +399,7 @@ export default function PortailEntreprisePage() {
   const garanties = garantiesQ.data ?? [];
   const paiements = paiementsQ.data ?? [];
   const receptions = receptionsQ.data ?? [];
+  const attachements = attachementsQ.data ?? [];
 
   // KPIs
   const marchesActifs = marches.filter(m => STATUTS_ACTIFS_MARCHE.includes(m.statut));
@@ -403,7 +412,9 @@ export default function PortailEntreprisePage() {
     { key: "dashboard",  label: "Tableau de bord",  icon: IC.chartBar },
     { key: "marches",    label: "Mes marchés",       icon: IC.building, badge: marchesActifs.length },
     { key: "decomptes",  label: "Mes décomptes",     icon: IC.document, badge: decomptes.length },
+    { key: "attachements", label: "Mes attachements", icon: IC.paperclip, badge: attachements.length },
     { key: "paiements",  label: "Paiements",         icon: IC.banknote },
+    { key: "receptions", label: "Réceptions / PV",   icon: IC.check },
     { key: "garanties",  label: "Garanties",         icon: IC.shield },
     { key: "deposer",    label: "Déposer décompte",  icon: IC.plus },
   ];
@@ -876,6 +887,75 @@ export default function PortailEntreprisePage() {
         )}
 
         {/* ══ DÉPOSER DÉCOMPTE ═════════════════════════════════════════════════ */}
+        {tab === "attachements" && (
+          <div className="space-y-3">
+            {attachements.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
+                <div className="opacity-30 mb-3 flex justify-center">{IC.paperclip}</div>
+                Aucun attachement enregistré
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>{["Code", "Décompte", "Marché", "Période", "Montant HT", "Statut"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-[10px] font-black text-gray-400 uppercase tracking-wide">{h}</th>
+                    ))}</tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {attachements.map((a) => (
+                      <tr key={a.id} className="hover:bg-gray-50/50">
+                        <td className="px-4 py-2.5 font-semibold text-navy">{a.code ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{a.decompte?.reference ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{a.decompte?.marche?.reference ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-xs text-gray-500">
+                          {a.periodeDebut ? new Date(a.periodeDebut).toLocaleDateString("fr-FR") : "—"}
+                          {a.periodeFin ? ` → ${new Date(a.periodeFin).toLocaleDateString("fr-FR")}` : ""}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-xs">{a.montantHtGnf ? Number(a.montantHtGnf).toLocaleString("fr-GN") + " FG" : "—"}</td>
+                        <td className="px-4 py-2.5"><span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{a.statut}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "receptions" && (
+          <div className="space-y-3">
+            {(receptions as Array<Record<string, any>>).length === 0 ? (
+              <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
+                <div className="opacity-30 mb-3 flex justify-center">{IC.check}</div>
+                Aucun PV de réception enregistré
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>{["Type", "Marché", "N° PV", "Date prévue", "Date réelle", "Statut"].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-[10px] font-black text-gray-400 uppercase tracking-wide">{h}</th>
+                    ))}</tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {(receptions as Array<Record<string, any>>).map((r) => (
+                      <tr key={r.id} className="hover:bg-gray-50/50">
+                        <td className="px-4 py-2.5 font-semibold text-navy">{r.type === "OPR" ? "OPR" : r.type === "PROVISOIRE" ? "Provisoire" : r.type === "DEFINITIVE" ? "Définitive" : r.type}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{r.marche?.reference ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-gray-600">{r.pvNumero ?? "—"}</td>
+                        <td className="px-4 py-2.5 text-xs text-gray-500">{r.datePrevu ? new Date(r.datePrevu).toLocaleDateString("fr-FR") : "—"}</td>
+                        <td className="px-4 py-2.5 text-xs text-gray-500">{r.dateReelle ? new Date(r.dateReelle).toLocaleDateString("fr-FR") : "—"}</td>
+                        <td className="px-4 py-2.5"><span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{r.statut}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "deposer" && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 max-w-3xl mx-auto">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
