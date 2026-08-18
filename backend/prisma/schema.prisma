@@ -135,6 +135,7 @@ enum StatutWorkflow {
 }
 
 enum AuditAction {
+  CONFIRM_BCRG
   CREATE
   UPDATE
   DELETE
@@ -1245,6 +1246,12 @@ model Paiement {
   refDntcp    String?  // référence DNTCP
   refBcrg     String?  // référence BCRG
   observations String?
+  // F10 — confirmation bancaire : montant réel transféré, date réelle, confirmé par BCRG
+  montantReelGnf       BigInt?
+  dateReelleTransfert  DateTime?
+  confirmePar          String?  // email BCRG
+  confirmeAt           DateTime?
+
   createdAt   DateTime @default(now())
   // §3.4 AGENTS.md — pas de suppression physique des paiements (auditabilité)
   deletedAt   DateTime?

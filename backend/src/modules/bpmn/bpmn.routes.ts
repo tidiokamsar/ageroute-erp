@@ -13,6 +13,7 @@ import { ApiError } from "../../middleware/error.middleware";
 import { notifyNextStep, notifyDecision, notifyApprouve } from "../../lib/mailer";
 import { rolesEffectifs } from "../../lib/delegations";
 import { entrepriseIdOf } from "../../lib/scope";
+import { etapesCircuitFinancier } from "../../lib/circuit-definitions";
 import { z } from "zod";
 
 export const bpmnRouter = Router();
@@ -170,7 +171,7 @@ bpmnRouter.post("/soumettre/:moduleType/:entityId", async (req: Request, res: Re
       PROJET: "EN_VALIDATION", MARCHE: "UNDER_REVIEW",
       ATTACHEMENT: "SOUMIS", DECOMPTE: "DEPOSE", CONFORMITE: "SUBMITTED",
     };
-    await updateEntityStatut(mt, entityId, statutInitial[mt] ?? "EN_VALIDATION").catch(() => {});
+    await updateEntityStatut(mt, entityId, statutInitial[mt] ?? "EN_VALIDATION").catch((e) => { console.error("[BPMN] updateEntityStatut:", e); });
 
     await logAudit({ userId: req.user.id, action: "CREATE", entityType: `BpmnInstance_${mt}`, entityId: instance.id, after: { moduleType: mt, entityId, definitionId: def.id } });
 
@@ -275,7 +276,7 @@ bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next:
     // Traitement selon la décision
     if (decision === "REJETE") {
       await prisma.$executeRaw`UPDATE bpmn_instances SET statut='REJETE', updated_at=NOW() WHERE id=${instance.id}`;
-      await updateEntityStatut(instance.module_type, instance.entity_id, "REJETE").catch(() => {});
+      await updateEntityStatut(instance.module_type, instance.entity_id, "REJETE").catch((e) => { console.error("[BPMN] updateEntityStatut:", e); });
       // Notifier le soumetteur du rejet
       void notifyDecision({
         to: soumetteurEmail, moduleType: instance.module_type, entityRef,
@@ -286,7 +287,7 @@ bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next:
     }
 
     if (decision === "DEMANDE_CORRECTION") {
-      await updateEntityStatut(instance.module_type, instance.entity_id, "DEMANDE_CORRECTION").catch(() => {});
+      await updateEntityStatut(instance.module_type, instance.entity_id, "DEMANDE_CORRECTION").catch((e) => { console.error("[BPMN] updateEntityStatut:", e); });
       void notifyDecision({
         to: soumetteurEmail, moduleType: instance.module_type, entityRef,
         decision: "DEMANDE_CORRECTION", stepNom: etapeCourante.nom, decideurNom,
@@ -333,8 +334,36 @@ bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next:
         DECOMPTE:    "VALIDE_DG",
         CONFORMITE:  "CONFORME",
       };
-      await updateEntityStatut(instance.module_type, instance.entity_id, statutFinal[instance.module_type] ?? "APPROUVE").catch(() => {});
+      await updateEntityStatut(instance.module_type, instance.entity_id, statutFinal[instance.module_type] ?? "APPROUVE").catch((e) => { console.error("[BPMN] updateEntityStatut:", e); });
       await logAudit({ userId: req.user.id, action: "APPROVE", entityType: `Bpmn_${instance.module_type}`, entityId: instance.entity_id });
+
+      // F4 — Décomptes : déclencher le circuit financier après validation DG
+      // (même logique que le moteur workflow interne — sans cela, les dépôts
+      // via le portail entreprise restent bloqués à VALIDE_DG sans paiement)
+      if (instance.module_type === "DECOMPTE") {
+        try {
+          const dec = await prisma.decompte.findUnique({
+            where: { id: instance.entity_id },
+            include: { marche: true, circuitFinancier: true },
+          });
+          if (dec && !dec.circuitFinancier && (dec.statut === "VALIDE_DG" || dec.statut === "VALIDE")) {
+            const fin = dec.marche.financement;
+            const typeCircuit = fin === "FER" ? "FER" : fin === "BUDGET_NATIONAL" ? "BUDGET" : "BAILLEUR";
+            const etapesDefs = etapesCircuitFinancier(fin).map(e => ({ordre: e.ordre, nom: e.nom, roleOuService: e.roleOuService}));
+            await prisma.circuitFinancier.create({
+              data: {
+                decompteId: dec.id, type: typeCircuit,
+                bailleurNom: dec.marche.bailleur ?? undefined,
+                etapes: { create: etapesDefs },
+              },
+            });
+            await prisma.decompte.update({
+              where: { id: dec.id },
+              data: { statut: "EN_CIRCUIT_FINANCIER" },
+            });
+          }
+        } catch (_) { /* non bloquant — le circuit manuel reste possible */ }
+      }
 
       // Notifier DG + soumetteur + rôle précédent de l'approbation finale
       const dgEmails = await getEmailsByRole("DG");

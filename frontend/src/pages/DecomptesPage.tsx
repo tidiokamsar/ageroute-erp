@@ -447,7 +447,7 @@ export function DecomptesPage() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
-              {["Numéro","Marché / Entreprise","Type","Période","Montant HT","Net à payer","Lignes","Pièces","Statut",""].map((h) => (
+              {["Numéro","Marché / Entreprise","Type","Période","Montant HT","Net à payer","Payé / Reste","Lignes","Pièces","Statut",""].map((h) => (
                 <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -483,6 +483,11 @@ export function DecomptesPage() {
                   <td className="px-3 py-2.5 text-xs text-gray-400">{d.periodeDebut ? d.periodeDebut.slice(0, 7) : "—"}</td>
                   <td className="px-3 py-2.5 text-right text-xs text-gray-600">{fmtGnf(d.montantPeriodeHtGnf)}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-xs text-navy">{fmtGnf(d.netAPayer)}</td>
+                  <td className="px-3 py-2.5 text-right">
+                    <span className="text-green-600 text-[10px]">{fmtGnf((d as any).dejaPayeGnf ?? "0")}</span>
+                    <span className="text-gray-300 text-[8px]"> / </span>
+                    <span className="text-orange-500 text-[10px]">{fmtGnf((d as any).resteAPayerGnf ?? d.netAPayer)}</span>
+                  </td>
                   <td className="px-3 py-2.5 text-center">
                     <span className="text-xs text-gray-500 flex items-center justify-center gap-1">
                       <Layers className="h-3 w-3" />{d._count?.lignesDecompte ?? 0}
@@ -773,6 +778,12 @@ export function DecomptesPage() {
                   <div className="flex justify-between items-center py-3 mt-2 bg-navy/5 rounded-lg px-3">
                     <span className="text-sm font-black text-navy">= NET À PAYER</span>
                     <span className="text-xl font-black text-navy">{fmtGnf(det.netAPayer)}</span>
+                    <div className="flex items-center gap-2 text-xs mt-1">
+                      <span className="text-green-600">✓ Payé : {fmtGnf((det as any).dejaPayeGnf ?? "0")}</span>
+                      <span className="text-gray-300">|</span>
+                      <span className="text-orange-500">Reste : {fmtGnf((det as any).resteAPayerGnf ?? det.netAPayer)}</span>
+                      {(det as any).confirmeParBanque && <span className="text-blue-500 ml-1">🔒 Confirmé BCRG</span>}
+                    </div>
                   </div>
 
                   {/* Cumulés */}
@@ -1040,6 +1051,12 @@ export function DecomptesPage() {
                 <div className="mt-4 p-4 bg-navy/5 rounded-xl flex items-center justify-between">
                   <span className="font-semibold text-gray-700 text-sm">Net à payer certifié</span>
                   <span className="text-xl font-black text-navy">{fmtGnf(det.netAPayer)}</span>
+                    <div className="flex items-center gap-2 text-xs mt-1">
+                      <span className="text-green-600">✓ Payé : {fmtGnf((det as any).dejaPayeGnf ?? "0")}</span>
+                      <span className="text-gray-300">|</span>
+                      <span className="text-orange-500">Reste : {fmtGnf((det as any).resteAPayerGnf ?? det.netAPayer)}</span>
+                      {(det as any).confirmeParBanque && <span className="text-blue-500 ml-1">🔒 Confirmé BCRG</span>}
+                    </div>
                 </div>
               </div>
             )}

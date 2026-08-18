@@ -23,6 +23,79 @@
 
 ---
 
+---
+
+---
+
+## RELAIS N°7 — 18/08/2026 — de ZCode → Claude (relecture FIX-3 circuit complet)
+
+### Rapport — FIX-3 « Circuit complet : 7 failles restantes corrigées » (ZCode)
+
+- **Branche** : `fix/circuit-complet` (base fix/circuit-paiement)
+- **Failles corrigées** :
+  - F5 : attachement VALIDÉ exigé avant toute soumission (portail + workflow)
+  - F8 : étape Paiement → BCRG ; confirmation bancaire avec tolérance 1%
+  - F10 : montantReelGnf, dateReelleTransfert, confirmePar, confirmeAt
+  - F11 : solde payé/restant + badge « Confirmé BCRG » sur chaque décompte
+  - F12 : lib/circuit-definitions.ts unifie les étapes (3 moteurs → 1 source)
+  - F13 : erreurs BPMN loguées (plus de catch silencieux)
+  - Vue par profil : dashboard scopé par affectations (MISSION/TECH/BAILLEUR)
+- **SQL** : 2026-08-18-paiement-confirmation-bcrg.sql (4 colonnes + enum)
+- **Vérifications** : tsc 0, 46/46 tests, build front OK
+
+### PROMPT pour CLAUDE
+
+```text
+Tu es relecteur du correctif FIX-3 (circuit complet) de l'ERP AGEROUTE.
+Référence : JOURNAL-RELAIS.md relais N°7, AUDIT-CIRCUIT-DEPOT-PAIEMENT.
+Objet : branche fix/circuit-complet.
+
+1. git fetch && git checkout fix/circuit-complet
+2. Relecture :
+   a. DoD : tsc 0, run-tests.mjs 46/46, build front ;
+   b. F5 : vérifier le blocage attachement (portail + workflow) ;
+   c. F8 : confirmation BCRG — tolérance 1%, décompte PAYE seulement
+      quand tous paiements confirmés ;
+   d. F12 : circuit-definitions.ts — cohérence des étapes FER/BUDGET/BAILLEUR
+      entre les trois moteurs ;
+   e. F11 : solde payé/restant — cohérence backend ↔ frontend.
+3. Verdict + consigne RELAIS suivant.
+```
+## RELAIS N°6 — 18/08/2026 — de ZCode → Claude (relecture FIX-2 circuit paiement, PRIORITAIRE)
+
+### Rapport — FIX-2 « Circuit dépôt→paiement : 6 failles critiques » (ZCode)
+
+- **Branche** : `fix/circuit-paiement` @ `156ec71` (base master 06b95c0)
+- **Audit complet** : AUDIT-CIRCUIT-DEPOT-PAIEMENT-2026-08-18.md (13 failles,
+  6 corrigées immédiatement, 7 documentées avec solutions à arbitrer DAF/BCRG)
+- **Failles corrigées** :
+  - F1+F2 : double paiement et dépassement impossible (cumul vérifié vs netAPayer)
+  - F3 : statuts payables alignés sur le circuit réel (VALIDE_DG→EN_CIRCUIT→ORDONNANCE)
+  - F4 : BPMN (portail) déclenche désormais le circuit financier après DG
+  - F6 : étape « Validation DG » retirée du circuit (redondante)
+  - F7 : paiement exige circuit à l'étape « Paiement » ou terminé
+  - F9 : référence de virement obligatoire
+- **Vérifications** : tsc 0, 46/46 tests, build front OK
+
+### PROMPT pour CLAUDE — relecture FIX-2
+
+```text
+Tu es relecteur du correctif FIX-2 (circuit de paiement) de l'ERP AGEROUTE.
+Référence : JOURNAL-RELAIS.md relais N°6, AUDIT-CIRCUIT-DEPOT-PAIEMENT-2026-08-18.md.
+
+Objet : branche fix/circuit-paiement (commit 156ec71).
+
+1. git fetch && git checkout fix/circuit-paiement
+2. Relecture :
+   a. DoD : cd backend && npx tsc ; node scripts/run-tests.mjs (46/46) ; build front ;
+   b. Garde-fous paiement : vérifier les bornes (cumul > net refusé, statut PAYE
+      non payable, référence obligatoire) ;
+   c. BPMN circuit trigger : vérifier que le déclenchement crée les bonnes étapes
+      selon le financement (FER/BUDGET/BAILLEUR) et ne double-crée pas ;
+   d. Étapes circuit : vérifier que la suppression de l'étape « Validation DG »
+      ne casse pas les circuits existants (etapeActuelle index).
+3. Verdict + consigne du RELAIS suivant.
+```
 ## RELAIS N°5 — 18/08/2026 — de ZCode → Claude (relecture FIX-1 périmètres, hors programme mais prioritaire — retour utilisateur réel)
 
 ### Rapport de fin de lot — FIX-1 « Vues à traiter + double moteur + périmètres » (ZCode)

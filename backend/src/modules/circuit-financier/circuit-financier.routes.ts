@@ -15,37 +15,10 @@ import { z } from "zod";
 export const circuitFinancierRouter = Router();
 circuitFinancierRouter.use(requireAuth);
 
-// Étapes par type de circuit §16
-const ETAPES_FER = [
-  { ordre:1, nom:"Validation DG",    roleOuService:"DG" },
-  { ordre:2, nom:"FER",              roleOuService:"FER_AGT" },
-  { ordre:3, nom:"Budget / MEF",     roleOuService:"BUDGET" },
-  { ordre:4, nom:"DNTCP",            roleOuService:"TRESOR" },
-  { ordre:5, nom:"BCRG",             roleOuService:"BCRG" },
-  { ordre:6, nom:"Paiement",         roleOuService:"DAF" },
-];
-
-const ETAPES_BUDGET = [
-  { ordre:1, nom:"Validation DG",    roleOuService:"DG" },
-  { ordre:2, nom:"Budget / MEF",     roleOuService:"BUDGET" },
-  { ordre:3, nom:"DNTCP",            roleOuService:"TRESOR" },
-  { ordre:4, nom:"BCRG",             roleOuService:"BCRG" },
-  { ordre:5, nom:"Paiement",         roleOuService:"DAF" },
-];
-
-const ETAPES_BAILLEUR = [
-  { ordre:1, nom:"Validation DG",            roleOuService:"DG" },
-  { ordre:2, nom:"UGP",                      roleOuService:"UGP" },
-  { ordre:3, nom:"Demande de décaissement",  roleOuService:"UGP" },
-  { ordre:4, nom:"Non-objection bailleur",   roleOuService:"BAILLEUR" },
-  { ordre:5, nom:"Décaissement",             roleOuService:"BAILLEUR" },
-  { ordre:6, nom:"Paiement",                 roleOuService:"DAF" },
-];
-
-function etapesPourFinancement(financement: string, bailleurNom?: string): typeof ETAPES_FER {
-  if (financement === "FER") return ETAPES_FER;
-  if (financement === "BUDGET_NATIONAL") return ETAPES_BUDGET;
-  return ETAPES_BAILLEUR; // BM, BAD, UE, BOAD, BID, BADEA, AFD, KFW, AUTRE
+// F12 — définitions unifiées : voir lib/circuit-definitions.ts
+import { etapesCircuitFinancier, type EtapeCircuit } from "../../lib/circuit-definitions";
+function etapesPourFinancement(financement: string, bailleurNom?: string): EtapeCircuit[] {
+  return etapesCircuitFinancier(financement);
 }
 
 // Déclencher le circuit financier après validation DG

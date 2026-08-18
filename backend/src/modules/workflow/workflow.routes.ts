@@ -13,6 +13,7 @@ import { ApiError } from "../../middleware/error.middleware";
 import { notifyWorkflowStep } from "../notifications/notifications.service";
 import { assertEntrepriseConforme } from "../conformite/conformite.service";
 import { rolesEffectifs } from "../../lib/delegations";
+import { etapesCircuitFinancier } from "../../lib/circuit-definitions";
 import { z } from "zod";
 
 export const workflowRouter = Router();
@@ -55,6 +56,14 @@ workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response
 
     await assertEntrepriseConforme(decompte.entrepriseId);
     if (decompte.marche.statut !== "ACTIF") throw new ApiError(400, "Le marché n'est pas actif");
+
+    // F5 — au moins un attachement VALIDÉ pour ce marché
+    const attValide = await prisma.attachement.count({
+      where: { decompte: { marcheId: decompte.marcheId, deletedAt: null }, valide: true },
+    });
+    if (attValide === 0) {
+      throw new ApiError(400, "Aucun attachement validé pour ce marché — le décompte ne peut pas être soumis");
+    }
 
     const pieces = decompte.piecesObligatoires as Record<string, boolean> | null;
     if (pieces) {
@@ -179,11 +188,7 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
         if (dec && !await prisma.circuitFinancier.findUnique({ where: { decompteId: dec.id } })) {
           const fin = dec.marche.financement;
           const typeCircuit = fin === "FER" ? "FER" : fin === "BUDGET_NATIONAL" ? "BUDGET" : "BAILLEUR";
-          const etapesDefs = typeCircuit === "FER"
-            ? [{ordre:1,nom:"FER",roleOuService:"FER_AGT"},{ordre:2,nom:"Budget/MEF",roleOuService:"BUDGET"},{ordre:3,nom:"DNTCP",roleOuService:"TRESOR"},{ordre:4,nom:"BCRG",roleOuService:"BCRG"},{ordre:5,nom:"Paiement",roleOuService:"DAF"}]
-            : typeCircuit === "BUDGET"
-            ? [{ordre:1,nom:"Budget/MEF",roleOuService:"BUDGET"},{ordre:2,nom:"DNTCP",roleOuService:"TRESOR"},{ordre:3,nom:"BCRG",roleOuService:"BCRG"},{ordre:4,nom:"Paiement",roleOuService:"DAF"}]
-            : [{ordre:1,nom:"UGP",roleOuService:"UGP"},{ordre:2,nom:"Non-objection bailleur",roleOuService:"BAILLEUR"},{ordre:3,nom:"Décaissement",roleOuService:"BAILLEUR"},{ordre:4,nom:"Paiement",roleOuService:"DAF"}];
+          const etapesDefs = etapesCircuitFinancier(fin).map(e => ({ordre: e.ordre, nom: e.nom, roleOuService: e.roleOuService}));
           await prisma.circuitFinancier.create({ data: { decompteId: dec.id, type: typeCircuit, bailleurNom: dec.marche.bailleur ?? undefined, etapes: { create: etapesDefs } } });
           await prisma.decompte.update({ where: { id: dec.id }, data: { statut: "EN_CIRCUIT_FINANCIER" } });
         }

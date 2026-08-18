@@ -188,6 +188,7 @@ export const decomptesService = {
           marche: marcheInclude,
           entreprise: { select: { id: true, raisonSociale: true, statut: true } },
           lot: true,
+          paiements: { where: { deletedAt: null }, select: { montantGnf: true, confirmeAt: true } },
         },
         orderBy: { createdAt: "desc" },
         skip: (page - 1) * pageSize,
@@ -195,13 +196,29 @@ export const decomptesService = {
       }),
       prisma.decompte.count({ where }),
     ]);
-    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+
+    // F11 — solde payé / restant pour chaque décompte
+    const dataAvecSolde = data.map((d) => {
+      const dejaPaye = (d as unknown as { paiements: Array<{ montantGnf: bigint; confirmeAt: Date | null }> }).paiements
+        .reduce((s, p) => s + p.montantGnf, 0n);
+      const confirmeParBanque = (d as unknown as { paiements: Array<{ montantGnf: bigint; confirmeAt: Date | null }> }).paiements
+        .every((p) => p.confirmeAt !== null);
+      return {
+        ...d,
+        dejaPayeGnf: dejaPaye.toString(),
+        resteAPayerGnf: (d.netAPayer - dejaPaye).toString(),
+        confirmeParBanque,
+      };
+    });
+    return { data: dataAvecSolde, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
   },
 
   async getById(id: string) {
     const d = await prisma.decompte.findFirst({ where: { id, deletedAt: null }, include });
     if (!d) throw new ApiError(404, "Décompte introuvable");
-    return d;
+    // F11 — solde payé / restant
+    const dejaPaye = d.paiements?.reduce((s, p) => s + p.montantGnf, 0n) ?? 0n;
+    return { ...d, dejaPayeGnf: dejaPaye.toString(), resteAPayerGnf: (d.netAPayer - dejaPaye).toString() };
   },
 
   async create(data: Record<string, unknown>, userId: string) {
