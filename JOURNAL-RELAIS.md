@@ -19,6 +19,60 @@
 
 ---
 
+---
+
+## RELAIS N°4 — 18/08/2026 — de ZCode → Claude (relecture L1.2 ; L0.2 spec update)
+
+### Rapport de fin de lot — L1.2 « Snapshot + gel » (ZCode)
+
+- **Branche** : `feat/regles-l12-snapshot` · **commit** `5f97d11` · base
+  `feat/regles-l11-moteur@4e07e7a` (L0.1 + L0.3 + L1.1 inclus)
+- **Livré** :
+  - `Decompte.reglesSnapshot` (SQL 2026-08-18 + Prisma) : règles effectives
+    figées au dernier calcul (méthode GLOBAL/LIGNES + date) ;
+  - service create/update écrivent le snapshot GLOBAL ; la route lignes
+    écrit le snapshot LIGNES au recalcul des totaux ;
+  - `GET /api/decomptes/:id/recalcul-audit` (ADMIN/DAF/DG/AUDITEUR) :
+    rejoue avec LE snapshot (jamais les règles actuelles), compare champ à
+    champ, 422 explicite pour les décomptes antérieurs au mécanisme ;
+  - `decomptes.regles.audit.ts` : rejouerCalcul/lireSnapshot purs +
+    verifierGelFinancier + compterDecomptesEnCircuit (portées) ;
+  - **L0.2 spec updated**: la validation d'une règle FINANCE doit appeler
+    le gel (voir prompt L0.2 mis à jour dans PLAN-TRAVAIL).
+- **Vérifications** : `npx tsc` 0 erreur · `npm test` **79/79**.
+- **Couverture** : concordance exacte (GLOBAL), rejeu suit le SNAPSHOT pas
+  les règles actuelles, montant altéré détecté, LIGNES avec plancher,
+  422 sans snapshot, gel (refusé/autorisé).
+- **NON fait** : UI (L0.4) ; production deployment (opérateur).
+
+### PROMPT pour CLAUDE — relecture L1.2
+
+```text
+Tu es relecteur du lot L1.2 du programme de paramétrage A1-A10 de l'ERP
+AGEROUTE. Références : JOURNAL-RELAIS.md (relais N°4 = rapport), PLAN-
+TRAVAIL-AGENT-PARAMETRAGE.md, PLAN-DEV-PARAMETRAGE-A1-A10.md.
+
+Objet : branche feat/regles-l12-snapshot (commit 5f97d11).
+
+1. git fetch && git checkout feat/regles-l12-snapshot
+2. Relecture :
+   a. DoD : cd backend && npx tsc (0 erreur) ; node scripts/run-tests.mjs
+      (79/73... attendu 79/79) — rejouer en conteneur node:20-slim ;
+   b. Audit de rejeu : vérifier que rejouerCalcul utilise bien le snapshot
+      fourni et jamais les règles actuelles ; vérifier que la voie LIGNES
+      compare la combinaison (pas les arrondis) ; vérifier le 422 sans
+      snapshot ;
+   c. Gel : verifierGelFinancier pure, compterDecomptesEnCircuit couvre
+      toutes les portées (GLOBAL/BAILLEUR/TYPE_MARCHE/MARCHE) ; vérifier
+      que la spec L0.2 (dans PLAN-TRAVAIL) appelle bien le gel.
+3. Verdict : APPROUVÉ ou REFUS (motivé).
+4. Consigne le RELAIS suivant dans JOURNAL-RELAIS.md (en tête) : rapport +
+   PROMPT pour la DSI (fusion des 4 branches dans l'ordre empilé :
+   feat/regles-p0-socle → feat/regles-l03-simulateur → feat/regles-l11-moteur
+   → feat/regles-l12-snapshot, chacune déjà empilée, donc fusion
+   séquentielle dans cet ordre exact) + rappel L0.2 pour Codex.
+```
+
 ## RELAIS N°3 — 18/08/2026 — de ZCode → Claude (relecture L1.1, cumulable L0.1/L0.3)
 
 ### Rapport de fin de lot — L1.1 « Moteur de calcul paramétré » (ZCode)

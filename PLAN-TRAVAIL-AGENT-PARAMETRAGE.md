@@ -134,7 +134,7 @@ d'observation d'une quinzaine avant ouverture de l'exploitation réelle.
 | L0.3 Simulateur | `feat/regles-l03-simulateur` @ `28555b8` | ZCode | Claude | **RÉALISÉ — relais N°2 consigné, en attente de relecture** |
 | L0.4 UI Règles financières | — | Codex | ZCode | À faire (après L0.2) |
 | L1.1 Calcul paramétré | `feat/regles-l11-moteur` @ `4e07e7a` | ZCode | Claude | **RÉALISÉ — relais N°3 consigné, en attente de relecture** |
-| L1.2 Snapshot + gel | — | ZCode | Codex | À faire |
+| L1.2 Snapshot + gel | `feat/regles-l12-snapshot` @ `5f97d11` | ZCode | Claude (spec update: L0.2) | **RÉALISÉ — relais N°4 consigné** |
 | L1.3 Tests matrice | — | Codex | ZCode | Parallélisable |
 | L2.1 Matrices rôles | — | ZCode | Claude | À faire |
 | L2.2 Libellés états | — | Codex | ZCode | Parallélisable |
