@@ -24,6 +24,7 @@
 4. **Relecture croisée avant fusion** : un agent différent de l'auteur relit (checklist : DoD, sécurité, cohérence avec PLAN-DEV §1-2, français des libellés).
 5. **Convention release** : tag `v2026.MM.JJ-N` posé uniquement par l'architecte, sur l'état exactement validé ; le tableau §4 est mis à jour dans le même commit que la fusion.
 6. **Interdits** (AGENTS.md) : jamais `prisma db push` ; jamais de formule financière en dur modifiée sans paramètre ; jamais de suppression d'audit.
+7. **Relais consigné (JOURNAL-RELAIS.md)** — à la fin de CHAQUE lot, l'agent livreur ajoute en tête du journal, dans le même commit que sa livraison ou sa fusion : (a) son rapport de fin de lot (contenu, branche/commit, résultats de vérification, restes à faire), (b) **le prompt du prochain lot pour l'agent suivant**, autoportant et prêt à coller. L'agent suivant démarre uniquement depuis le dépôt et ce journal. Une entrée consignée ne se réécrit jamais — on la corrige par une entrée nouvelle.
 
 ## 3. Découpage en lots — spécifications autoportantes
 
@@ -128,7 +129,7 @@ d'observation d'une quinzaine avant ouverture de l'exploitation réelle.
 
 | Lot | Branche | Auteur | Relecteur | Statut |
 |---|---|---|---|---|
-| L0.1 Socle données + moteur | `feat/regles-p0-socle` | ZCode | — (révision demandée à Claude) | **RÉALISÉ — en attente de relecture** |
+| L0.1 Socle données + moteur | `feat/regles-p0-socle` @ `7e79de3` | ZCode | Claude | **RÉALISÉ — relais N°1 consigné (JOURNAL-RELAIS.md), en attente de relecture** |
 | L0.2 API CRUD + 4 yeux | — | Codex | ZCode | À faire |
 | L0.3 Simulateur | — | ZCode | Claude | À faire |
 | L0.4 UI Règles financières | — | Codex | ZCode | À faire (après L0.2) |
