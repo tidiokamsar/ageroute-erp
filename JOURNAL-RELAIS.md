@@ -21,6 +21,102 @@
 
 ---
 
+## RELAIS N°7 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L1.3)
+
+### Rapport de fin de lot — L1.3 « Tests de matrice complets »
+
+**Branche** : `feat/regles-l02-api` (suite de L0.2 et L0.4).
+**Fichier** : `backend/src/modules/decomptes/decomptes.matrice.test.ts` — 25 cas.
+**Suite complète** : 119 → **144 tests, 144 passés**, `tsc` 0 erreur, rejoués
+sous `node:20-slim` avec openssl (conditions du Dockerfile).
+
+### Tableau de couverture
+
+| Axe | Règle | Valeurs couvertes | Cas |
+|---|---|---|---|
+| A1 | `RG_ASSIETTE_RETENUE_GARANTIE` | TTC, HT | 2 |
+| A2 | `RG_FORMULE_PRECOMPTE_TVA` | PRORATA_9_118, TAUX_HT, TAUX_TTC | 2 |
+| A3 | `RG_ARMP_INCLUSE_TTC` + `RG_ARMP_ASSIETTE` | true/false × HT/TTC | 3 |
+| A4 | `RG_NET_PLANCHER_ZERO` | true, false, net déjà positif | 4 |
+| A5 | `RG_PENALITE_MODE` + plafond + assiette | SAISIE, FORMULE × 0/10/100 % × HT/TTC | 4 |
+| A6 | `RG_AVANCE_MODE` | UNIQUE, DEMARRAGE_APPRO, repli, plafond, solde négatif | 5 |
+| A7 | `RG_ARRONDI_MODE` | FRANC_PROCHE, FRANC_INF, FRANC_SUP | 3 |
+| — | Matrice A1×A2×A3 | **12 combinaisons × 4 échelles** | 1 |
+| — | Échelle et cohérence | 0, 1 000, 1 M, 1 Md, 25 Md GNF | 3 |
+| — | Ancres de non-régression | 4 configurations à 1 Md GNF | 1 |
+
+**Parti pris de rédaction.** Les assertions sont autant que possible
+INDÉPENDANTES de l'implémentation : on compare deux exécutions plutôt que de
+recopier la formule, ce qui ne prouverait rien. Exemples :
+- A1 : basculer l'assiette ne doit toucher QUE la retenue et le net, et
+  `Δnet == −Δretenue` exactement ;
+- A2 : changer la formule ne doit toucher QUE le précompte et le net ;
+- A3 : sortir l'ARMP du TTC réduit le TTC d'exactement l'ARMP, et l'effet sur
+  le net passe uniquement par l'élargissement du précompte et de la retenue.
+
+S'y ajoutent des **ancres de non-régression** : les valeurs constatées ce jour
+pour 1 000 000 000 GNF HT dans quatre configurations. Elles ne sont pas une
+vérité métier — elles gèlent le comportement pour qu'aucune évolution ne le
+change en silence.
+
+**Précision en grands montants.** Vérifié à 25 milliards GNF : TVA, ARMP et
+avance tombent exactement (4 500 000 000 / 150 000 000 / 5 000 000 000). L'écart
+entre modes d'arrondi reste borné à quelques francs sur 25 milliards — l'erreur
+ne dérive pas avec la taille du marché, ce que l'ancienne arithmétique
+flottante ne garantissait pas.
+
+### ⚠️ Lacune révélée par la matrice — `RG_REPORT_PENALITES` sans effet
+
+La règle est déclarée dans `REGLES_DEFAUT` (L0.1) et proposée à la saisie dans
+le catalogue (L0.2), mais **aucun code ne la consomme** : un opérateur peut
+l'activer, cela ne change rien. Le spécifique A4 du plan mentionne pourtant
+« comportement selon booléen**s** », au pluriel.
+
+Un test fige explicitement ce comportement (`A4 — LACUNE CONNUE`) : il échouera
+le jour où le report sera implémenté, ce qui obligera à le documenter au lieu
+de le découvrir en production. **Décision à prendre** : soit implémenter le
+report du reliquat sur le décompte suivant (lot à créer), soit retirer la règle
+du catalogue pour ne pas proposer un levier inopérant. C'est un arbitrage DAF,
+pas technique.
+
+### PROMPT pour la DSI (humain) — fusion
+
+```bash
+git fetch origin
+git checkout master && git pull --ff-only origin master
+git merge --no-ff origin/feat/regles-l02-api -m "merge: L0.2 API regles, L0.4 UI, L1.3 matrice de tests"
+git push origin master
+```
+
+Aucune migration SQL. Aucun changement de comportement : ce lot n'ajoute que
+des tests.
+
+### PROMPT pour le relecteur — lot L1.3
+
+```text
+Tu es relecteur du lot L1.3 du programme de paramétrage A1-A10.
+Références : PLAN-TRAVAIL-AGENT-PARAMETRAGE.md §3, JOURNAL-RELAIS.md (RELAIS
+N°7). Objet : backend/src/modules/decomptes/decomptes.matrice.test.ts.
+
+1. git fetch && git checkout feat/regles-l02-api
+2. Checklist :
+   a. DoD : `npx tsc` 0 erreur, `node scripts/run-tests.mjs` 144/144 dans
+      node:20-slim AVEC openssl ;
+   b. Qualité des assertions : vérifie qu'un test échoue vraiment si on casse
+      le moteur — modifie temporairement une constante de
+      decomptes.calc.regles.ts et confirme que la suite rougit (un test qui ne
+      peut pas échouer ne prouve rien) ;
+   c. Indépendance : les assertions comparent-elles deux exécutions, ou
+      recopient-elles la formule ? Signale toute assertion tautologique ;
+   d. Couverture : le tableau ci-dessus correspond-il au contenu réel ?
+      manque-t-il un axe du plan §3 ?
+3. Traite la lacune RG_REPORT_PENALITES : verdict d'implémentation ou de
+   retrait, à porter à la DAF.
+4. Verdict : APPROUVÉ (avec remarques) ou REFUS motivé. Consigne le RELAIS N°8.
+```
+
+---
+
 ## RELAIS N°6 — 18/08/2026 — de Claude → DSI (fusion) puis relecteur (L0.4)
 
 ### Rapport de fin de lot — L0.4 « UI Règles financières »
