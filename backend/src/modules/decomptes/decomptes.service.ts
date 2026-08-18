@@ -128,6 +128,7 @@ async function runControlesAuto(decompte: {
 // Utilisé par la vue "À traiter" : chaque profil ne voit que ce qui attend SA décision
 // (dès qu'il approuve, l'étape passe au rôle suivant et le décompte sort de sa liste).
 async function decompteIdsATraiterPour(role: string): Promise<string[]> {
+  // Moteur workflow interne (instances Prisma)
   const instances = await prisma.workflowInstance.findMany({
     where: { statut: "EN_COURS" },
     select: {
@@ -136,10 +137,26 @@ async function decompteIdsATraiterPour(role: string): Promise<string[]> {
       definition: { select: { etapes: { orderBy: { ordre: "asc" }, select: { roleRequis: true } } } },
     },
   });
-  return instances
+  const fromWorkflow = instances
     .filter((inst) => inst.definition.etapes[inst.etapeActuelle]?.roleRequis === role)
     .map((inst) => inst.decompteId)
     .filter((id): id is string => !!id);
+
+  // Moteur BPMN générique (décomptes déposés via le portail entreprise) :
+  // sans cette fusion, ces décomptes n'apparaissent JAMAIS dans « À traiter ».
+  let fromBpmn: string[] = [];
+  try {
+    const rows = await prisma.$queryRaw<{ entity_id: string }[]>`
+      SELECT bi.entity_id
+      FROM bpmn_instances bi
+      JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle + 1
+      WHERE bi.statut = 'EN_COURS' AND bi.module_type = 'DECOMPTE'
+        AND bs.role_requis = ${role}
+        AND COALESCE(bs.is_system, false) = false`;
+    fromBpmn = rows.map((r) => r.entity_id);
+  } catch { /* tables bpmn absentes : environnement vierge */ }
+
+  return [...new Set([...fromWorkflow, ...fromBpmn])];
 }
 
 export const decomptesService = {
@@ -153,9 +170,10 @@ export const decomptesService = {
     if (params.entrepriseId) where.entrepriseId = params.entrepriseId;
 
     // Vue "À traiter" : uniquement les dossiers en attente d'une action de CE rôle.
-    // ADMIN/DG gardent la vue globale (rôle superviseur). Les rôles créateurs voient
-    // aussi leurs BROUILLONs (à compléter/soumettre) — c'est une action qui leur incombe.
-    if (params.aTraiter && params.role && !["ADMIN", "DG"].includes(params.role)) {
+    // DG désormais filtré comme les autres (il voit les dossiers à SON étape,
+    // pas toute la file) ; seul l'ADMIN garde la vue globale. Les rôles créateurs
+    // voient aussi leurs BROUILLONs (à compléter/soumettre).
+    if (params.aTraiter && params.role && params.role !== "ADMIN") {
       const ids = await decompteIdsATraiterPour(params.role);
       const orClauses: Record<string, unknown>[] = [{ id: { in: ids } }];
       if (["DMC", "MISSION", "ENTREPRISE"].includes(params.role)) {

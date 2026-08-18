@@ -5,6 +5,7 @@
  * DG/ADMIN : visibilité sur TOUTES les instances en cours (rôle superviseur)
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
+import { Prisma } from "@prisma/client";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
@@ -251,6 +252,63 @@ workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: Next
       const peutAgir = isSuperv || (etapeCourante && mesRoles.includes(etapeCourante.roleRequis));
       return { ...inst, etapeCourante, joursEnCours, enRetardSla, peutAgir };
     });
+
+    // ── Tâches du moteur BPMN générique (décomptes déposés via le portail
+    //    entreprise) : mêmes règles de rôle, fusionnées dans la même liste.
+    //    source:"BPMN" → le traitement se fait depuis la fiche décompte.
+    try {
+      interface LigneBpmn {
+        id: string; entity_id: string; created_at: Date;
+        step_nom: string | null; role_requis: string | null; sla_jours: number | null;
+      }
+      const lignes = isSuperv
+        ? await prisma.$queryRaw<LigneBpmn[]>`
+            SELECT bi.id, bi.entity_id, bi.created_at,
+                   bs.nom AS step_nom, bs.role_requis, bs.sla_jours
+            FROM bpmn_instances bi
+            LEFT JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle + 1
+            WHERE bi.statut = 'EN_COURS' AND bi.module_type = 'DECOMPTE'
+            ORDER BY bi.created_at ASC`
+        : await prisma.$queryRaw<LigneBpmn[]>`
+            SELECT bi.id, bi.entity_id, bi.created_at,
+                   bs.nom AS step_nom, bs.role_requis, bs.sla_jours
+            FROM bpmn_instances bi
+            JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle + 1
+            WHERE bi.statut = 'EN_COURS' AND bi.module_type = 'DECOMPTE'
+              AND bs.role_requis IN (${Prisma.join(mesRoles)})
+              AND COALESCE(bs.is_system, false) = false
+            ORDER BY bi.created_at ASC`;
+
+      if (lignes.length > 0) {
+        const decomptes = await prisma.decompte.findMany({
+          where: { id: { in: lignes.map((l) => l.entity_id) } },
+          select: {
+            id: true, reference: true, statut: true, createdAt: true,
+            marche: { select: { reference: true, intitule: true, financement: true } },
+            entreprise: { select: { raisonSociale: true } },
+          },
+        });
+        const parId = new Map(decomptes.map((d) => [d.id, d]));
+        for (const l of lignes) {
+          const d = parId.get(l.entity_id);
+          if (!d) continue;
+          const jours = Math.floor((Date.now() - new Date(l.created_at).getTime()) / 86400000);
+          enriched.push({
+            id: l.id,
+            statut: "EN_COURS",
+            source: "BPMN",
+            createdAt: l.created_at,
+            etapeCourante: { nom: l.step_nom ?? "—", roleRequis: l.role_requis ?? "", slaJours: l.sla_jours ?? undefined },
+            definition: { financement: d.marche.financement, nom: "Circuit BPMN" },
+            decompte: { id: d.id, reference: d.reference, statut: d.statut, marche: d.marche, entreprise: d.entreprise },
+            actions: [],
+            joursEnCours: jours,
+            enRetardSla: l.sla_jours != null && jours > l.sla_jours,
+            peutAgir: false, // traitement via la fiche décompte (BpmnPanel)
+          } as never);
+        }
+      }
+    } catch { /* tables bpmn absentes : environnement vierge */ }
 
     res.json(enriched);
   } catch (err) { next(err); }
