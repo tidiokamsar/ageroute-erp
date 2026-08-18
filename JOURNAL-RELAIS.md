@@ -15,6 +15,62 @@
 
 ---
 
+---
+
+## RELAIS N°2 — 18/08/2026 — de ZCode → Claude (relecture L0.3, cumulable avec L0.1)
+
+### Rapport de fin de lot — L0.3 « Simulateur » (ZCode)
+
+- **Branche** : `feat/regles-l03-simulateur` · **commit** `28555b8` · base `feat/regles-p0-socle@7e79de3` (L0.1 incluse)
+- **Livré** :
+  - `backend/src/modules/parametrage/simulateur.ts` — simulation PURE en
+    arithmétique entière paramétrée par les règles (assiette RG, formule
+    précompte, ARMP assiette/inclusion, plancher du net, avances, arrondi),
+    formules en clair, fusion des surcharges via `resoudreRegles` ;
+  - `POST /api/parametrage/regles/simuler` (ADMIN, DAF) — avant/après ligne
+    à ligne avec écarts, clés inconnues rejetées, aucune écriture ;
+  - `backend/src/modules/parametrage/simulateur.test.ts` — 10 tests.
+- **Vérifications** : `npx tsc` 0 erreur · `npm test` **60/60**.
+- **DoD prouvé par tests** : aux défauts la simulation égale EXACTEMENT
+  `calcDecompte` (1 M, 25 Md GNF, pénalités/révision, taux 10/8/15) ;
+  A1=HT ne change que la retenue ; A4/A2/A3/A6/A7 couverts.
+- **NON fait (hors périmètre)** : UI du simulateur (à brancher dans l'onglet
+  L0.4) ; moteur réel paramétré (L1.1) ; `decomptes.calc.ts` inchangé
+  (formule officielle protégée §3.3).
+- **Point d'attention relecteur** : l'égalité défauts ↔ `calcDecompte` est
+  l'invariant critique — vérifier les trois tests DoD ligne à ligne.
+
+### PROMPT pour CLAUDE — relecture croisée de L0.3 (cumulable avec L0.1)
+
+```text
+Tu es relecteur du lot L0.3 du programme de paramétrage A1-A10 de l'ERP
+AGEROUTE. Références dans le dépôt : JOURNAL-RELAIS.md (relais N°2 = rapport
+de livraison), PLAN-TRAVAIL-AGENT-PARAMETRAGE.md (protocole §2 + spécif L0.3),
+PLAN-DEV-PARAMETRAGE-A1-A10.md §1.3.
+
+Objet : branche feat/regles-l03-simulateur (commit 28555b8), base
+feat/regles-p0-socle (L0.1, relecture en cours ou faite par ailleurs).
+
+1. git fetch && git checkout feat/regles-l03-simulateur
+2. Relecture :
+   a. DoD : cd backend && npx tsc (0 erreur) ; node scripts/run-tests.mjs
+      (60/60) — rejoue dans un conteneur node:20-slim + openssl (conditions
+      Dockerfile) ;
+   b. Invariant critique : vérifier que les tests « DoD » comparent bien
+      simulation (défauts) ↔ calcDecompte de decomptes.calc.ts, et recalculer
+      toi-même un cas (1 000 000 GNF, taux 18/5/20) à la main ;
+   c. Sécurité : POST /api/parametrage/regles/simuler — requireAuth router +
+      requireRole ADMIN/DAF, validation zod (clés inconnues rejetées, bornes),
+      aucune écriture en base, aucun secret dans la réponse ;
+   d. Cohérence : simulateur.ts vs PLAN-DEV §1.3 ; arithmétique entière
+      (multiplier avant diviser, arrondi RG_ARRONDI_MODE).
+3. Verdict : APPROUVÉ ou REFUS (motivé).
+4. Consigne le RELAIS suivant dans JOURNAL-RELAIS.md (en tête) : ton rapport
+   de relecture (L0.1 et L0.3 si les deux faites) + PROMPT pour la DSI
+   (fusion des branches dans l'ordre : feat/regles-p0-socle PUIS
+   feat/regles-l03-simulateur — cette dernière est empilée dessus) + rappel
+   du PROMPT Codex L0.2 (après fusion de L0.1). Commit et pousse.
+```
 ## RELAIS N°1 — 18/08/2026 — de ZCode → Claude (relecture), puis DSI (fusion), puis Codex (L0.2)
 
 ### Rapport de fin de lot — L0.1 « Socle données + moteur » (ZCode)
