@@ -80,7 +80,7 @@ export function LoginPage() {
         </div>
 
         <p className="text-center text-white/30 text-xs mt-6">
-          AGEROUTE Guinée — Direction des Systèmes d'Information
+          AGEROUTE Guinée — Service Digital et Moyens Informatiques
         </p>
       </div>
     </div>
