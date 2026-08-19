@@ -4,6 +4,7 @@ import { authStore } from "../lib/auth";
 import { parseApiError } from "../lib/api";
 import { Input } from "../components/ui/Input";
 import { Button } from "../components/ui/Button";
+import { LogoAgeroute } from "../components/ui/LogoAgeroute";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -43,17 +44,7 @@ export function LoginPage() {
         {/* Logo + titre */}
         <div className="text-center mb-8">
           <div className="inline-block mb-4">
-            <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-20 w-20 mx-auto drop-shadow-xl">
-              {/* Grand triangle bleu marine */}
-              <polygon points="40,4 76,72 4,72" fill="#1B2A4A" stroke="#F0A500" strokeWidth="1.5"/>
-              {/* Route blanche */}
-              <path d="M40 14 C40 14, 30 38, 34 58 C35 62, 38 68, 40 72" stroke="white" strokeWidth="3" strokeLinecap="round" fill="none" opacity="0.9"/>
-              <path d="M40 14 C40 14, 50 38, 46 58 C45 62, 42 68, 40 72" stroke="white" strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.5"/>
-              <line x1="40" y1="38" x2="40" y2="44" stroke="white" strokeWidth="1.8" strokeLinecap="round" opacity="0.8"/>
-              <line x1="40" y1="50" x2="40" y2="56" stroke="white" strokeWidth="1.8" strokeLinecap="round" opacity="0.8"/>
-              {/* Petit triangle or */}
-              <polygon points="14,72 28,72 20,54" fill="#F0A500"/>
-            </svg>
+            <LogoAgeroute taille={96} className="mx-auto drop-shadow-xl" />
           </div>
           <div className="flex items-baseline justify-center gap-0 mb-1">
             <span className="text-3xl font-black text-gold tracking-tight">AGE</span>

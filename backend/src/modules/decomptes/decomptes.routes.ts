@@ -33,8 +33,13 @@ decomptesRouter.get("/", async (req: Request, res: Response, next: NextFunction)
   } catch (err) { next(err); }
 });
 
-decomptesRouter.get("/stats", async (_req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await decomptesService.stats()); } catch (err) { next(err); }
+decomptesRouter.get("/stats", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Mêmes règles que la liste : isolation ENTREPRISE + affectations terrain.
+    const entrepriseId = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    const marcheIds = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
+    res.json(await decomptesService.stats({ entrepriseId, marcheIds }));
+  } catch (err) { next(err); }
 });
 
 decomptesRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {

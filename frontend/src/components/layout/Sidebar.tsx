@@ -8,19 +8,12 @@ import {
   FileSignature, CreditCard, BarChart2, Landmark, UserCheck, TrendingUp,
 } from "lucide-react";
 import { authStore } from "../../lib/auth";
+import { LogoAgeroute } from "../ui/LogoAgeroute";
 
 // Logo AGEROUTE Guinée
+/** Emblème officiel AGEROUTE — posé sur cartouche blanc, la barre étant navy. */
 function AgeroiteLogo() {
-  return (
-    <svg viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-11 w-11 shrink-0">
-      <polygon points="28,3 54,50 2,50" fill="#1B2A4A" />
-      <path d="M28 10 C28 10, 20 28, 24 40 C25 43, 27 47, 28 50" stroke="white" strokeWidth="2.2" strokeLinecap="round" fill="none" opacity="0.9" />
-      <path d="M28 10 C28 10, 36 28, 32 40 C31 43, 29 47, 28 50" stroke="white" strokeWidth="1.4" strokeLinecap="round" fill="none" opacity="0.55" />
-      <line x1="28" y1="26" x2="28" y2="30" stroke="white" strokeWidth="1.2" strokeLinecap="round" opacity="0.7"/>
-      <line x1="28" y1="34" x2="28" y2="38" stroke="white" strokeWidth="1.2" strokeLinecap="round" opacity="0.7"/>
-      <polygon points="10,50 20,50 14,38" fill="#F0A500" />
-    </svg>
-  );
+  return <LogoAgeroute taille={44} />;
 }
 
 // ─── DÉFINITION RBAC PAR RÔLE ────────────────────────────────────────────────

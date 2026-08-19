@@ -365,14 +365,26 @@ export const decomptesService = {
     await logAudit({ userId, action: "DELETE", entityType: "Decompte", entityId: id, before });
   },
 
-  async stats() {
+  /**
+   * Compteurs de tête d'écran.
+   *
+   * ⚠️ Ils DOIVENT porter le même périmètre que la liste. Sans cela, un agent
+   * dont la liste ne montre qu'un marché lisait quand même « 6 décomptes,
+   * 11,7 Md GNF payés » sur l'ensemble de l'agence : le cloisonnement était
+   * contredit par les chiffres affichés juste au-dessus.
+   */
+  async stats(portee?: { entrepriseId?: string | null; marcheIds?: string[] | null }) {
+    const base: Record<string, unknown> = { deletedAt: null };
+    if (portee?.entrepriseId) base.entrepriseId = portee.entrepriseId;
+    if (portee?.marcheIds) base.marcheId = { in: portee.marcheIds };
+
     const [total, enAttente, valides, payes, montantEngageRaw, montantPayeRaw] = await Promise.all([
-      prisma.decompte.count({ where: { deletedAt: null } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: { in: ["DEPOSE","EN_CONTROLE","EN_VALIDATION"] } } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "VALIDE" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "PAYE" } }),
-      prisma.decompte.aggregate({ where: { deletedAt: null }, _sum: { netAPayer: true } }),
-      prisma.decompte.aggregate({ where: { deletedAt: null, statut: "PAYE" }, _sum: { netAPayer: true } }),
+      prisma.decompte.count({ where: base }),
+      prisma.decompte.count({ where: { ...base, statut: { in: ["DEPOSE","EN_CONTROLE","EN_VALIDATION"] } } }),
+      prisma.decompte.count({ where: { ...base, statut: "VALIDE" } }),
+      prisma.decompte.count({ where: { ...base, statut: "PAYE" } }),
+      prisma.decompte.aggregate({ where: base, _sum: { netAPayer: true } }),
+      prisma.decompte.aggregate({ where: { ...base, statut: "PAYE" }, _sum: { netAPayer: true } }),
     ]);
     return {
       total, enAttente, valides, payes,

@@ -408,9 +408,12 @@ export function MarchesPage() {
         @media print{button{display:none}}</style>
     </head><body>
       <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:16px">
-        <div>
-          <h1 style="margin:0;font-size:18px;color:#1e3a8a">AGEROUTE GUINÉE</h1>
-          <p style="margin:2px 0;font-size:11px;color:#6b7280">Direction des Marchés et Contrats</p>
+        <div style="display:flex;align-items:center">
+          <img src="/ageroute-logo.png" alt="AGEROUTE" style="height:52px;width:auto;margin-right:12px" />
+          <div>
+            <h1 style="margin:0;font-size:18px;color:#1e3a8a">AGEROUTE GUINÉE</h1>
+            <p style="margin:2px 0;font-size:11px;color:#6b7280">Direction des Marchés et Contrats</p>
+          </div>
         </div>
         <div style="text-align:right;font-size:11px;color:#6b7280">
           <p>Date : ${new Date().toLocaleDateString("fr-FR")}</p>

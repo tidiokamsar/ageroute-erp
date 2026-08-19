@@ -233,10 +233,13 @@ function imprimerFiche(att: Attachement) {
     </style>
   </head><body>
     <div class="header">
-      <div>
+      <div style="display:flex;align-items:center">
+        <img src="/ageroute-logo.png" alt="AGEROUTE" style="height:52px;width:auto;margin-right:12px" />
+        <div>
         <div class="org">AGEROUTE GUINÉE — Direction des Marchés et Contrats</div>
         <div class="title">FICHE D'ATTACHEMENT TECHNIQUE</div>
         <div class="ref">${att.code ?? "ATT-" + att.id.substring(0, 8).toUpperCase()}</div>
+        </div>
       </div>
       <div style="text-align:right;font-size:11px;color:#555">
         <div>Date d'impression : ${fmtDate(new Date().toISOString())}</div>
