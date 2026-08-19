@@ -31,6 +31,7 @@ import { bpmnRouter } from "./modules/bpmn/bpmn.routes";
 import { delegationsRouter } from "./modules/delegations/delegations.routes";
 import { exportRouter } from "./modules/export/export.routes";
 import { rapportBailleurRouter } from "./modules/export/rapport-bailleur.routes";
+import { documentsOfficielsRouter } from "./modules/documents/documents-officiels.routes";
 import { fundingRouter } from "./modules/funding/funding.routes";
 import { portailRouter } from "./modules/portail/portail.routes";
 import { revisionRouter } from "./modules/revision/revision.routes";
@@ -135,6 +136,7 @@ export function createApp() {
   // export : transversal (lecture multi-modules), authentification seule
   app.use("/api/export", requireAuth, exportRouter);
   app.use("/api/export", rapportBailleurRouter);
+  app.use("/api/documents", documentsOfficielsRouter);
   // portail entreprise : rôle contrôlé en routeur (entrepriseOnly)
   app.use("/api/portail", portailRouter);
   app.use("/api/revision", requireAuth, checkModuleAccess("revision"), revisionRouter);

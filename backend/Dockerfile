@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/
 COPY package*.json ./
 RUN npm ci
 COPY prisma ./prisma
+COPY assets ./assets
 RUN npx prisma generate
 COPY tsconfig.json .
 COPY src ./src
@@ -17,6 +18,7 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
+COPY assets ./assets
 EXPOSE 4001
 COPY .env* ./
 CMD ["sh", "-c", "[ -f /app/.env ] && set -a && . /app/.env && set +a; node dist/server.js"]
