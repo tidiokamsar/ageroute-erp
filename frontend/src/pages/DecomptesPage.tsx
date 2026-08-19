@@ -126,7 +126,7 @@ const PIECES_CFG = [
   { key: "pvContradictoire",  label: "PV contradictoire",        requis: false },
 ];
 
-const TABS = ["Résumé","Lignes BPU","Calculs","Pièces","Validations","Workflow","Paiement","Audit","Historique"] as const;
+const TABS = ["Résumé","Lignes BPU","Calculs","Pièces","Validations","Workflow","Paiement","Audit","Historique","Attachements"] as const;
 
 const TYPE_OPT = [
   { value:"AVANCE",        label:"Avance de démarrage" },
@@ -216,6 +216,20 @@ export function DecomptesPage() {
     queryKey: ["dec-comments", detailId],
     queryFn: () => api.get(`/decomptes/${detailId}/commentaires`).then((r) => r.data),
     enabled: !!detailId && activeTab === 8,
+  });
+
+  // Onglet Attachements (index 9) — ceux du décompte consulté, et ceux des
+  // autres décomptes du même marché : le constat contradictoire se lit en
+  // cumul, un décompte isolé ne dit pas ce qui a déjà été attaché.
+  const { data: attCourants } = useQuery({
+    queryKey: ["decompte-attachements", detailId],
+    queryFn: () => api.get(`/attachements?decompteId=${detailId}&pageSize=100`).then((r) => r.data),
+    enabled: !!detailId && activeTab === 9,
+  });
+  const { data: attAnterieurs } = useQuery({
+    queryKey: ["marche-attachements", detail?.marcheId, detailId],
+    queryFn: () => api.get(`/attachements?marcheId=${detail?.marcheId}&saufDecompteId=${detailId}&pageSize=100`).then((r) => r.data),
+    enabled: !!detailId && !!detail?.marcheId && activeTab === 9,
   });
 
   const { data: paymentTraces, refetch: refetchPay } = useQuery({
@@ -1120,6 +1134,29 @@ export function DecomptesPage() {
               </div>
             )}
 
+            {activeTab === 9 && (
+              <div className="space-y-5">
+                <p className="text-xs text-gray-500">
+                  Les attachements constatent les quantités réellement exécutées. Ceux du décompte
+                  consulté en constituent la base de calcul ; les antérieurs donnent le cumul déjà
+                  attaché sur le marché.
+                </p>
+
+                <ListeAttachements
+                  titre="Attachements de ce décompte"
+                  vide="Aucun attachement rattaché à ce décompte."
+                  lignes={(attCourants?.data ?? []) as AttachementLigne[]}
+                />
+
+                <ListeAttachements
+                  titre="Attachements antérieurs du marché"
+                  vide="Aucun attachement sur les autres décomptes de ce marché."
+                  lignes={(attAnterieurs?.data ?? []) as AttachementLigne[]}
+                  montrerDecompte
+                />
+              </div>
+            )}
+
           </div>
         )}
       </Modal>
@@ -1284,6 +1321,73 @@ export function DecomptesPage() {
         </div>
       </Modal>
 
+    </div>
+  );
+}
+
+// ─── Attachements rattachés à un décompte ────────────────────────────────────
+export interface AttachementLigne {
+  id: string;
+  code?: string | null;
+  reference?: string | null;
+  typeAttachement?: string | null;
+  statut: string;
+  periodeDebut?: string | null;
+  periodeFin?: string | null;
+  montantTotalGnf?: string | number | null;
+  createdAt?: string | null;
+  decompte?: { reference?: string | null } | null;
+}
+
+/**
+ * Liste compacte d'attachements. Utilisée deux fois dans le détail d'un
+ * décompte : les siens, puis ceux des décomptes antérieurs du même marché.
+ */
+function ListeAttachements({
+  titre, vide, lignes, montrerDecompte = false,
+}: {
+  titre: string; vide: string; lignes: AttachementLigne[]; montrerDecompte?: boolean;
+}) {
+  const periode = (a: AttachementLigne) =>
+    a.periodeDebut || a.periodeFin
+      ? `${a.periodeDebut ? new Date(a.periodeDebut).toLocaleDateString("fr-FR") : "—"} → ${a.periodeFin ? new Date(a.periodeFin).toLocaleDateString("fr-FR") : "—"}`
+      : "—";
+
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-semibold text-gray-700">
+        {titre} <span className="font-normal text-gray-400">({lignes.length})</span>
+      </h3>
+      {lignes.length === 0 ? (
+        <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500">{vide}</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-100">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-left text-gray-500">
+              <tr>
+                <th className="px-3 py-2 font-medium">Référence</th>
+                {montrerDecompte && <th className="px-3 py-2 font-medium">Décompte</th>}
+                <th className="px-3 py-2 font-medium">Type</th>
+                <th className="px-3 py-2 font-medium">Période</th>
+                <th className="px-3 py-2 text-right font-medium">Montant</th>
+                <th className="px-3 py-2 font-medium">Statut</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {lignes.map((a) => (
+                <tr key={a.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono text-navy">{a.code ?? a.reference ?? a.id.slice(0, 8)}</td>
+                  {montrerDecompte && <td className="px-3 py-2 font-mono text-gray-500">{a.decompte?.reference ?? "—"}</td>}
+                  <td className="px-3 py-2">{a.typeAttachement ?? "—"}</td>
+                  <td className="px-3 py-2 text-gray-500">{periode(a)}</td>
+                  <td className="px-3 py-2 text-right font-medium">{a.montantTotalGnf != null ? fmtGnf(a.montantTotalGnf) : "—"}</td>
+                  <td className="px-3 py-2"><StatutBadge statut={a.statut} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

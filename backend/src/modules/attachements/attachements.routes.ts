@@ -83,23 +83,40 @@ attachementsRouter.get("/stats", async (_req: Request, res: Response, next: Next
 
 attachementsRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { decompteId, statut, typeAttachement } = req.query as Record<string, string>;
+    const { decompteId, marcheId, saufDecompteId, statut, typeAttachement } = req.query as Record<string, string>;
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
     const skip = (page - 1) * pageSize;
 
     const where: Record<string, unknown> = {};
     if (decompteId) where.decompteId = decompteId;
+    // `saufDecompteId` sert à lister les attachements ANTÉRIEURS d'un marché :
+    // ceux des autres décomptes, pour donner le cumul sans répéter le décompte
+    // en cours de consultation.
+    if (saufDecompteId) where.decompteId = { not: saufDecompteId };
     if (statut) where.statut = statut;
     if (typeAttachement) where.typeAttachement = typeAttachement;
 
+    // Filtres portés par le décompte parent. Ils se cumulent avec le périmètre
+    // ci-dessous : on compose au lieu d'écraser, sinon un filtre métier
+    // supprimerait silencieusement la restriction d'accès.
+    const filtresDecompte: Record<string, unknown> = {};
+    if (marcheId) filtresDecompte.marcheId = marcheId;
+
     // Périmètres : isolation ENTREPRISE + affectations terrain (via le décompte)
     if (req.user?.role === "ENTREPRISE") {
-      where.decompte = { entrepriseId: await entrepriseIdOf(req.user.id), deletedAt: null };
+      Object.assign(filtresDecompte, { entrepriseId: await entrepriseIdOf(req.user.id), deletedAt: null });
     } else if (req.user) {
       const affectes = await getMarchesAffectes(req.user.id, req.user.role);
-      if (affectes) where.decompte = { marcheId: { in: affectes }, deletedAt: null };
+      if (affectes) {
+        // Un marché demandé hors périmètre ne doit rien renvoyer.
+        Object.assign(filtresDecompte, {
+          marcheId: marcheId && !affectes.includes(marcheId) ? "__hors_perimetre__" : (marcheId ?? { in: affectes }),
+          deletedAt: null,
+        });
+      }
     }
+    if (Object.keys(filtresDecompte).length > 0) where.decompte = filtresDecompte;
 
     const [data, total] = await Promise.all([
       prisma.attachement.findMany({

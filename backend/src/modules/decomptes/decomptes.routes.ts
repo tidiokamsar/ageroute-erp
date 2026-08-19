@@ -10,6 +10,7 @@ import { chargerRegles, nombreRegles } from "../../lib/regles";
 import { calcDecompteRegles } from "./decomptes.calc.regles";
 import { construireSnapshot, rejouerCalcul, lireSnapshot } from "./decomptes.regles.audit";
 import { z } from "zod";
+import type { StatutDecompte } from "@prisma/client";
 
 export const decomptesRouter = Router();
 decomptesRouter.use(requireAuth);
@@ -395,10 +396,19 @@ decomptesRouter.post("/:id/validations-avancees", requireRole("ADMIN","DG","DAF"
       },
     });
 
-    // Mise à jour statut décompte selon décision
-    const statutMap: Record<string, string> = {
+    // Mise à jour du statut selon la décision.
+    //
+    // ⚠️ Le type est celui de Prisma, PAS `string` : la version précédente
+    // mappait MISSION-APPROUVE vers "EN_CONTROLE_TECHNIQUE", valeur absente de
+    // l'énumération StatutDecompte. Le `as never` masquait l'erreur au
+    // compilateur ; Prisma levait à l'exécution, APRÈS la création de la ligne
+    // de validation. Résultat observé en production : la validation MISSION
+    // apparaissait bien dans l'onglet Validations, mais le décompte restait
+    // « Soumis » et l'étape ne franchissait jamais le contrôle Mission.
+    // En typant la table, une valeur inexistante ne compile plus.
+    const statutMap: Partial<Record<string, StatutDecompte>> = {
       "SOUMISSION-APPROUVE": "SOUMIS",
-      "MISSION-APPROUVE":    "EN_CONTROLE_TECHNIQUE",
+      "MISSION-APPROUVE":    "EN_CONTROLE",
       "TECHNIQUE-APPROUVE":  "EN_VALIDATION",
       "DMC-APPROUVE":        "VISA_DAF",
       "DAF-APPROUVE":        "VISA_DG",
@@ -407,11 +417,9 @@ decomptesRouter.post("/:id/validations-avancees", requireRole("ADMIN","DG","DAF"
       "TECHNIQUE-REJETE":    "REJETE",
     };
     const key = `${body.etape}-${body.decision}`;
-    if (statutMap[key]) {
-      await prisma.decompte.update({ where: { id: req.params.id }, data: { statut: statutMap[key] as never } });
-    }
-    if (body.decision === "CORRECTION") {
-      await prisma.decompte.update({ where: { id: req.params.id }, data: { statut: "BROUILLON" as never } });
+    const nouveauStatut = body.decision === "CORRECTION" ? "BROUILLON" : statutMap[key];
+    if (nouveauStatut) {
+      await prisma.decompte.update({ where: { id: req.params.id }, data: { statut: nouveauStatut } });
     }
 
     res.status(201).json(val);

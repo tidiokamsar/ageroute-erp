@@ -38,7 +38,17 @@ export function parseApiError(err: unknown): string {
   return err instanceof Error ? err.message : "Erreur inconnue";
 }
 
+/**
+ * Montant en francs guinéens : « 52 000 000 000 GNF ».
+ *
+ * Le style « currency » en locale fr-GN affichait le symbole local « FG », qui
+ * ne correspond ni aux documents officiels ni au reste de l'application, et
+ * séparait les milliers par une espace fine insécable — invisible à l'écran
+ * mais illisible dès qu'un montant part à l'impression. On formate donc en
+ * fr-FR, on normalise les espaces et on écrit la devise explicitement.
+ */
 export function fmtGnf(val: string | number | bigint | null | undefined): string {
   if (val == null) return "—";
-  return new Intl.NumberFormat("fr-GN", { style: "currency", currency: "GNF", maximumFractionDigits: 0 }).format(Number(val));
+  const nombre = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(Number(val));
+  return `${nombre.replace(/[    ]/g, " ")} GNF`;
 }
