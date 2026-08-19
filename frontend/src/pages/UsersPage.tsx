@@ -6,9 +6,11 @@ import { Input, Select, FormField } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { toast } from "../components/ui/Toast";
 import { Plus, Users, CheckCircle, XCircle, KeyRound, Pencil, Trash2, Search, ShieldCheck, Briefcase } from "lucide-react";
+import { FileUploadModal } from "../components/ui/FileUploadModal";
 
 interface User {
   id: string; email: string; nomComplet: string; role: string;
+  nom?: string | null; prenom?: string | null; fonction?: string | null; signatureUrl?: string | null;
   actif: boolean; derniereConnexion?: string; createdAt: string;
 }
 
@@ -43,6 +45,7 @@ export default function UsersPage() {
   const [pwdModal, setPwdModal] = useState<User|null>(null);
   const [newPwd, setNewPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
+  const [depotSignature, setDepotSignature] = useState(false);
 
   const { data: users, isLoading } = useQuery<User[]>({
     queryKey: ["users"],
@@ -80,7 +83,13 @@ export default function UsersPage() {
   );
 
   function openNew() { setForm({ role: "MISSION", actif: true }); setModal("new"); }
-  function openEdit(u:User) { setForm({ email:u.email, nomComplet:u.nomComplet, role:u.role, actif:u.actif }); setModal(u); }
+  function openEdit(u:User) {
+    setForm({
+      email:u.email, nomComplet:u.nomComplet, role:u.role, actif:u.actif,
+      nom:u.nom ?? "", prenom:u.prenom ?? "", fonction:u.fonction ?? "", signatureUrl:u.signatureUrl ?? "",
+    });
+    setModal(u);
+  }
 
   return (
     <div className="space-y-4">
@@ -150,6 +159,37 @@ export default function UsersPage() {
       <Modal open={modal!==null} onClose={()=>setModal(null)} title={modal==="new"?"Nouvel utilisateur":"Modifier l'utilisateur"} size="md">
         <div className="space-y-3">
           <FormField label="Nom complet" required><Input value={String(form.nomComplet??"")} onChange={(e)=>setForm({...form,nomComplet:e.target.value})}/></FormField>
+
+          {/* Identité officielle — portée sur les documents signés. Le nom
+              complet reste l'affichage courant de l'application ; ces champs
+              alimentent les cartouches de visa, où l'usage sépare les deux. */}
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Prénom"><Input value={String(form.prenom??"")} onChange={(e)=>setForm({...form,prenom:e.target.value})} placeholder="Abdoulaye"/></FormField>
+            <FormField label="Nom"><Input value={String(form.nom??"")} onChange={(e)=>setForm({...form,nom:e.target.value})} placeholder="DABO"/></FormField>
+          </div>
+          <FormField label="Fonction (telle qu'elle figure sur les documents)">
+            <Input value={String(form.fonction??"")} onChange={(e)=>setForm({...form,fonction:e.target.value})} placeholder="Chef de Mission de Contrôle"/>
+          </FormField>
+
+          <FormField label="Signature numérique">
+            <div className="flex items-center gap-3">
+              {form.signatureUrl ? (
+                <img src={String(form.signatureUrl)} alt="Spécimen de signature" className="h-14 rounded border border-gray-200 bg-white object-contain px-2" />
+              ) : (
+                <span className="text-xs text-gray-400">Aucun spécimen déposé</span>
+              )}
+              <Button size="sm" variant="secondary" onClick={()=>setDepotSignature(true)}>
+                {form.signatureUrl ? "Remplacer" : "Déposer"}
+              </Button>
+              {Boolean(form.signatureUrl) && (
+                <Button size="sm" variant="ghost" onClick={()=>setForm({...form,signatureUrl:""})}>Retirer</Button>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              Apposée sur les décomptes, attachements et PV validés par cet agent. Elle complète le
+              cachet électronique, elle ne le remplace pas.
+            </p>
+          </FormField>
           <FormField label="Email" required><Input type="email" value={String(form.email??"")} onChange={(e)=>setForm({...form,email:e.target.value})}/></FormField>
           <FormField label="Rôle" required>
             <Select value={String(form.role??"")} onChange={(e)=>setForm({...form,role:e.target.value})}>
@@ -210,6 +250,14 @@ export default function UsersPage() {
       </Modal>
       {accessUser && <AccessModal user={accessUser} onClose={()=>setAccessUser(null)} />}
       {affectUser && <AffectModal user={affectUser} onClose={()=>setAffectUser(null)} />}
+
+      <FileUploadModal
+        open={depotSignature}
+        onClose={() => setDepotSignature(false)}
+        title="Déposer le spécimen de signature"
+        onFileUploaded={(url) => { setForm({ ...form, signatureUrl: url }); setDepotSignature(false); }}
+      />
+
     </div>
   );
 }

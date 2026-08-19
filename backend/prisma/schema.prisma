@@ -172,6 +172,15 @@ model User {
   id               String    @id @default(uuid())
   email            String    @unique
   nomComplet       String
+  // Identité officielle portée sur les documents signés. `nomComplet` reste
+  // l'affichage courant ; nom, prénom et fonction servent aux mentions
+  // officielles, où l'usage les sépare.
+  // Migration : 2026-08-19-user-signature.sql
+  nom              String?
+  prenom           String?
+  fonction         String?   // ex. « Chef de Mission de Contrôle »
+  // Spécimen de signature déposé — complète le cachet cryptographique.
+  signatureUrl     String?
   passwordHash     String
   role             Role      @default(MISSION)
   actif            Boolean   @default(true)

@@ -44,7 +44,9 @@ interface DecompteLigne {
   statut: string; depassement: boolean; observations?: string;
 }
 
+interface Signataire { nom?: string | null; fonction?: string | null; signatureUrl?: string | null }
 interface DecompteValidation {
+  signataire?: Signataire;
   id: string; etape: string; decision: string; commentaire: string;
   validePar: string; valideNom?: string; valideRole?: string; signatureRef?: string; valideAt: string;
 }
@@ -904,9 +906,21 @@ export function DecomptesPage() {
                           <span className={`text-xs font-bold ${v.decision === "APPROUVE" ? "text-green-700" : v.decision === "REJETE" ? "text-red-700" : "text-orange-700"}`}>{v.decision}</span>
                           {v.signatureRef && <span className="text-[10px] text-gray-400 font-mono">#{v.signatureRef.slice(0, 8)}</span>}
                         </div>
-                        <span className="text-[10px] text-gray-400">{new Date(v.valideAt).toLocaleString("fr-FR")} — {v.valideNom ?? v.validePar} ({v.valideRole})</span>
+                        <span className="text-[10px] text-gray-400">{new Date(v.valideAt).toLocaleString("fr-FR")}</span>
                       </div>
                       <p className="text-sm text-gray-700">{v.commentaire}</p>
+
+                      {/* Cartouche de signature — une pièce comptable doit dire
+                          qui a validé, à quel titre, et porter sa signature. */}
+                      <div className="mt-2 flex items-end justify-between gap-3 border-t border-white/70 pt-2">
+                        <div className="text-xs">
+                          <p className="font-semibold text-gray-800">{v.signataire?.nom ?? v.valideNom ?? v.validePar}</p>
+                          <p className="text-gray-500">{v.signataire?.fonction ?? v.valideRole}</p>
+                        </div>
+                        {v.signataire?.signatureUrl
+                          ? <img src={v.signataire.signatureUrl} alt="Signature" className="h-12 object-contain" />
+                          : <span className="text-[10px] italic text-gray-400">Aucun spécimen de signature déposé</span>}
+                      </div>
                     </div>
                   ))}
                 </div>

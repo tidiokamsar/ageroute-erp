@@ -16,11 +16,19 @@ const userCreateSchema = z.object({
   password: z.string().min(8),
   role: z.enum(["ADMIN", "DG", "DAF", "DMC", "UGP", "MISSION", "TECHNIQUE", "ENTREPRISE", "AUDITEUR"]),
   actif: z.boolean().default(true),
+  // Identité officielle portée sur les documents signés. Sans elle, les
+  // cartouches de visa restaient vides même sur une pièce validée, et
+  // l'historique des validations affichait l'adresse e-mail du valideur.
+  nom: z.string().optional(),
+  prenom: z.string().optional(),
+  fonction: z.string().optional(),
+  // Spécimen de signature déposé via /api/uploads — apposé sur les documents.
+  signatureUrl: z.string().optional(),
 });
 
 usersRouter.get("/", async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const users = await prisma.user.findMany({ select: { id: true, email: true, nomComplet: true, role: true, actif: true, derniereConnexion: true, createdAt: true }, orderBy: { nomComplet: "asc" } });
+    const users = await prisma.user.findMany({ select: { id: true, email: true, nomComplet: true, nom: true, prenom: true, fonction: true, signatureUrl: true, role: true, actif: true, derniereConnexion: true, createdAt: true }, orderBy: { nomComplet: "asc" } });
     res.json(users);
   } catch (err) { next(err); }
 });
@@ -42,7 +50,7 @@ usersRouter.put("/:id", async (req: Request, res: Response, next: NextFunction) 
     const data = userCreateSchema.partial().omit({ password: true }).parse(req.body);
     const updated = await prisma.user.update({ where: { id: req.params.id }, data });
     await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "User", entityId: req.params.id });
-    res.json({ id: updated.id, email: updated.email, nomComplet: updated.nomComplet, role: updated.role, actif: updated.actif });
+    res.json({ id: updated.id, email: updated.email, nomComplet: updated.nomComplet, nom: updated.nom, prenom: updated.prenom, fonction: updated.fonction, signatureUrl: updated.signatureUrl, role: updated.role, actif: updated.actif });
   } catch (err) { next(err); }
 });
 

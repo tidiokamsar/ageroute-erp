@@ -371,7 +371,34 @@ decomptesRouter.get("/:id/validations-avancees", async (req: Request, res: Respo
       where: { decompteId: req.params.id },
       orderBy: { valideAt: "desc" },
     });
-    res.json(validations);
+
+    // Identité du signataire — une pièce comptable doit dire QUI a validé, à
+    // quel titre, et porter sa signature. Le nom est resservi depuis le compte
+    // plutôt que depuis l'instantané `valideNom`, qui contenait l'adresse
+    // e-mail sur les validations anciennes.
+    const ids = [...new Set(validations.map((v) => v.validePar).filter(Boolean) as string[])];
+    const agents = ids.length
+      ? await prisma.user.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, nomComplet: true, nom: true, prenom: true, fonction: true, signatureUrl: true },
+        })
+      : [];
+    const parId = new Map(agents.map((a) => [a.id, a]));
+
+    res.json(validations.map((v) => {
+      const a = v.validePar ? parId.get(v.validePar) : undefined;
+      const nomAffiche = a
+        ? ([a.prenom, a.nom].filter(Boolean).join(" ") || a.nomComplet)
+        : v.valideNom;
+      return {
+        ...v,
+        signataire: {
+          nom: nomAffiche,
+          fonction: a?.fonction ?? null,
+          signatureUrl: a?.signatureUrl ?? null,
+        },
+      };
+    }));
   } catch (err) { next(err); }
 });
 
