@@ -3,7 +3,7 @@
  * Module partagé pour TOUS les documents PDF de l'ERP : décomptes,
  * attachements, PV de réception, bordereaux, rapports bailleurs.
  *
- * Utilise le logo officiel AGEROUTE (assets/ageroute-logo.jpg).
+ * Utilise le logo officiel AGEROUTE (assets/ageroute-logo-pdf.jpg).
  * En-tête : logo + République de Guinée + titre du document.
  * Pied de page : espaces de signature + horodatage.
  */
@@ -11,7 +11,7 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
 
-const CHEMIN_LOGO = path.join(__dirname, "..", "assets", "ageroute-logo.jpg");
+const CHEMIN_LOGO = path.join(__dirname, "..", "assets", "ageroute-logo-pdf.jpg");
 
 export interface OptionsGabarit {
   titre: string;
