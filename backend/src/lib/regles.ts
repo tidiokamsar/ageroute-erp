@@ -78,8 +78,18 @@ export interface ContexteRegles {
 const SPECIFICITE: Record<string, number> = { MARCHE: 0, TYPE_MARCHE: 1, BAILLEUR: 2, GLOBAL: 3 };
 
 /**
- * Résout les valeurs effectives : défauts surchargés par les règles VALIDE
- * applicables au contexte, de la portée la plus spécifique à la plus générale.
+ * Statuts actifs acceptés par le moteur — pendant la transition du cycle
+ * de vie L0.2, "VALIDE" (ancien) et "APPROUVEE"/"GELEE" (nouveau) sont
+ * TOUS actifs. Sans cela, après la migration qui bascule VALIDE→APPROUVEE,
+ * le moteur ne trouverait plus aucune règle et ignorerait silencieusement
+ * tous les arbitrages DAF.
+ */
+const STATUTS_ACTIFS = new Set(["VALIDE", "APPROUVEE", "GELEE"]);
+
+/**
+ * Résout les valeurs effectives : défauts surchargés par les règles actives
+ * (VALIDE ou APPROUVEE/GELEE selon le cycle de vie) applicables au contexte,
+ * de la portée la plus spécifique à la plus générale.
  * Pure — aucune base de données ni horloge implicite (dateRef par défaut
  * fournie par l'appelant).
  */
@@ -87,7 +97,7 @@ export function resoudreRegles(records: RegleRecord[], ctx: ContexteRegles = {},
   const resultat: Record<string, string> = { ...REGLES_DEFAUT };
 
   const candidates: RegleRecord[] = records.filter((r) => {
-    if (r.statut !== "VALIDE") return false;
+    if (!STATUTS_ACTIFS.has(r.statut)) return false;
     if (!(r.cle in REGLES_DEFAUT)) return false; // clé inconnue : ignorée
     if (r.dateEffet.getTime() > dateRef.getTime()) return false; // pas encore en vigueur
     if (r.portee === "GLOBAL") return true;
@@ -140,7 +150,7 @@ function cleCache(ctx: ContexteRegles): string {
   });
 }
 
-/** Règles effectives pour un contexte donné (défauts + surcharges VALIDE). */
+/** Règles effectives pour un contexte donné (défauts + surcharges actives). */
 export async function chargerRegles(ctx: ContexteRegles = {}): Promise<ReglesEffectives> {
   const k = cleCache(ctx);
   const entree = cache.get(k);
@@ -148,7 +158,7 @@ export async function chargerRegles(ctx: ContexteRegles = {}): Promise<ReglesEff
 
   const dateRef = ctx.dateRef ?? new Date();
   const rows = await prisma.regleGestion.findMany({
-    where: { statut: "VALIDE", dateEffet: { lte: dateRef } },
+    where: { statut: { in: [...STATUTS_ACTIFS] }, dateEffet: { lte: dateRef } },
     select: { cle: true, portee: true, porteeId: true, valeur: true, dateEffet: true, version: true, statut: true },
   });
   const valeur = resoudreRegles(rows, ctx, dateRef);
