@@ -10,6 +10,7 @@ import { entreprisesRouter } from "./modules/entreprises/entreprises.routes";
 import { marchesRouter } from "./modules/marches/marches.routes";
 import { bpuRouter } from "./modules/marches/bpu.routes";
 import { osRouter } from "./modules/marches/os.routes";
+import { situationBordereauRouter } from "./modules/marches/marches.situation.routes";
 import { decomptesRouter } from "./modules/decomptes/decomptes.routes";
 import { attachementsRouter } from "./modules/attachements/attachements.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
@@ -99,6 +100,7 @@ export function createApp() {
   app.use("/api/marches", requireAuth, checkModuleAccess("marches"), marchesRouter);
   app.use("/api/marches/:marcheId/bpu", requireAuth, checkModuleAccess("marches"), bpuRouter);
   app.use("/api/marches/:marcheId/os", requireAuth, checkModuleAccess("marches"), osRouter);
+  app.use("/api/marches/:marcheId", situationBordereauRouter);
   app.use("/api/decomptes", requireAuth, checkModuleAccess("decomptes"), decomptesRouter);
   app.use("/api/attachements", requireAuth, checkModuleAccess("attachements"), attachementsRouter);
   app.use("/api/dashboard", requireAuth, checkModuleAccess("dashboard"), dashboardRouter);
