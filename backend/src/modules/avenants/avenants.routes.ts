@@ -5,6 +5,7 @@ import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { z } from "zod";
+import { assertMarcheAutorise } from "../../lib/perimetre";
 
 export const avenantsRouter = Router();
 avenantsRouter.use(requireAuth);
@@ -22,6 +23,7 @@ const avenantSchema = z.object({
 
 avenantsRouter.get("/marche/:marcheId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertMarcheAutorise(req, req.params.marcheId);
     const avenants = await prisma.avenant.findMany({
       where: { marcheId: req.params.marcheId },
       orderBy: { numero: "asc" },

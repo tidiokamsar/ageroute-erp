@@ -9,6 +9,7 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
+import { assertMarcheAutorise, filtreParMarche } from "../../lib/perimetre";
 import { z } from "zod";
 
 export const garantiesRouter = Router();
@@ -29,6 +30,7 @@ const schema = z.object({
 // Toutes les garanties d'un marché
 garantiesRouter.get("/marche/:marcheId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertMarcheAutorise(req, req.params.marcheId);
     const garanties = await prisma.garantie.findMany({
       where: { marcheId: req.params.marcheId },
       orderBy: { dateExpiration: "asc" },
@@ -41,7 +43,8 @@ garantiesRouter.get("/marche/:marcheId", async (req: Request, res: Response, nex
 garantiesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { expirantes, active } = req.query;
-    const where: Record<string,unknown> = {};
+    // Périmètre : une garantie appartient à un marché (lib/perimetre.ts).
+    const where: Record<string,unknown> = { ...(await filtreParMarche(req)) };
     if (active !== undefined) where.active = active === "true";
     if (expirantes === "true") {
       const soon = new Date(); soon.setDate(soon.getDate() + 30);

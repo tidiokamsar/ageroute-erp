@@ -13,7 +13,8 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
-import { z } from "zod";
+import { z } from "zod";
+import { assertMarcheAutorise } from "../../lib/perimetre";
 
 export const revisionRouter = Router();
 revisionRouter.use(requireAuth);

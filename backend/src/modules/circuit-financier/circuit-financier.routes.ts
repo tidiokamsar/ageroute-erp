@@ -18,7 +18,8 @@ circuitFinancierRouter.use(requireAuth);
 // F12 — définitions unifiées : voir lib/circuit-definitions.ts
 import { etapesCircuitFinancier, type EtapeCircuit } from "../../lib/circuit-definitions";
 import { roleAutorise } from "../../lib/roles-circuit";
-import { chargerRegles } from "../../lib/regles";
+import { chargerRegles } from "../../lib/regles";
+import { filtreParDecompte } from "../../lib/perimetre";
 function etapesPourFinancement(financement: string, bailleurNom?: string): EtapeCircuit[] {
   return etapesCircuitFinancier(financement);
 }

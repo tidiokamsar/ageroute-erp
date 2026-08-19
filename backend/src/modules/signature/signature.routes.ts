@@ -10,6 +10,7 @@ import PDFDocument from "pdfkit";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import { formaterMontantGnf } from "../../lib/montants";
+import { assertDecompteAutorise } from "../../lib/perimetre";
 
 export const signatureRouter = Router();
 signatureRouter.use(requireAuth);
@@ -21,6 +22,13 @@ function fmtGnf(v: bigint | number): string {
 // Signer un décompte validé
 signatureRouter.post("/signer/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Un décompte hors périmètre est « introuvable » : servir son PDF
+    // contournerait le cloisonnement de la liste.
+    await assertDecompteAutorise(req, req.params.decompteId, async (id) => {
+      const d = await prisma.decompte.findUnique({ where: { id }, select: { marcheId: true } });
+      return d?.marcheId ?? null;
+    });
+
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const decompte = await prisma.decompte.findFirst({
       where: { id: req.params.decompteId, deletedAt: null },
@@ -50,6 +58,13 @@ signatureRouter.post("/signer/:decompteId", async (req: Request, res: Response, 
 // Générer le PDF officiel
 signatureRouter.get("/pdf/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Un décompte hors périmètre est « introuvable » : servir son PDF
+    // contournerait le cloisonnement de la liste.
+    await assertDecompteAutorise(req, req.params.decompteId, async (id) => {
+      const d = await prisma.decompte.findUnique({ where: { id }, select: { marcheId: true } });
+      return d?.marcheId ?? null;
+    });
+
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const raw = await prisma.decompte.findFirst({
       where: { id: req.params.decompteId, deletedAt: null },

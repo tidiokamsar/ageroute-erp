@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { requireAuth } from "../../middleware/auth.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
+import { assertMarcheAutorise, filtreParDecompte, filtreParMarche, marchesAutorises } from "../../lib/perimetre";
 
 export const exportRouter = Router();
 exportRouter.use(requireAuth);
@@ -33,7 +34,11 @@ function sendCsv(res: Response, filename: string, csv: string) {
 exportRouter.get("/marches", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { statut, entrepriseId } = req.query;
+    // Même règle que l'export des décomptes : le fichier ne doit pas contenir
+    // ce que l'écran masque. Ici le marché porte l'identifiant directement.
+    const autorises = await marchesAutorises(req);
     const where: Record<string, unknown> = { deletedAt: null };
+    if (autorises !== null) where.id = { in: autorises };
     if (statut) where.statut = statut;
     if (entrepriseId) where.entrepriseId = entrepriseId;
 
@@ -59,9 +64,11 @@ exportRouter.get("/marches", async (req: Request, res: Response, next: NextFunct
 exportRouter.get("/decomptes", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { statut, marcheId } = req.query;
-    const where: Record<string, unknown> = { deletedAt: null };
+    // Un export est une sortie de données : sans périmètre, le cloisonnement
+    // de l'écran se contournerait par un simple téléchargement.
+    const where: Record<string, unknown> = { deletedAt: null, ...(await filtreParMarche(req)) };
     if (statut) where.statut = statut;
-    if (marcheId) where.marcheId = marcheId;
+    if (marcheId) { await assertMarcheAutorise(req, String(marcheId)); where.marcheId = marcheId; }
 
     const decomptes = await prisma.decompte.findMany({
       where,
@@ -83,8 +90,15 @@ exportRouter.get("/decomptes", async (req: Request, res: Response, next: NextFun
 // ─── Export entreprises ───────────────────────────────────────────────────────
 exportRouter.get("/entreprises", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Titulaires des marchés confiés, comme le référentiel à l'écran.
+    const autorisesEnt = await marchesAutorises(req);
+    let filtreEnt: Record<string, unknown> = {};
+    if (autorisesEnt !== null) {
+      const m = await prisma.marche.findMany({ where: { id: { in: autorisesEnt } }, select: { entrepriseId: true } });
+      filtreEnt = { id: { in: [...new Set(m.map((x) => x.entrepriseId))] } };
+    }
     const entreprises = await prisma.entreprise.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...filtreEnt },
       orderBy: { raisonSociale: "asc" },
     });
 
@@ -102,7 +116,7 @@ exportRouter.get("/entreprises", async (req: Request, res: Response, next: NextF
 exportRouter.get("/paiements", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { statut } = req.query;
-    const where: Record<string, unknown> = { deletedAt: null };
+    const where: Record<string, unknown> = { deletedAt: null, ...(await filtreParDecompte(req)) };
     if (statut) where.statut = statut;
 
     const paiements = await prisma.paiement.findMany({
@@ -128,6 +142,7 @@ exportRouter.get("/paiements", async (req: Request, res: Response, next: NextFun
 exportRouter.get("/garanties", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const garanties = await prisma.garantie.findMany({
+      where: { ...(await filtreParMarche(req)) },
       include: { marche: { select: { reference: true, entreprise: { select: { raisonSociale: true } } } } },
       orderBy: { createdAt: "desc" },
     });
