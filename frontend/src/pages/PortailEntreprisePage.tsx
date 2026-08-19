@@ -6,7 +6,8 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { useAuth, authStore } from "../lib/auth";
+import { useAuth, authStore } from "../lib/auth";
+import { FileUploadModal } from "../components/ui/FileUploadModal";
 
 // ─── ICÔNES (HeroIcons inline SVG léger) ─────────────────────────────────────
 const IC = {
@@ -384,6 +385,9 @@ export default function PortailEntreprisePage() {
   const tab: Tab = tabParam && TABS_VALIDES.includes(tabParam) ? tabParam : "dashboard";
   const setTab = (t: Tab) => setSearchParams(t === "dashboard" ? {} : { tab: t });
   const [marcheDetail, setMarcheDetail] = useState<string | null>(null);
+  // Dépôt des pièces justificatives : c'est l'entreprise qui les fournit, la
+  // Mission et la Direction Technique les valident ou les retournent.
+  const [piecesDe, setPiecesDe] = useState<{ id: string; reference: string } | null>(null);
 
   const profilQ = useQuery<Profil>({ queryKey: ["portail-profil"], queryFn: () => api.get("/portail/profil").then(r => r.data) });
   const marchesQ = useQuery<Marche[]>({ queryKey: ["portail-marches"], queryFn: () => api.get("/portail/mes-marches").then(r => r.data) });
@@ -745,7 +749,7 @@ export default function PortailEntreprisePage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100">
-                      {["Référence","Marché","Type","Montant HT","Net à payer","Statut","Étape","Date"].map(h => (
+                      {["Référence","Marché","Type","Montant HT","Net à payer","Statut","Étape","Pièces","Date"].map(h => (
                         <th key={h} className="px-4 py-3 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
@@ -976,6 +980,133 @@ export default function PortailEntreprisePage() {
         )}
 
       </div>
+
+      {piecesDe && (
+        <PiecesDossier
+          decompteId={piecesDe.id}
+          reference={piecesDe.reference}
+          onClose={() => setPiecesDe(null)}
+        />
+      )}
+
+    </div>
+  );
+}
+
+// ─── Pièces justificatives du dossier (côté entreprise) ──────────────────────
+interface PieceDoc {
+  id: string; nom: string; url: string; version: number; createdAt: string;
+  statutValidation: "DEPOSE" | "VALIDE" | "RETOURNE";
+  motifRetour?: string | null;
+}
+interface PieceNat {
+  cle: string; libelle: string; requis: boolean; fourni: boolean; documents: PieceDoc[];
+}
+
+const ETAT_PIECE: Record<string, { label: string; couleur: string; fond: string }> = {
+  DEPOSE:   { label: "En attente de contrôle", couleur: "#1D4ED8", fond: "#DBEAFE" },
+  VALIDE:   { label: "Validée",                couleur: "#15803D", fond: "#DCFCE7" },
+  RETOURNE: { label: "À corriger",             couleur: "#B45309", fond: "#FEF3C7" },
+};
+
+/**
+ * L'entreprise dépose ici les justificatifs de son décompte.
+ *
+ * Le circuit est le même que côté agence : déposer crée une version, la Mission
+ * ou la Direction Technique valide ou retourne avec un motif. Une pièce
+ * retournée réapparaît ici avec la raison, ce qui évite l'aller-retour par
+ * téléphone pour savoir ce qui ne va pas.
+ */
+function PiecesDossier({ decompteId, reference, onClose }: { decompteId: string; reference: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [depotPour, setDepotPour] = useState<PieceNat | null>(null);
+
+  const { data, isLoading } = useQuery<{ pieces: PieceNat[]; requisFournis: number; requisTotal: number }>({
+    queryKey: ["portail-pieces", decompteId],
+    queryFn: () => api.get(`/decomptes/${decompteId}/documents`).then((r) => r.data),
+  });
+
+  const rattacher = useMutation({
+    mutationFn: (corps: object) => api.post(`/decomptes/${decompteId}/documents`, corps),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["portail-pieces", decompteId] });
+      qc.invalidateQueries({ queryKey: ["portail-decomptes"] });
+      setDepotPour(null);
+    },
+  });
+
+  const pieces = data?.pieces ?? [];
+  const complet = (data?.requisFournis ?? 0) === (data?.requisTotal ?? 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <div>
+            <h3 className="text-sm font-bold text-gray-800">Pièces justificatives</h3>
+            <p className="font-mono text-xs text-gray-400">{reference}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        <div className="space-y-3 p-5">
+          <div className={`rounded-xl px-4 py-3 text-sm ${complet ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"}`}>
+            {data?.requisFournis ?? 0}/{data?.requisTotal ?? 0} pièces obligatoires fournies.
+            {!complet && " Le décompte ne pourra pas avancer tant que le dossier est incomplet."}
+          </div>
+
+          {isLoading && <p className="text-sm text-gray-500">Chargement…</p>}
+
+          {pieces.map((p) => (
+            <div key={p.cle} className="rounded-xl border border-gray-100 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-sm font-semibold text-gray-700">{p.libelle}</span>
+                  {p.requis
+                    ? <span className="ml-2 text-[11px] font-bold text-red-500">OBLIGATOIRE</span>
+                    : <span className="ml-2 text-[11px] text-gray-400">(si applicable)</span>}
+                </div>
+                <button
+                  onClick={() => setDepotPour(p)}
+                  className="rounded-lg px-3 py-1.5 text-xs font-bold text-white"
+                  style={{ background: "#1B2A4A" }}
+                >
+                  {p.fourni ? "Nouvelle version" : "Déposer"}
+                </button>
+              </div>
+
+              {p.documents.map((d) => {
+                const etat = ETAT_PIECE[d.statutValidation] ?? ETAT_PIECE.DEPOSE;
+                return (
+                  <div key={d.id} className="mt-2 border-t border-gray-50 pt-2">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <a href={d.url} target="_blank" rel="noreferrer" className="truncate font-medium text-blue-700 hover:underline">
+                        {d.nom} <span className="text-gray-400">v{d.version}</span>
+                      </a>
+                      <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold"
+                        style={{ color: etat.couleur, background: etat.fond }}>
+                        {etat.label}
+                      </span>
+                    </div>
+                    {d.statutValidation === "RETOURNE" && d.motifRetour && (
+                      <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                        Motif du retour : {d.motifRetour}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <FileUploadModal
+        open={Boolean(depotPour)}
+        onClose={() => setDepotPour(null)}
+        title={depotPour ? `Déposer — ${depotPour.libelle}` : "Déposer une pièce"}
+        onFileUploaded={(url, nom) => { if (depotPour) rattacher.mutate({ type: depotPour.cle, nom, url }); }}
+      />
     </div>
   );
 }
