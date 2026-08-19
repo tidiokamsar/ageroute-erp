@@ -1003,12 +1003,23 @@ export function MarchesPage() {
                     <div className="bg-white border border-gray-100 rounded-xl p-4 space-y-3">
                       <div className="flex items-center justify-between mb-1">
                         <p className="text-xs font-bold text-gray-600">Avancement financier</p>
-                        <button
-                          onClick={() => imprimerSituation(situation, detail!)}
-                          className="text-xs text-navy underline hover:text-navy/70"
-                        >
-                          Imprimer situation officielle
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              window.open(`/api/marches/${detail!.id}/situation-bordereau/pdf`, "_blank");
+                            }}
+                            className="text-xs text-blue-600 underline hover:text-blue-800 font-semibold"
+                            title="Bordereau officiel PDF — Situation du Marché avec tous les décomptes, cumuls, retenues et paiements"
+                          >
+                            Bordereau PDF
+                          </button>
+                          <button
+                            onClick={() => imprimerSituation(situation, detail!)}
+                            className="text-xs text-navy underline hover:text-navy/70"
+                          >
+                            Imprimer
+                          </button>
+                        </div>
                       </div>
                       {(() => {
                         const tc = situation.financier.tauxConsommation;
