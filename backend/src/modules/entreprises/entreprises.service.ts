@@ -177,10 +177,16 @@ export const entreprisesService = {
   async list(params: {
     page?: number; pageSize?: number; search?: string; statut?: string;
     scoreLt?: number; scoreGte?: number;
+    /** Restriction de périmètre : titulaires des marchés confiés à l'agent. */
+    entrepriseIds?: string[] | null;
   }) {
     const page = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(100, params.pageSize ?? 20);
     const where: Record<string, unknown> = { deletedAt: null };
+    // Un rôle scopé ne doit voir que les entreprises avec lesquelles il
+    // travaille. Sans cela, la liste des marchés était cloisonnée mais le
+    // référentiel des titulaires restait ouvert à toute l'agence.
+    if (params.entrepriseIds) where.id = { in: params.entrepriseIds };
     if (params.search) where.OR = [
       { raisonSociale: { contains: params.search, mode: "insensitive" } },
       { nif:           { contains: params.search, mode: "insensitive" } },

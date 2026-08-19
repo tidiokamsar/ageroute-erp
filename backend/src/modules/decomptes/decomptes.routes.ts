@@ -519,20 +519,30 @@ decomptesRouter.post("/:id/payment-traces", requireRole("ADMIN","DAF","DG"), asy
 });
 
 // KPIs enrichis §8 CDC
-decomptesRouter.get("/stats/enrichis", async (_req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.get("/stats/enrichis", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { prisma } = await import("../../lib/prisma");
+
+    // C'est CET endpoint que l'écran interroge (celui de /stats ne sert que de
+    // repli). Sans périmètre, un agent dont la liste ne montrait que ses deux
+    // marchés lisait « Total 8 » et le montant payé de toute l'agence.
+    const entrepriseId = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    const marcheIds = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
+    const base: Record<string, unknown> = { deletedAt: null };
+    if (entrepriseId) base.entrepriseId = entrepriseId;
+    if (marcheIds) base.marcheId = { in: marcheIds };
+
     const [total, brouillons, soumis, enControle, valides, payes, rejetes,
       montantAttenteRaw, montantPayeRaw] = await Promise.all([
-      prisma.decompte.count({ where: { deletedAt: null } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "BROUILLON" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "SOUMIS" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: { in: ["EN_CONTROLE","EN_VALIDATION","VISA_DAF","VISA_DG"] } } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "VALIDE" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "PAYE" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "REJETE" } }),
-      prisma.decompte.aggregate({ where: { deletedAt: null, statut: { notIn: ["PAYE","REJETE"] } }, _sum: { netAPayer: true } }),
-      prisma.decompte.aggregate({ where: { deletedAt: null, statut: "PAYE" }, _sum: { netAPayer: true } }),
+      prisma.decompte.count({ where: base }),
+      prisma.decompte.count({ where: { ...base, statut: "BROUILLON" } }),
+      prisma.decompte.count({ where: { ...base, statut: "SOUMIS" } }),
+      prisma.decompte.count({ where: { ...base, statut: { in: ["EN_CONTROLE","EN_VALIDATION","VISA_DAF","VISA_DG"] } } }),
+      prisma.decompte.count({ where: { ...base, statut: "VALIDE" } }),
+      prisma.decompte.count({ where: { ...base, statut: "PAYE" } }),
+      prisma.decompte.count({ where: { ...base, statut: "REJETE" } }),
+      prisma.decompte.aggregate({ where: { ...base, statut: { notIn: ["PAYE","REJETE"] } }, _sum: { netAPayer: true } }),
+      prisma.decompte.aggregate({ where: { ...base, statut: "PAYE" }, _sum: { netAPayer: true } }),
     ]);
     res.json({
       total, brouillons, soumis, enControle, valides, payes, rejetes,

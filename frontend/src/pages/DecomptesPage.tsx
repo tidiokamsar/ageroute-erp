@@ -394,6 +394,18 @@ export function DecomptesPage() {
 
   // ── JSX ───────────────────────────────────────────────────────────────────
 
+  /**
+   * Total d'une colonne du bordereau. Centralisé parce que le pied du tableau
+   * ne comptait que 14 cellules pour 16 colonnes : la retenue s'affichait sous
+   * « ARMP » et le net sous « TTC ». Un total mal placé sur une pièce
+   * comptable se lit comme une erreur de calcul.
+   */
+  const totalLignes = (champ: string): number =>
+    ((lignes as DecompteLigne[] | undefined) ?? []).reduce(
+      (somme, l) => somme + Number((l as unknown as Record<string, unknown>)[champ] ?? 0),
+      0,
+    );
+
   return (
     <div className="space-y-5">
 
@@ -682,17 +694,17 @@ export function DecomptesPage() {
                           <td className="px-2 py-2 font-mono font-bold text-gray-700">{l.codeArticle}</td>
                           <td className="px-2 py-2 max-w-[160px] truncate text-gray-700" title={l.designation}>{l.designation}</td>
                           <td className="px-2 py-2 text-gray-400">{l.unite}</td>
-                          <td className="px-2 py-2 text-right">{l.quantiteContrat}</td>
-                          <td className="px-2 py-2 text-right text-gray-400">{l.quantitePrecedent}</td>
-                          <td className="px-2 py-2 text-right font-semibold">{l.quantiteCourante}</td>
+                          <td className="px-2 py-2 text-right whitespace-nowrap tabular-nums">{l.quantiteContrat}</td>
+                          <td className="px-2 py-2 text-right text-gray-400 whitespace-nowrap tabular-nums">{l.quantitePrecedent}</td>
+                          <td className="px-2 py-2 text-right font-semibold whitespace-nowrap tabular-nums">{l.quantiteCourante}</td>
                           <td className={`px-2 py-2 text-right font-bold ${l.depassement ? "text-red-600" : "text-navy"}`}>{l.quantiteCumulee}</td>
-                          <td className="px-2 py-2 text-right text-gray-400">{fmtGnf(l.prixUnitaire)}</td>
-                          <td className="px-2 py-2 text-right">{fmtGnf(l.montantBrut)}</td>
-                          <td className="px-2 py-2 text-right text-cyan-600">{fmtGnf(l.montantTva)}</td>
-                          <td className="px-2 py-2 text-right text-orange-500">{fmtGnf((l as unknown as Record<string, unknown>).montantArmp as string ?? "0")}</td>
-                          <td className="px-2 py-2 text-right font-semibold text-slate-700">{fmtGnf((l as unknown as Record<string, unknown>).montantTtc as string ?? "0")}</td>
-                          <td className="px-2 py-2 text-right text-amber-600">{fmtGnf(l.montantRetenue)}</td>
-                          <td className="px-2 py-2 text-right font-black text-navy">{fmtGnf(l.montantNet)}</td>
+                          <td className="px-2 py-2 text-right text-gray-400 whitespace-nowrap tabular-nums">{fmtGnf(l.prixUnitaire)}</td>
+                          <td className="px-2 py-2 text-right whitespace-nowrap tabular-nums">{fmtGnf(l.montantBrut)}</td>
+                          <td className="px-2 py-2 text-right text-cyan-600 whitespace-nowrap tabular-nums">{fmtGnf(l.montantTva)}</td>
+                          <td className="px-2 py-2 text-right text-orange-500 whitespace-nowrap tabular-nums">{fmtGnf((l as unknown as Record<string, unknown>).montantArmp as string ?? "0")}</td>
+                          <td className="px-2 py-2 text-right font-semibold text-slate-700 whitespace-nowrap tabular-nums">{fmtGnf((l as unknown as Record<string, unknown>).montantTtc as string ?? "0")}</td>
+                          <td className="px-2 py-2 text-right text-amber-600 whitespace-nowrap tabular-nums">{fmtGnf(l.montantRetenue)}</td>
+                          <td className="px-2 py-2 text-right font-black text-navy whitespace-nowrap tabular-nums">{fmtGnf(l.montantNet)}</td>
                           <td className="px-2 py-2">
                             {l.depassement ? <span className="text-red-600 flex items-center gap-0.5 font-bold"><AlertTriangle className="h-3 w-3"/>!!</span> : <span className="text-green-500"><Check className="h-3 w-3"/></span>}
                           </td>
@@ -704,17 +716,19 @@ export function DecomptesPage() {
                         </tr>
                       ))}
                       {(!lignes || (lignes as DecompteLigne[]).length === 0) && (
-                        <tr><td colSpan={14} className="py-8 text-center text-gray-400">Aucune ligne BPU — ajoutez des articles</td></tr>
+                        <tr><td colSpan={16} className="py-8 text-center text-gray-400">Aucune ligne BPU — ajoutez des articles</td></tr>
                       )}
                     </tbody>
                     {lignes && (lignes as DecompteLigne[]).length > 0 && (
                       <tfoot className="bg-gray-50 border-t border-gray-200">
                         <tr>
                           <td colSpan={8} className="px-2 py-2 font-black text-gray-500 uppercase text-[10px]">Total</td>
-                          <td className="px-2 py-2 text-right font-bold">{fmtGnf((lignes as DecompteLigne[]).reduce((s, l) => s + Number(l.montantBrut), 0))}</td>
-                          <td className="px-2 py-2 text-right text-blue-500">{fmtGnf((lignes as DecompteLigne[]).reduce((s, l) => s + Number(l.montantTva), 0))}</td>
-                          <td className="px-2 py-2 text-right text-amber-500">{fmtGnf((lignes as DecompteLigne[]).reduce((s, l) => s + Number(l.montantRetenue), 0))}</td>
-                          <td className="px-2 py-2 text-right font-black text-navy">{fmtGnf((lignes as DecompteLigne[]).reduce((s, l) => s + Number(l.montantNet), 0))}</td>
+                          <td className="px-2 py-2 text-right font-bold whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantBrut"))}</td>
+                          <td className="px-2 py-2 text-right text-cyan-600 whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantTva"))}</td>
+                          <td className="px-2 py-2 text-right text-orange-500 whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantArmp"))}</td>
+                          <td className="px-2 py-2 text-right font-semibold text-slate-700 whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantTtc"))}</td>
+                          <td className="px-2 py-2 text-right text-amber-600 whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantRetenue"))}</td>
+                          <td className="px-2 py-2 text-right font-black text-navy whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantNet"))}</td>
                           <td colSpan={2} />
                         </tr>
                       </tfoot>
