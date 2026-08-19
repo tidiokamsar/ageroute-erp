@@ -1126,6 +1126,15 @@ model Document {
   // §18 CDC — versioning + horodatage
   estArchive  Boolean  @default(false)
   uploadePar  String?  // userId
+
+  // Circuit de validation des pièces : l'ENTREPRISE dépose, la MISSION et la
+  // DIRECTION TECHNIQUE valident — ou retournent avec un motif.
+  // Migration : 2026-08-19-documents-validation.sql
+  statutValidation String    @default("DEPOSE") // DEPOSE | VALIDE | RETOURNE
+  valideParId      String?
+  valideAt         DateTime?
+  motifRetour      String?
+
   createdAt   DateTime @default(now())
 
   @@map("documents")

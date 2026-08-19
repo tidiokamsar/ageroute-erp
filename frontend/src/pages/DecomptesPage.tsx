@@ -16,9 +16,11 @@ import {
   Plus, Receipt, ChevronRight, Check, X, Send, FileDown, CreditCard,
   CheckCircle, XCircle, Trash2, Calculator, AlertTriangle, Shield,
   FileText, RefreshCw, MessageSquare, Eye, Stamp, Paperclip,
-  DollarSign, ClipboardCheck, Layers, GitBranch,
+  DollarSign, ClipboardCheck, Layers, GitBranch, Upload, RotateCcw,
 } from "lucide-react";
 import { BpmnPanel } from "../components/BpmnPanel";
+import { FileUploadModal } from "../components/ui/FileUploadModal";
+import { Badge } from "../components/ui/Badge";
 
 // ===== TYPES =====
 
@@ -876,41 +878,7 @@ export function DecomptesPage() {
 
             {/* ── TAB 3 PIÈCES ─────────────────────────────────────────────── */}
             {activeTab === 3 && (
-              <div>
-                {(() => {
-                  const ps = piecesStats(det.piecesObligatoires);
-                  return (
-                    <div className={`mb-4 flex items-center gap-3 px-4 py-3 rounded-lg border ${ps.reqOk === ps.reqTotal ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
-                      {ps.reqOk === ps.reqTotal ? <CheckCircle className="h-5 w-5 text-green-500" /> : <AlertTriangle className="h-5 w-5 text-red-500" />}
-                      <div>
-                        <p className={`font-semibold text-sm ${ps.reqOk === ps.reqTotal ? "text-green-700" : "text-red-700"}`}>{ps.reqOk}/{ps.reqTotal} pièces obligatoires</p>
-                        <p className="text-xs text-gray-500">{ps.ok}/{ps.total} au total (pièces conditionnelles incluses)</p>
-                      </div>
-                    </div>
-                  );
-                })()}
-                <div className="space-y-2">
-                  {PIECES_CFG.map((p) => {
-                    const checked = det.piecesObligatoires?.[p.key as keyof Pieces] ?? false;
-                    return (
-                      <div key={p.key} className={`flex items-center justify-between rounded-lg px-4 py-3 border ${checked ? "bg-green-50 border-green-200" : p.requis ? "bg-red-50 border-red-200" : "bg-gray-50 border-gray-200"}`}>
-                        <div className="flex items-center gap-3">
-                          {checked ? <CheckCircle className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-red-400" />}
-                          <span className="text-sm font-medium text-gray-700">{p.label}</span>
-                          {!p.requis && <span className="text-xs text-gray-400">(si applicable)</span>}
-                          {p.requis && !checked && <span className="text-xs text-red-600 font-bold">REQUIS</span>}
-                        </div>
-                        {canWrite(role) && (
-                          <button className={`px-3 py-1 text-xs rounded-lg font-semibold transition-colors ${checked ? "bg-red-50 text-red-500 hover:bg-red-100" : "bg-green-50 text-green-600 hover:bg-green-100"}`}
-                            onClick={() => piecesMut.mutate({ id: det.id, pieces: { ...det.piecesObligatoires, [p.key]: !checked } })}>
-                            {checked ? "Retirer" : "Confirmer"}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <PiecesJustificatives decompteId={det.id} role={role} />
             )}
 
             {/* ── TAB 4 VALIDATIONS ─────────────────────────────────────────── */}
@@ -1402,6 +1370,197 @@ function ListeAttachements({
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Pièces justificatives : de vrais fichiers ───────────────────────────────
+interface PieceDocument {
+  id: string; nom: string; url: string; mimeType?: string | null;
+  tailleOctets?: number | null; version: number; createdAt: string;
+  statutValidation: "DEPOSE" | "VALIDE" | "RETOURNE";
+  motifRetour?: string | null; valideAt?: string | null;
+  deposePar?: string | null; roleDeposant?: string | null;
+}
+interface PieceNature {
+  cle: string; libelle: string; requis: boolean;
+  fourni: boolean; documents: PieceDocument[];
+}
+
+/**
+ * Bordereau des pièces du dossier.
+ *
+ * Auparavant l'onglet n'affichait que des cases à cocher : on déclarait qu'une
+ * facture existait sans jamais la fournir. Chaque nature accepte désormais un
+ * fichier, qui reste attaché au décompte et suit le dossier jusqu'au paiement.
+ * Déposer une pièce déjà pourvue crée une nouvelle version — l'ancienne reste
+ * consultable, une pièce justificative ne s'écrase pas.
+ */
+function PiecesJustificatives({ decompteId, role }: { decompteId: string; role?: string | null }) {
+  const qc = useQueryClient();
+  const [depotPour, setDepotPour] = useState<PieceNature | null>(null);
+  const [retourPour, setRetourPour] = useState<PieceDocument | null>(null);
+  const [motif, setMotif] = useState("");
+
+  // L'entreprise titulaire dépose ses justificatifs ; la Mission de contrôle et
+  // la Direction Technique les valident ou les retournent à corriger.
+  const peutDeposer = role === "ENTREPRISE" || role === "ADMIN";
+  const peutControler = ["MISSION", "TECHNIQUE", "DMC", "ADMIN"].includes(role ?? "");
+
+  const { data, isLoading } = useQuery<{ pieces: PieceNature[]; requisFournis: number; requisTotal: number; fournis: number }>({
+    queryKey: ["decompte-pieces", decompteId],
+    queryFn: () => api.get(`/decomptes/${decompteId}/documents`).then((r) => r.data),
+  });
+
+  const rattacher = useMutation({
+    mutationFn: (corps: object) => api.post(`/decomptes/${decompteId}/documents`, corps),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["decompte-pieces", decompteId] });
+      qc.invalidateQueries({ queryKey: ["decomptes"] });
+      toast.success("Pièce déposée");
+      setDepotPour(null);
+    },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  const valider = useMutation({
+    mutationFn: (documentId: string) => api.post(`/decomptes/${decompteId}/documents/${documentId}/valider`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["decompte-pieces", decompteId] }); toast.success("Pièce validée"); },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  const retourner = useMutation({
+    mutationFn: ({ documentId, motif }: { documentId: string; motif: string }) =>
+      api.post(`/decomptes/${decompteId}/documents/${documentId}/retourner`, { motif }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["decompte-pieces", decompteId] });
+      toast.success("Pièce retournée à l'entreprise");
+      setRetourPour(null); setMotif("");
+    },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  const retirer = useMutation({
+    mutationFn: (documentId: string) => api.delete(`/decomptes/${decompteId}/documents/${documentId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["decompte-pieces", decompteId] });
+      toast.success("Pièce retirée du dossier — elle reste archivée");
+    },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  if (isLoading) return <p className="text-sm text-gray-500">Chargement des pièces…</p>;
+
+  const pieces = data?.pieces ?? [];
+  const complet = (data?.requisFournis ?? 0) === (data?.requisTotal ?? 0);
+
+  return (
+    <div>
+      <div className={`mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 ${complet ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+        {complet ? <CheckCircle className="h-5 w-5 text-green-500" /> : <AlertTriangle className="h-5 w-5 text-red-500" />}
+        <div>
+          <p className={`text-sm font-semibold ${complet ? "text-green-700" : "text-red-700"}`}>
+            {data?.requisFournis ?? 0}/{data?.requisTotal ?? 0} pièces obligatoires fournies
+          </p>
+          <p className="text-xs text-gray-500">{data?.fournis ?? 0}/{pieces.length} au total — les pièces accompagnent le dossier jusqu'au paiement</p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {pieces.map((p) => (
+          <div key={p.cle} className={`rounded-lg border px-4 py-3 ${p.fourni ? "border-green-200 bg-green-50" : p.requis ? "border-red-200 bg-red-50" : "border-gray-200 bg-gray-50"}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                {p.fourni ? <CheckCircle className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-red-400" />}
+                <span className="text-sm font-medium text-gray-700">{p.libelle}</span>
+                {!p.requis && <span className="text-xs text-gray-400">(si applicable)</span>}
+                {p.requis && !p.fourni && <span className="text-xs font-bold text-red-600">REQUIS</span>}
+              </div>
+              {peutDeposer ? (
+                <Button size="sm" variant={p.fourni ? "secondary" : "primary"} onClick={() => setDepotPour(p)}>
+                  <Upload className="h-3.5 w-3.5" /> {p.fourni ? "Nouvelle version" : "Déposer"}
+                </Button>
+              ) : peutControler && !p.fourni ? (
+                <span className="text-xs text-gray-400">En attente de l'entreprise</span>
+              ) : null}
+            </div>
+
+            {p.documents.length > 0 && (
+              <ul className="mt-2 space-y-1 border-t border-white/60 pt-2">
+                {p.documents.map((d) => (
+                  <li key={d.id} className="text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <a href={d.url} target="_blank" rel="noreferrer" className="truncate font-medium text-navy hover:underline" title={d.nom}>
+                        {d.nom} <span className="font-normal text-gray-400">v{d.version}</span>
+                      </a>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge
+                          label={d.statutValidation === "VALIDE" ? "Validée" : d.statutValidation === "RETOURNE" ? "Retournée" : "Déposée"}
+                          color={d.statutValidation === "VALIDE" ? "green" : d.statutValidation === "RETOURNE" ? "red" : "blue"}
+                        />
+                        <span className="text-gray-500">
+                          {d.deposePar ?? "—"}{d.roleDeposant && ` (${d.roleDeposant})`} · {new Date(d.createdAt).toLocaleDateString("fr-FR")}
+                        </span>
+                        {peutControler && d.statutValidation !== "VALIDE" && (
+                          <Button size="sm" variant="ghost" title="Valider cette pièce" onClick={() => valider.mutate(d.id)}>
+                            <Check className="h-3.5 w-3.5 text-green-600" />
+                          </Button>
+                        )}
+                        {peutControler && d.statutValidation !== "RETOURNE" && (
+                          <Button size="sm" variant="ghost" title="Retourner à l'entreprise" onClick={() => setRetourPour(d)}>
+                            <RotateCcw className="h-3.5 w-3.5 text-amber-600" />
+                          </Button>
+                        )}
+                        {peutDeposer && (
+                          <button className="text-red-300 hover:text-red-500" title="Retirer du dossier" onClick={() => retirer.mutate(d.id)}>
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {d.statutValidation === "RETOURNE" && d.motifRetour && (
+                      <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">
+                        À corriger : {d.motifRetour}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <Modal open={Boolean(retourPour)} onClose={() => { setRetourPour(null); setMotif(""); }} title="Retourner la pièce à l'entreprise">
+        <div className="space-y-3 p-4">
+          <p className="text-sm text-gray-600">
+            L'entreprise devra déposer une nouvelle version. Indiquez précisément ce qui doit être corrigé :
+            le motif lui est communiqué et reste dans la piste d'audit.
+          </p>
+          <Textarea rows={3} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Facture non signée, montant différent du décompte…" />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => { setRetourPour(null); setMotif(""); }}>Annuler</Button>
+            <Button
+              disabled={motif.trim().length < 10 || retourner.isPending}
+              onClick={() => retourPour && retourner.mutate({ documentId: retourPour.id, motif })}
+            >
+              <RotateCcw className="h-4 w-4" /> Retourner
+            </Button>
+          </div>
+          {motif.trim().length > 0 && motif.trim().length < 10 && (
+            <p className="text-xs text-amber-700">Le motif doit compter au moins 10 caractères.</p>
+          )}
+        </div>
+      </Modal>
+
+      <FileUploadModal
+        open={Boolean(depotPour)}
+        onClose={() => setDepotPour(null)}
+        title={depotPour ? `Déposer — ${depotPour.libelle}` : "Déposer une pièce"}
+        onFileUploaded={(url, nom) => {
+          if (depotPour) rattacher.mutate({ type: depotPour.cle, nom, url });
+        }}
+      />
     </div>
   );
 }

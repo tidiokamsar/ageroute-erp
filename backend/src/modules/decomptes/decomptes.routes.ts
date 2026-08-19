@@ -11,9 +11,13 @@ import { calcDecompteRegles } from "./decomptes.calc.regles";
 import { construireSnapshot, rejouerCalcul, lireSnapshot } from "./decomptes.regles.audit";
 import { z } from "zod";
 import type { StatutDecompte } from "@prisma/client";
+import { decompteDocumentsRouter } from "./decomptes.documents.routes";
 
 export const decomptesRouter = Router();
 decomptesRouter.use(requireAuth);
+
+// Pièces justificatives réelles (fichiers) — voir decomptes.documents.routes.ts
+decomptesRouter.use("/:id/documents", decompteDocumentsRouter);
 
 decomptesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
