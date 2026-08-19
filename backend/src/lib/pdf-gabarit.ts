@@ -46,13 +46,24 @@ export function creerDocumentOfficiel(opts: OptionsGabarit): PDFKit.PDFDocument 
   const largeur = opts.landscape ? 842 : 595;
   doc.rect(0, 0, largeur, 85).fill("#1e3a5f");
 
-  // ── Logo AGEROUTE (à gauche) ──
+  // ── Logo AGEROUTE dans un cercle blanc (fond propre sur le bleu) ──
   if (fs.existsSync(CHEMIN_LOGO)) {
-    doc.image(CHEMIN_LOGO, 35, 12, { fit: [60, 60] });
+    // Cercle blanc de fond pour éviter le rectangle blanc du JPEG
+    const logoX = 30, logoY = 8, logoSize = 68;
+    const centreLogoX = logoX + logoSize / 2;
+    const centreLogoY = logoY + logoSize / 2;
+    const rayon = logoSize / 2 + 4;
+
+    // Cercle blanc avec bordure dorée
+    doc.circle(centreLogoX, centreLogoY, rayon).fill("#ffffff");
+    doc.circle(centreLogoX, centreLogoY, rayon).strokeColor("#F0A500").lineWidth(1.5).stroke();
+
+    // Logo à l'intérieur du cercle
+    doc.image(CHEMIN_LOGO, logoX + 6, logoY + 6, { fit: [logoSize - 12, logoSize - 12] });
   }
 
   // ── Texte en-tête (centré, décalé pour laisser place au logo) ──
-  const centreX = opts.landscape ? 421 : 297;
+  const centreX = opts.landscape ? 461 : 325;
   doc.fillColor("#F0A500").fontSize(11).font("Helvetica-Bold")
     .text("REPUBLIQUE DE GUINEE", centreX, 15, { align: "center" });
   doc.fillColor("#ffffff").fontSize(13)
