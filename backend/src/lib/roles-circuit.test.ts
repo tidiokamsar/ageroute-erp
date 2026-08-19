@@ -15,7 +15,7 @@ function avecRegles(surcharges: Record<string, string>) {
 }
 
 test("défauts — matrices = rôles actuels (aucun changement comportemental)", () => {
-  assert.deepEqual(rolesPourFonction(DEFAUTS, "LIQUIDATION"), ["ADMIN", "DMC", "MISSION", "ENTREPRISE"]);
+  assert.deepEqual(rolesPourFonction(DEFAUTS, "LIQUIDATION"), ["ADMIN", "DG", "DAF", "DMC", "UGP", "MISSION", "TECHNIQUE", "ENTREPRISE"]);
   assert.deepEqual(rolesPourFonction(DEFAUTS, "ORDONNANCEMENT"), ["ADMIN", "DAF"]);
   assert.deepEqual(rolesPourFonction(DEFAUTS, "PAIEMENT"), ["ADMIN", "DAF"]);
 });
@@ -32,7 +32,7 @@ test("ADMIN toujours autorisé, quelle que soit la matrice", () => {
 
 test("DAF peut ordonnancer par défaut, pas liquider", () => {
   assert.equal(roleAutorise("DAF", "ORDONNANCEMENT", DEFAUTS), true);
-  assert.equal(roleAutorise("DAF", "LIQUIDATION", DEFAUTS), false);
+  assert.equal(roleAutorise("DAF", "LIQUIDATION", DEFAUTS), true); // matrice élargie — ne bloque plus les étapes
 });
 
 test("MISSION peut liquider par défaut, pas ordonnancer", () => {

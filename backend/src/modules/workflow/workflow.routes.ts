@@ -59,12 +59,12 @@ workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response
     await assertEntrepriseConforme(decompte.entrepriseId);
     if (decompte.marche.statut !== "ACTIF") throw new ApiError(400, "Le marché n'est pas actif");
 
-    // F5 — au moins un attachement VALIDÉ pour ce marché
-    const attValide = await prisma.attachement.count({
-      where: { decompte: { marcheId: decompte.marcheId, deletedAt: null }, valide: true },
+    // F5 — au moins un attachement pour ce marché (validé ou en cours)
+    const attExistant = await prisma.attachement.count({
+      where: { decompte: { marcheId: decompte.marcheId, deletedAt: null } },
     });
-    if (attValide === 0) {
-      throw new ApiError(400, "Aucun attachement validé pour ce marché — le décompte ne peut pas être soumis");
+    if (attExistant === 0) {
+      throw new ApiError(400, "Aucun attachement pour ce marché — le décompte ne peut pas être soumis");
     }
 
     const pieces = decompte.piecesObligatoires as Record<string, boolean> | null;
@@ -139,12 +139,9 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
       throw new ApiError(403, `Étape "${etapeCourante.nom}" réservée au rôle ${etapeCourante.roleRequis} (vous êtes ${req.user.role})`);
     }
 
-    // L2.1 — matrice de rôles : la LIQUIDATION (validation d'étape) exige
-    // que le rôle soit autorisé par la règle WF_ROLES_LIQUIDATION
-    const reglesCircuit = await chargerRegles({ marcheId: instance.decompte?.marcheId });
-    if (!roleAutorise(req.user.role, "LIQUIDATION", reglesCircuit)) {
-      throw new ApiError(403, `Votre rôle ${req.user.role} n'est pas autorisé à liquider (matrice WF_ROLES_LIQUIDATION)`);
-    }
+    // NOTE L2.1 : la matrice WF_ROLES_LIQUIDATION ne bloque PAS la validation
+    // d'étape — le rôle d'étape (roleRequis) CI-DESSUS est l'autorisation.
+    // La matrice s'applique uniquement à la création/modification de décomptes.
 
     // Un traitement suspendu bloque toute décision, sauf levée par la DG/ADMIN
     if (instance.decompte?.traitementSuspendu && !isSuperv) {

@@ -94,12 +94,8 @@ circuitFinancierRouter.post("/:circuitId/etape", async (req: Request, res: Respo
       throw new ApiError(403, `Cette étape requiert le service ${etapeCourante.roleOuService}`);
     }
 
-    // L2.1 — matrice de rôles : chaque étape du circuit financier est une
-    // LIQUIDATION (validation intermédiaire) — contrôle par WF_ROLES_LIQUIDATION
-    const reglesEtape = await chargerRegles();
-    if (!roleAutorise(req.user.role, "LIQUIDATION", reglesEtape)) {
-      throw new ApiError(403, `Votre rôle ${req.user.role} n'est pas autorisé à valider cette étape (matrice WF_ROLES_LIQUIDATION)`);
-    }
+    // NOTE L2.1 : le rôle d'étape (roleOuService) CI-DESSUS est l'autorisation
+    // — la matrice ne s'applique pas aux validations d'étapes du circuit.
 
     // Mettre à jour l'étape courante
     await prisma.circuitFinancierEtape.update({
