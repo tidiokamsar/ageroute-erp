@@ -82,18 +82,47 @@ usersRouter.delete("/:id", async (req: Request, res: Response, next: NextFunctio
 });
 
 // ─── Affectations marchés (périmètre de visibilité MISSION/TECHNIQUE/BAILLEUR) ─
-// Sans affectation, ces rôles voient TOUS les marchés — l'administrateur
-// restreint ici leur périmètre aux marchés concernés.
+/**
+ * Périmètre de travail d'un agent.
+ *
+ * ⚠️ SÉMANTIQUE : pour les rôles scopés (MISSION, TECHNIQUE, BAILLEUR),
+ * AUCUNE affectation = AUCUN accès — et non « accès à tout », comme le
+ * disaient l'ancien commentaire et le texte de l'écran. C'est `lib/affectations.ts`
+ * qui fait foi : `getMarchesAffectes` renvoie la liste des marchés confiés,
+ * vide si l'agent n'en a aucun.
+ *
+ * La réponse porte la liste COMPLÈTE des marchés, chacun marqué `affecte`.
+ * L'écran d'administration en a besoin pour proposer des cases à cocher :
+ * en ne renvoyant que les marchés déjà affectés, on ne pouvait qu'en retirer,
+ * jamais en ajouter.
+ */
 usersRouter.get("/:id/affectations", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, role: true, nomComplet: true } });
     if (!user) throw new ApiError(404, "Utilisateur introuvable");
-    const affectations = await prisma.marcheAffectation.findMany({
-      where: { userId: req.params.id },
-      select: { id: true, marcheId: true, marche: { select: { reference: true, intitule: true, financement: true, statut: true } } },
-      orderBy: { createdAt: "asc" },
+
+    const [affectations, tousMarches] = await Promise.all([
+      prisma.marcheAffectation.findMany({
+        where: { userId: req.params.id },
+        select: { id: true, marcheId: true, marche: { select: { reference: true, intitule: true, financement: true, statut: true } } },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.marche.findMany({
+        where: { deletedAt: null },
+        select: { id: true, reference: true, intitule: true, statut: true, financement: true, entreprise: { select: { raisonSociale: true } } },
+        orderBy: [{ statut: "asc" }, { reference: "asc" }],
+      }),
+    ]);
+
+    const affectes = new Set(affectations.map((a) => a.marcheId));
+
+    res.json({
+      user,
+      scopable: ["MISSION", "TECHNIQUE", "BAILLEUR"].includes(user.role),
+      affectations,
+      marches: tousMarches.map((m) => ({ ...m, affecte: affectes.has(m.id) })),
+      nbAffectes: affectes.size,
     });
-    res.json({ user, scopable: ["MISSION", "TECHNIQUE", "BAILLEUR"].includes(user.role), affectations });
   } catch (err) { next(err); }
 });
 

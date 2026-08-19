@@ -17,6 +17,7 @@ import { roleAutorise } from "../../lib/roles-circuit";
 import { chargerRegles } from "../../lib/regles";
 import { etapesCircuitFinancier } from "../../lib/circuit-definitions";
 import { z } from "zod";
+import { getMarchesAffectes } from "../../lib/affectations";
 
 export const workflowRouter = Router();
 workflowRouter.use(requireAuth);
@@ -236,8 +237,18 @@ workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: Next
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const isSuperv = (await rolesEffectifs(req.user.id, req.user.role)).includes("DG") || req.user.role === "ADMIN";
 
+    // Périmètre d'affectation — même règle que les listes (marchés, décomptes,
+    // attachements). Sans ce filtre, un agent MISSION voyait les tâches de TOUS
+    // les marchés dès lors que l'étape courante requérait son rôle, y compris
+    // ceux d'une autre équipe de contrôle : les listes étaient cloisonnées, les
+    // tâches ne l'étaient pas.
+    const marchesAffectes = isSuperv ? null : await getMarchesAffectes(req.user.id, req.user.role);
+
     const instances = await prisma.workflowInstance.findMany({
-      where: { statut: "EN_COURS" as const },
+      where: {
+        statut: "EN_COURS" as const,
+        ...(marchesAffectes !== null ? { decompte: { marcheId: { in: marchesAffectes } } } : {}),
+      },
       include: includeInstance,
       orderBy: { createdAt: "asc" },
     });

@@ -294,9 +294,16 @@ function AffectModal({ user, onClose }: { user: User; onClose: () => void }) {
     <Modal open onClose={onClose} title={`Périmètre de travail — ${user.nomComplet}`} size="lg">
       <div className="p-4">
         <p className="text-xs text-gray-500 mb-3">
-          Cochez les marchés confiés à cet agent ({user.role}). Il ne verra alors que ces marchés,
-          leurs projets, entreprises, décomptes et attachements. <strong>Aucune case cochée = accès non restreint.</strong>
+          Cochez les marchés confiés à cet agent ({user.role}). Il ne verra que ces marchés,
+          leurs projets, entreprises, décomptes et attachements.{" "}
+          <strong className="text-amber-700">Aucune case cochée = aucun accès</strong> — un agent
+          sans périmètre ne voit rien.
         </p>
+        {marches.length === 0 && (
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+            Aucun marché à afficher. Créez d'abord un marché pour pouvoir définir un périmètre.
+          </p>
+        )}
         <div className="space-y-1 max-h-[55vh] overflow-auto pr-1">
           {marches.map((m) => (
             <label key={m.id} className="flex items-center gap-3 py-2 px-2 border-b border-gray-50 cursor-pointer hover:bg-gray-50 rounded">

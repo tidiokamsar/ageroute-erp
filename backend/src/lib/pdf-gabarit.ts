@@ -11,7 +11,29 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
 
-const CHEMIN_LOGO = path.join(__dirname, "..", "assets", "ageroute-logo.jpg");
+/**
+ * Emplacement du logo — résolu parmi plusieurs candidats.
+ *
+ * En développement le code s'exécute depuis `src/lib`, en production depuis
+ * `dist/lib` : un chemin relatif unique ne peut pas convenir aux deux. La
+ * version précédente calculait `dist/assets`, alors que le Dockerfile dépose
+ * le fichier dans `/app/assets` — le logo était donc introuvable et l'en-tête
+ * des PDF sortait sans emblème, sans la moindre erreur puisque le dessin est
+ * conditionné par un `existsSync`.
+ */
+const CANDIDATS_LOGO = [
+  path.join(__dirname, "..", "assets", "ageroute-logo.jpg"),        // src/assets ou dist/assets
+  path.join(__dirname, "..", "..", "assets", "ageroute-logo.jpg"),  // /app/assets depuis dist/lib
+  path.join(process.cwd(), "assets", "ageroute-logo.jpg"),          // racine de l'application
+];
+
+const CHEMIN_LOGO = CANDIDATS_LOGO.find((c) => fs.existsSync(c)) ?? CANDIDATS_LOGO[0];
+
+if (!fs.existsSync(CHEMIN_LOGO)) {
+  // Trace explicite : un logo manquant doit se voir dans les journaux, pas
+  // seulement à l'impression d'un document officiel.
+  console.warn(`[pdf-gabarit] Logo introuvable — cherché dans : ${CANDIDATS_LOGO.join(", ")}`);
+}
 
 export interface OptionsGabarit {
   titre: string;

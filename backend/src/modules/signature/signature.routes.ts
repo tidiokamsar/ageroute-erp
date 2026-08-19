@@ -9,12 +9,13 @@ import { ApiError } from "../../middleware/error.middleware";
 import PDFDocument from "pdfkit";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
+import { formaterMontantGnf } from "../../lib/montants";
 
 export const signatureRouter = Router();
 signatureRouter.use(requireAuth);
 
 function fmtGnf(v: bigint | number): string {
-  return new Intl.NumberFormat("fr-GN", { style: "currency", currency: "GNF", maximumFractionDigits: 0 }).format(Number(v));
+  return formaterMontantGnf(v);
 }
 
 // Signer un décompte validé
