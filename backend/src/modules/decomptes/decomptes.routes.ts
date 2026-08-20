@@ -402,63 +402,44 @@ decomptesRouter.get("/:id/validations-avancees", async (req: Request, res: Respo
   } catch (err) { next(err); }
 });
 
-decomptesRouter.post("/:id/validations-avancees", requireRole("ADMIN","DG","DAF","DMC","MISSION","TECHNIQUE"), async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Validation d'une étape — ROUTE RETIRÉE DU SERVICE le 20/08/2026.
+ *
+ * Elle écrivait `decompte.statut` directement, avec sa PROPRE table de
+ * correspondance étape -> statut, sans toucher au circuit de validation. D'où la
+ * divergence constatée en production : sur 8 décomptes, 3 portaient des
+ * validations sans aucune instance de circuit, et l'écran affichait un statut de
+ * décompte incompatible avec l'étape de workflow courante.
+ *
+ * Le circuit est désormais la source unique du parcours. `POST /api/workflow/
+ * :instanceId/action` écrit, dans UNE SEULE transaction : l'action de workflow,
+ * la ligne de validation (onglet Validations) et le statut du décompte. Il
+ * applique aussi RG9 — séparation des tâches.
+ *
+ * La route est conservée et répond explicitement, plutôt que supprimée : un
+ * appelant resté sur l'ancienne interface doit comprendre ce qui a changé, pas
+ * recevoir un 404 muet. Les données déjà écrites ne sont pas touchées.
+ */
+decomptesRouter.post("/:id/validations-avancees", requireRole("ADMIN","DG","DAF","DMC","MISSION","TECHNIQUE","UGP"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const body = z.object({
-      etape:       z.enum(["SOUMISSION","MISSION","TECHNIQUE","DMC","DAF","DG","UGP"]),
-      decision:    z.enum(["APPROUVE","REJETE","CORRECTION"]),
-      commentaire: z.string().min(5),
-      signatureRef:z.string().optional(),
-    }).parse(req.body);
-
     const { prisma } = await import("../../lib/prisma");
-    // RG9 — même personne ne peut pas soumettre et valider
-    if (body.decision !== "CORRECTION") {
-      const decompte = await prisma.decompte.findUnique({ where: { id: req.params.id } });
-      // RG9 temporairement désactivé
-    }
 
-    const val = await prisma.decompteValidation.create({
-      data: {
-        decompteId:   req.params.id,
-        etape:        body.etape,
-        decision:     body.decision,
-        commentaire:  body.commentaire,
-        validePar:    req.user.id,
-        valideNom:    req.user.email,
-        valideRole:   req.user.role,
-        signatureRef: body.signatureRef,
-      },
+    const instance = await prisma.workflowInstance.findFirst({
+      where: { decompteId: req.params.id, statut: "EN_COURS" },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
     });
 
-    // Mise à jour du statut selon la décision.
-    //
-    // ⚠️ Le type est celui de Prisma, PAS `string` : la version précédente
-    // mappait MISSION-APPROUVE vers "EN_CONTROLE_TECHNIQUE", valeur absente de
-    // l'énumération StatutDecompte. Le `as never` masquait l'erreur au
-    // compilateur ; Prisma levait à l'exécution, APRÈS la création de la ligne
-    // de validation. Résultat observé en production : la validation MISSION
-    // apparaissait bien dans l'onglet Validations, mais le décompte restait
-    // « Soumis » et l'étape ne franchissait jamais le contrôle Mission.
-    // En typant la table, une valeur inexistante ne compile plus.
-    const statutMap: Partial<Record<string, StatutDecompte>> = {
-      "SOUMISSION-APPROUVE": "SOUMIS",
-      "MISSION-APPROUVE":    "EN_CONTROLE",
-      "TECHNIQUE-APPROUVE":  "EN_VALIDATION",
-      "DMC-APPROUVE":        "VISA_DAF",
-      "DAF-APPROUVE":        "VISA_DG",
-      "DG-APPROUVE":         "VALIDE",
-      "MISSION-REJETE":      "REJETE",
-      "TECHNIQUE-REJETE":    "REJETE",
-    };
-    const key = `${body.etape}-${body.decision}`;
-    const nouveauStatut = body.decision === "CORRECTION" ? "BROUILLON" : statutMap[key];
-    if (nouveauStatut) {
-      await prisma.decompte.update({ where: { id: req.params.id }, data: { statut: nouveauStatut } });
-    }
-
-    res.status(201).json(val);
+    throw new ApiError(
+      410,
+      instance
+        ? `Route retirée du service. La validation passe par le circuit : POST /api/workflow/${instance.id}/action. ` +
+          "La ligne de l'onglet Validations y est écrite automatiquement, dans la même transaction — " +
+          "un appel séparé créerait un doublon."
+        : "Route retirée du service, et aucun circuit n'est ouvert pour ce décompte. " +
+          "Soumettez-le d'abord : POST /api/workflow/soumettre/" + req.params.id + ".",
+    );
   } catch (err) { next(err); }
 });
 

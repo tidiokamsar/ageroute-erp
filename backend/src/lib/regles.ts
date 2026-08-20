@@ -44,6 +44,12 @@ export const REGLES_DEFAUT = {
   WF_ROLES_ORDONNANCEMENT: "ADMIN,DAF",
   WF_ROLES_PAIEMENT: "ADMIN,DAF",
   WF_SEPARATION_ORD_COMPTABLE: "false",
+  // RG9 — séparation des tâches : une personne n'engage qu'une étape du circuit.
+  // Active par défaut. Elle était présente dans le code sous forme d'un bloc
+  // vide commenté « RG9 temporairement désactivé » : la même personne pouvait
+  // soumettre ET valider. Désactivable par paramétrage, mais ce doit être une
+  // décision explicite et tracée.
+  WF_SEPARATION_TACHES: "true",
   // A9 — Libellés d'états officiels (consommé au lot L2.2)
   ETQ_MAPPINGS: "{}",
   // A10 — Conformité entreprise (consommé au lot L3.1)

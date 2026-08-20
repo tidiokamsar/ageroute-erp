@@ -303,25 +303,23 @@ export function DecomptesPage() {
     onError: (e) => toast.error(parseApiError(e)),
   });
 
-  // Validation réelle : fait avancer l'instance de workflow (change le statut du décompte
-  // et passe la main au rôle suivant), puis journalise dans le registre des validations.
-  // L'ancien comportement n'écrivait QUE dans le registre — le statut ne bougeait jamais.
+  // Validation : UN SEUL appel, au circuit. Le serveur écrit dans la même
+  // transaction l'action de workflow, la ligne de l'onglet Validations et le
+  // statut du décompte — et applique RG9 (séparation des tâches).
+  //
+  // L'écran postait auparavant AUSSI sur /validations-avancees, « non bloquant ».
+  // Cette seconde écriture ferait désormais doublon : la projection est
+  // produite par le moteur. La route répond 410 et explique le changement.
   const valMut = useMutation({
     mutationFn: async (b: { etape?: unknown; decision?: unknown; commentaire?: unknown; signatureRef?: unknown }) => {
       if (!wfInst || wfInst.statut !== "EN_COURS") {
         throw new Error("Aucun circuit de validation actif — soumettez d'abord le décompte.");
       }
       const decisionWf = b.decision === "CORRECTION" ? "DEMANDE_CORRECTION" : String(b.decision ?? "APPROUVE");
-      const result = await api.post(`/workflow/${wfInst.id}/action`, {
-        decision: decisionWf,
-        commentaire: String(b.commentaire ?? ""),
-      }).then((r) => r.data);
-      // Registre des validations (trace signée) — non bloquant si indisponible
-      await api.post(`/decomptes/${detailId}/validations-avancees`, {
-        ...b,
-        etape: etapeCourante?.nom ?? b.etape,
-      }).catch(() => {});
-      return result;
+      const commentaire = b.signatureRef
+        ? `${String(b.commentaire ?? "")} [réf. saisie : ${String(b.signatureRef)}]`
+        : String(b.commentaire ?? "");
+      return api.post(`/workflow/${wfInst.id}/action`, { decision: decisionWf, commentaire }).then((r) => r.data);
     },
     onSuccess: (data: { message?: string; statut?: string }) => {
       qc.invalidateQueries();

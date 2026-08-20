@@ -21,7 +21,6 @@ import {
   TrendingDown, ArrowRight, Activity, CreditCard, RotateCcw, Map, Building2,
   ChevronRight, Info, XCircle, Layers,
 } from "lucide-react";
-import { BpmnPanel } from "../components/BpmnPanel";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, ResponsiveContainer } from "recharts";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -531,7 +530,6 @@ export function MarchesPage() {
     { key:"situation",      label:"Situation §13",   icon:TrendingUp },
     { key:"courbes",        label:"Courbe S",        icon:Activity },
     { key:"historique",     label:"Historique",      icon:Activity },
-    { key:"workflow",       label:"Workflow BPMN",   icon:GitBranch },
   ];
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -1253,18 +1251,6 @@ export function MarchesPage() {
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
-
-            {/* ── Tab Workflow BPMN ── */}
-            {detailTab === "workflow" && (
-              <div className="py-2">
-                <BpmnPanel
-                  moduleType="MARCHE"
-                  entityId={detail.id}
-                  currentUserRole={user!.role}
-                  canSubmit={canWrite(user?.role)}
-                />
               </div>
             )}
 

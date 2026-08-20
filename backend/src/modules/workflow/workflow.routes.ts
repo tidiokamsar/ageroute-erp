@@ -14,9 +14,15 @@ import { notifyWorkflowStep } from "../notifications/notifications.service";
 import { assertEntrepriseConforme } from "../conformite/conformite.service";
 import { rolesEffectifs } from "../../lib/delegations";
 import { roleAutorise } from "../../lib/roles-circuit";
-import { chargerRegles } from "../../lib/regles";
 import { etapesCircuitFinancier } from "../../lib/circuit-definitions";
 import { z } from "zod";
+// Moteur unique de validation : RG9, statut d'étape et projection de la ligne
+// de validation. Voir lib/moteur-validation.ts pour le contexte.
+import {
+  verifierSeparationTaches, statutPourRoleEtape, libelleEtapeValidation,
+  decisionValidation, produitUneValidation,
+} from "../../lib/moteur-validation";
+import { chargerRegles, booleenRegles } from "../../lib/regles";
 import { getMarchesAffectes } from "../../lib/affectations";
 
 export const workflowRouter = Router();
@@ -25,6 +31,8 @@ workflowRouter.use(requireAuth);
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const DECISIONS = ["APPROUVE","REJETE","DEMANDE_CORRECTION","DEMANDE_COMPLEMENT","SUSPENDRE","AUDIT"] as const;
+// Identique au type `Decision` de lib/moteur-validation.ts, dont il est la
+// source : la liste DECISIONS alimente aussi le schema zod de la route.
 type Decision = typeof DECISIONS[number];
 
 const ROLES_SUPERVISEURS = ["DG","ADMIN"];
@@ -149,9 +157,50 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
       throw new ApiError(403, "Traitement suspendu par la Direction Générale — aucune action possible");
     }
 
-    // Enregistrer l'action
-    await prisma.workflowAction.create({
-      data: { instanceId: instance.id, etapeId: etapeCourante.id, userId: req.user.id, decision, commentaire },
+    // ── RG9 — séparation des tâches ───────────────────────────────────────────
+    // Une personne n'engage qu'une étape du circuit. Les intervenants antérieurs
+    // sont lus dans LES DEUX registres : actions de workflow et lignes de
+    // validation — l'historique d'avant l'unification vit dans le second.
+    const reglesEffectives = await chargerRegles({ marcheId: instance.decompte?.marcheId ?? undefined });
+    const [actionsAnterieures, validationsAnterieures] = await Promise.all([
+      prisma.workflowAction.findMany({ where: { instanceId: instance.id }, select: { userId: true } }),
+      instance.decompteId
+        ? prisma.decompteValidation.findMany({ where: { decompteId: instance.decompteId }, select: { validePar: true } })
+        : Promise.resolve([] as Array<{ validePar: string }>),
+    ]);
+    const intervenantsAnterieurs = [
+      ...actionsAnterieures.map((a) => a.userId),
+      ...validationsAnterieures.map((v) => v.validePar),
+    ];
+    const rg9 = verifierSeparationTaches({
+      utilisateurId: req.user.id,
+      intervenantsAnterieurs,
+      decision: decision as Decision,
+      active: booleenRegles(reglesEffectives, "WF_SEPARATION_TACHES"),
+    });
+    if (!rg9.autorise) throw new ApiError(403, rg9.motif!);
+
+    // Enregistrer l'action ET, pour les décisions engageantes, sa PROJECTION
+    // dans l'onglet Validations — dans la même transaction. C'est ce couplage
+    // qui manquait : l'onglet Workflow avançait sans que l'onglet Validations
+    // en sache rien, et réciproquement.
+    await prisma.$transaction(async (tx) => {
+      await tx.workflowAction.create({
+        data: { instanceId: instance.id, etapeId: etapeCourante.id, userId: req.user!.id, decision, commentaire },
+      });
+      if (instance.decompteId && produitUneValidation(decision as Decision)) {
+        await tx.decompteValidation.create({
+          data: {
+            decompteId: instance.decompteId,
+            etape: libelleEtapeValidation(etapeCourante.roleRequis),
+            decision: decisionValidation(decision as Decision),
+            commentaire: commentaire ?? "(sans commentaire)",
+            validePar: req.user!.id,
+            valideNom: req.user!.email,
+            valideRole: req.user!.role,
+          },
+        });
+      }
     });
     await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "WorkflowInstance", entityId: instance.id, after: { decision, etape: etapeCourante.nom, commentaire } });
 
@@ -207,10 +256,11 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
     await prisma.workflowInstance.update({ where: { id: instance.id }, data: { etapeActuelle: prochainIndex } });
     const prochaineEtape = instance.definition.etapes[prochainIndex];
 
-    let prochainStatut = "EN_VALIDATION";
-    if (["MISSION","TECHNIQUE"].includes(prochaineEtape.roleRequis)) prochainStatut = "EN_CONTROLE";
-    else if (prochaineEtape.roleRequis === "DG") prochainStatut = "EN_VALIDATION";
-    await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: prochainStatut as never } });
+    // Table de correspondance UNIQUE (lib/moteur-validation.ts). Elle vivait
+    // auparavant en deux exemplaires divergents : ici, et dans la route
+    // validations-avancees — d'où deux statuts possibles pour la même étape.
+    const prochainStatut = statutPourRoleEtape(prochaineEtape.roleRequis);
+    await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: prochainStatut } });
 
     await notifyWorkflowStep(prochaineEtape, instance.decompte?.reference ?? "", instance.id).catch(() => {});
 
