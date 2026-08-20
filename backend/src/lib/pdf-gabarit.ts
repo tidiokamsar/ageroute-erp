@@ -122,6 +122,12 @@ export function ajouterPiedDePage(doc: PDFKit.PDFDocument, signataires: Signatai
   const nb = signataires.length;
   const espacement = (largeur - 80) / nb;
 
+  // ⚠️ Ce bloc s'écrit SOUS la marge basse (h-35, h-15). Sans neutraliser cette
+  // marge, PDFKit juge que le texte ne tient pas et ajoute une page vide à la
+  // fin de chaque document officiel — page qui ne contient que la fin du pied.
+  const margeBasse = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
+
   // Ligne de séparation
   doc.moveTo(40, hauteur - 80).lineTo(largeur - 40, hauteur - 80).strokeColor("#ddd").lineWidth(1).stroke();
 
@@ -132,12 +138,14 @@ export function ajouterPiedDePage(doc: PDFKit.PDFDocument, signataires: Signatai
     doc.text(sig.role, x - espacement / 2 + 10, hauteur - 75, { width: espacement - 20, align: "center" });
     doc.moveTo(x - espacement / 2 + 15, hauteur - 40).lineTo(x + espacement / 2 - 15, hauteur - 40)
       .strokeColor("#999").lineWidth(0.5).stroke();
-    doc.fontSize(5).text("Nom et signature", x - espacement / 2 + 10, hauteur - 35, { width: espacement - 20, align: "center" });
+    doc.fontSize(5).text("Nom et signature", x - espacement / 2 + 10, hauteur - 35, { width: espacement - 20, align: "center", lineBreak: false });
   });
 
   // Horodatage
   doc.fontSize(5).fillColor("#999").font("Helvetica")
-    .text(`Généré le ${new Date().toLocaleString("fr-FR")} par ERP AGEROUTE — Document officiel`, 40, hauteur - 15, { width: largeur - 80, align: "center" });
+    .text(`Généré le ${new Date().toLocaleString("fr-FR")} par ERP AGEROUTE — Document officiel`, 40, hauteur - 15, { width: largeur - 80, align: "center", lineBreak: false });
+
+  doc.page.margins.bottom = margeBasse;
 }
 
 /**

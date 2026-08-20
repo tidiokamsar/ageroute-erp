@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { doitChangerDePage, limiteBasse, tronquer, fmtDate, RESERVE_PIED } from "./pdf-dossier";
+import { doitChangerDePage, limiteBasse, tronquer, fmtDate, assainirTexte, RESERVE_PIED } from "./pdf-dossier";
 
 /**
  * Le défaut que ces règles évitent : l'ancien gabarit écrivait à des positions
@@ -73,4 +73,36 @@ test("l'heure est ajoutee quand elle est demandee", () => {
   const avec = fmtDate(new Date("2026-02-28T10:00:00Z"), true);
   const sans = fmtDate(new Date("2026-02-28T10:00:00Z"), false);
   assert.ok(avec.length > sans.length, "le format avec heure est plus long");
+});
+
+/**
+ * Les polices standard de PDFKit (WinAnsi) ne portent ni la flèche ni le signe
+ * moins typographique. Constaté sur le premier dossier généré : « → » sortait
+ * en « !' » et « − » en guillemet. Même famille que l'espace fine insécable qui
+ * s'imprimait « / » au milieu des montants.
+ */
+test("la fleche est remplacee par un equivalent imprimable", () => {
+  assert.equal(assainirTexte("01/07/2026 → 31/07/2026"), "01/07/2026 -> 31/07/2026");
+});
+
+test("le signe moins typographique devient un tiret simple", () => {
+  assert.equal(assainirTexte("− 264 977 165 GNF"), "- 264 977 165 GNF");
+});
+
+test("les espaces fines et insecables deviennent des espaces normales", () => {
+  assert.equal(assainirTexte("2 929 296 000"), "2 929 296 000");
+});
+
+test("les comparateurs et apostrophes courbes sont substitues", () => {
+  assert.equal(assainirTexte("≤ ≥ ≠"), "<= >= !=");
+  assert.equal(assainirTexte("l’agent"), "l'agent");
+});
+
+test("les caracteres bien supportes ne sont pas touches", () => {
+  const intact = "Béton armé — 60 × 60 « ml » … 0,6 %";
+  assert.equal(assainirTexte(intact), intact);
+});
+
+test("tronquer assainit avant de couper", () => {
+  assert.ok(!tronquer("A → B", 20).includes("→"));
 });
