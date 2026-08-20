@@ -8,6 +8,7 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
+import { calculerAvancement, libelleBaseAvancement } from "../../lib/avancement";
 import { z } from "zod";
 
 export const projetsRouter = Router();
@@ -282,9 +283,16 @@ projetsRouter.get("/:id/kpis", async (req: Request, res: Response, next: NextFun
     const totalMarcheHt   = projet.marches.reduce((s, m) => s + Number(m.montantInitialGnf), 0);
     const totalDecompteHt = decomptesProjet.reduce((s, d) => s + Number(d.montantPeriodeHtGnf), 0);
     const totalPaye       = decomptesProjet.filter((d) => d.statut === "PAYE").reduce((s, d) => s + Number(d.netAPayer), 0);
-    const budget          = Number(projet.budgetReviseGnf) || Number(projet.budgetInitialGnf) || 1;
-    const avancFinancier  = budget > 0 ? Math.round(totalPaye / budget * 10000) / 100 : 0;
-    const tauxDecaiss     = budget > 0 ? Math.round(Number(projet.montantPayeGnf) / budget * 10000) / 100 : 0;
+    // ⚠️ Ne JAMAIS fabriquer un dénominateur. L'ancien `|| 1` remplaçait un
+    // budget absent par un franc : dès que les décomptes ont été correctement
+    // rattachés au projet, l'écran a affiché « 202 668 805 200 % ».
+    // Voir lib/avancement.ts.
+    const budgetSaisi     = Number(projet.budgetReviseGnf) || Number(projet.budgetInitialGnf) || 0;
+    const avancement      = calculerAvancement({ budgetGnf: budgetSaisi, totalMarcheHtGnf: totalMarcheHt, montantGnf: totalPaye });
+    const decaissement    = calculerAvancement({ budgetGnf: budgetSaisi, totalMarcheHtGnf: totalMarcheHt, montantGnf: Number(projet.montantPayeGnf) });
+    const budget          = avancement.reference;
+    const avancFinancier  = avancement.taux;
+    const tauxDecaiss     = decaissement.taux;
 
     const dsm: Record<string, number> = {};
     for (const d of decomptesProjet) dsm[d.statut] = (dsm[d.statut] ?? 0) + 1;
@@ -295,6 +303,10 @@ projetsRouter.get("/:id/kpis", async (req: Request, res: Response, next: NextFun
     res.json({
       avancementPhysique:  projet.avancementPhysique,
       avancementFinancier: avancFinancier,
+      // Sur quoi le pourcentage est calculé — l'écran doit le dire plutôt que
+      // de laisser croire à un budget qui n'existe pas.
+      baseAvancement:      avancement.base,
+      libelleBaseAvancement: libelleBaseAvancement(avancement.base),
       tauxDecaissement:    tauxDecaiss,
       budgetInitialGnf:    projet.budgetInitialGnf.toString(),
       budgetReviseGnf:     projet.budgetReviseGnf.toString(),
