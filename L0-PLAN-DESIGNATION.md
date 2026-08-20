@@ -25,16 +25,21 @@ Ces éléments sont acquis et n'attendent aucune décision supplémentaire.
 
 Cinq éléments, et cinq seulement, bloquent le démarrage. Aucun n'est technique.
 
-| # | Manque | Sans lui, impossible de |
+| # | Manque | État au 20/08/2026 |
 |---|---|---|
-| D1 | **Domaine des trois comptes à créer** — la convention constatée est `@ageroute.gov.gn`, mais elle n'est pas confirmée | créer les comptes sans inventer une adresse |
-| D2 | **Rôle de Moïse SIDIBÉ et de Famo MANSARÉ** | leur affecter un périmètre et des tâches |
-| D3 | **Qualité exercée** des trois personnes, et des deux déjà nominatives | renseigner la preuve de signature |
-| D4 | **Membres de chaque groupe** — MISSION, TECHNIQUE, DAF, UGP n'ont personne | opérer la bascule sans arrêter la chaîne |
-| D5 | **Personnes habilitées** côté entreprises et organismes externes | faire signer hors AGEROUTE |
+| D1 | Domaine des trois comptes à créer | **Levé** — `@ageroute.gov.gn` confirmé |
+| D2 | Rôle de Moïse SIDIBÉ et de Famo MANSARÉ | **Levé** — DG et DAF |
+| D3 | Qualité exercée des trois personnes | **Déduite du rôle, à confirmer** |
+| D4 | **Membres des groupes MISSION, TECHNIQUE et UGP** — personne n'y est désigné | **Ouvert** |
+| D5 | **Personnes habilitées** côté entreprises et organismes externes | **Ouvert** |
+| **D6** | **Deux titulaires pour le rôle DG** — Moïse SIDIBÉ désigné, Abdoulaye DABO déjà en place | **Ouvert — bloquant pour l'étape 2** |
 
-D1 à D3 suffisent pour créer les trois comptes personnels. D4 est indispensable **avant la
-bascule**, pas avant la création.
+D1 et D2 sont levés. **D6 est apparu à leur place** et bloque la création du compte de Moïse
+SIDIBÉ : créer un second DG sans trancher reviendrait à habiliter deux personnes à ordonnancer le
+même décompte. Les comptes de Famo MANSARÉ (DAF) et de Moussa CAMARA (DGA) ne sont pas concernés
+— aucun titulaire nominatif n'existe pour ces deux rôles.
+
+D4 est indispensable **avant la bascule**, pas avant la création.
 
 ---
 
@@ -111,19 +116,22 @@ Retirer la signature aux comptes de fonction est l'opération qui peut arrêter 
 **Règle de sécurité, sans exception** : un compte de fonction ne perd la signature que lorsque
 son groupe compte **au moins un signataire désigné, avec un compte personnel actif**.
 
-| Groupe | Signataire désigné ? | Peut basculer ? |
+| Groupe | Signataire désigné | Peut basculer ? |
 |---|---|---|
-| DG | Abdoulaye DABO | oui |
 | DMC | Mohamed lamine Keita | oui |
+| DAF | Famo MANSARÉ | après étape 2 |
 | DGA | Moussa CAMARA | après étapes 2 et 4 |
+| DG | Moïse SIDIBÉ **ou** Abdoulaye DABO | **non — D6 à trancher** |
 | MISSION | — | **non** |
 | TECHNIQUE | — | **non** |
-| DAF | — | **non** |
 | UGP | — | **non** |
 
-Quatre groupes sur sept ne peuvent pas basculer aujourd'hui. La bascule est donc **groupe par
-groupe**, jamais globale. Un basculement global le même jour arrêterait la validation des
-décomptes.
+Quatre groupes sur sept ne peuvent pas basculer. La bascule est donc **groupe par groupe**,
+jamais globale. Un basculement global le même jour arrêterait la validation des décomptes.
+
+Le cas du DG mérite attention : c'est la **dernière étape interne** des onze circuits. Un blocage
+sur ce rôle immobilise tous les décomptes en fin de parcours, quel que soit l'état des étapes
+amont.
 
 ---
 

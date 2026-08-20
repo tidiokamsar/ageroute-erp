@@ -45,20 +45,35 @@ après application de la décision.
 
 ## Partie 1 — Les trois comptes personnels à créer
 
-| Personne | Identifiant | Rôle | Qualité exercée (intitulé exact du poste) |
+**Désignations confirmées le 20/08/2026.** Domaine confirmé : `@ageroute.gov.gn`.
+
+| Personne | Identifiant | Rôle | Qualité exercée (à confirmer) |
 |---|---|---|---|
-| Moïse SIDIBÉ | `moise.sidibe@` ⟶ domaine : ______________ | ______________ | ______________________________ |
-| Famo MANSARÉ | `famo.mansare@` ⟶ domaine : ______________ | ______________ | ______________________________ |
-| Moussa CAMARA | `moussa.camara@` ⟶ domaine : ______________ | **DGA** | Directeur Général Adjoint |
+| Moïse SIDIBÉ | `moise.sidibe@ageroute.gov.gn` | **DG** | Directeur Général |
+| Famo MANSARÉ | `famo.mansare@ageroute.gov.gn` | **DAF** | Directeur Administratif et Financier |
+| Moussa CAMARA | `moussa.camara@ageroute.gov.gn` | **DGA** | Directeur Général Adjoint |
 
-**Trois points à trancher :**
+Les qualités exercées ci-dessus sont **déduites du rôle** et doivent être confirmées : elles
+figureront dans la preuve de signature et seront lues dix ans plus tard. Si l'intitulé exact du
+poste diffère, c'est lui qui doit être inscrit.
 
-- **Le domaine de messagerie.** Les vingt comptes existants utilisent `@ageroute.gov.gn`. Nous ne
-  l'avons pas présumé pour ces trois comptes : merci de le confirmer ou d'en indiquer un autre.
-- **Le rôle de Moïse SIDIBÉ et de Famo MANSARÉ.** La décision approuve leur nominativité mais ne
-  leur affecte pas de rôle, contrairement à Moussa CAMARA désigné DGA.
-- **La qualité exercée.** Elle doit être l'intitulé exact du poste, tel qu'il figurera dans la
-  preuve de signature et sera lu dix ans plus tard.
+### ⚠️ Point à trancher — deux titulaires pour le rôle DG
+
+Moïse SIDIBÉ est désigné **DG**. Or `abdoulaye.dabo@ageroute.gov.gn` porte déjà ce rôle et
+constitue l'un des trois seuls comptes nominatifs existants.
+
+Trois lectures possibles, qui n'ont pas les mêmes conséquences :
+
+| Lecture | Conséquence |
+|---|---|
+| Moïse SIDIBÉ est le Directeur Général en fonction | le compte d'Abdoulaye DABO doit être désactivé ou reversé vers un autre rôle |
+| Abdoulaye DABO reste Directeur Général | le rôle de Moïse SIDIBÉ est à corriger |
+| Les deux exercent, l'un par intérim ou délégation | l'intérim doit être formalisé comme une **délégation datée**, pas comme un second titulaire |
+
+**Ce point doit être tranché avant création du compte.** Deux titulaires simultanés du rôle DG
+signifieraient deux personnes habilitées à ordonnancer le même décompte — exactement ce que la
+séparation des tâches doit empêcher. Le système ne saurait pas laquelle est légitime, et la
+preuve de signature non plus.
 
 ---
 
@@ -74,9 +89,9 @@ Un membre non signataire peut consulter et préparer, mais pas valider.
 | **MISSION** | `mission@ageroute.gov.gn` | | | |
 | **TECHNIQUE** | `technique@ageroute.gov.gn` | | | |
 | **DMC** | `dmc@ageroute.gov.gn` | Mohamed lamine Keita *(déjà nominatif)* + | | |
-| **DAF** | `daf@ageroute.gov.gn` | | | |
+| **DAF** | `daf@ageroute.gov.gn` | **Famo MANSARÉ** | Famo MANSARÉ | Directeur Administratif et Financier |
 | **DGA** | *(rôle à créer)* | Moussa CAMARA | Moussa CAMARA | Directeur Général Adjoint |
-| **DG** | `dg@ageroute.gov.gn` | Abdoulaye DABO *(déjà nominatif)* | Abdoulaye DABO | |
+| **DG** | `dg@ageroute.gov.gn` | **Moïse SIDIBÉ** + Abdoulaye DABO ⟶ ⚠️ *voir partie 1* | à trancher | Directeur Général |
 | **UGP** | `ugp@ageroute.gov.gn` | | | |
 | **AUDITEUR** | `auditeur@ageroute.gov.gn` | | *(consultation seule)* | |
 
