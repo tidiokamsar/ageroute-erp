@@ -18,7 +18,6 @@ import {
   FileText, RefreshCw, MessageSquare, Eye, Stamp, Paperclip,
   DollarSign, ClipboardCheck, Layers, GitBranch, Upload, RotateCcw,
 } from "lucide-react";
-import { BpmnPanel } from "../components/BpmnPanel";
 import { FileUploadModal } from "../components/ui/FileUploadModal";
 import { Badge } from "../components/ui/Badge";
 
@@ -999,16 +998,6 @@ export function DecomptesPage() {
                   </div>
                 )}
 
-                {/* Circuit BPMN générique en complément */}
-                <div className="mt-6 border-t border-gray-100 pt-4">
-                  <p className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Circuit BPMN 5 étapes</p>
-                  <BpmnPanel
-                    moduleType="DECOMPTE"
-                    entityId={det.id}
-                    currentUserRole={role ?? "MISSION"}
-                    canSubmit={canWrite(role) && det.statut === "BROUILLON"}
-                  />
-                </div>
               </div>
             )}
 

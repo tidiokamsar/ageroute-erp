@@ -20,7 +20,6 @@ import {
   ClipboardList, CreditCard, ArrowRight, Star, TrendingDown,
   UserCheck,
   History} from "lucide-react";
-import { BpmnPanel } from "../components/BpmnPanel";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -372,7 +371,6 @@ export function EntreprisesPage() {
     { key:"decomptes",    label:"Décomptes",       icon:CreditCard },
     { key:"performance",  label:"Performance",     icon:BarChart2 },
     { key:"historique",   label:"Historique",      icon:Activity },
-    { key:"workflow",     label:"Workflow BPMN",   icon:Activity },
     { key:"utilisateurs", label:"Utilisateurs",    icon:UserCheck },
     { key:"suivi",        label:"Suivi & Audit",   icon:History },
   ];
@@ -871,17 +869,6 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Workflow BPMN conformité ── */}
-            {detailTab === "workflow" && (
-              <div className="py-2">
-                <BpmnPanel
-                  moduleType="CONFORMITE"
-                  entityId={detail.id}
-                  currentUserRole={user!.role}
-                  canSubmit={canWrite(user?.role)}
-                />
-              </div>
-            )}
 
             {/* ── Utilisateurs liés §7.2 ── */}
             {detailTab === "utilisateurs" && (

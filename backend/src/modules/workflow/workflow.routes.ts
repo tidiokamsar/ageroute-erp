@@ -426,6 +426,19 @@ workflowRouter.get("/instance/:id", async (req: Request, res: Response, next: Ne
 });
 
 // ─── Instance par décompte ────────────────────────────────────────────────────
+/**
+ * Circuit d'un décompte.
+ *
+ * Renvoie `null` quand aucune instance n'existe — mais un `null` sec ne
+ * distingue pas deux situations très différentes : un décompte jamais soumis,
+ * et un décompte ANTÉRIEUR à l'unification des circuits, validé et payé à
+ * l'époque où la validation s'écrivait hors du workflow.
+ *
+ * Constaté le 20/08/2026 : 3 décomptes sur 8, tous au statut PAYE, portaient
+ * cinq validations chacun sans aucune instance. Leur reconstituer un circuit
+ * a posteriori fabriquerait un historique qui n'a pas eu lieu. On les qualifie
+ * plutôt, et l'écran le dit.
+ */
 workflowRouter.get("/decompte/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const instance = await prisma.workflowInstance.findFirst({
@@ -433,7 +446,28 @@ workflowRouter.get("/decompte/:decompteId", async (req: Request, res: Response, 
       include: includeInstance,
       orderBy: { createdAt: "desc" },
     });
-    res.json(instance ?? null);
+    if (instance) return res.json(instance);
+
+    const [nbValidations, decompte] = await Promise.all([
+      prisma.decompteValidation.count({ where: { decompteId: req.params.decompteId } }),
+      prisma.decompte.findUnique({ where: { id: req.params.decompteId }, select: { statut: true } }),
+    ]);
+
+    if (nbValidations > 0) {
+      return res.json({
+        instance: null,
+        anterieurAuDispositif: true,
+        nbValidations,
+        statutDecompte: decompte?.statut ?? null,
+        message:
+          `Dossier antérieur à l'unification des circuits : ${nbValidations} validation(s) ` +
+          "ont été enregistrées avant que le circuit ne devienne la source unique du parcours. " +
+          "Aucune instance n'est reconstituée — l'historique du circuit n'a pas eu lieu et ne " +
+          "sera pas fabriqué. Les validations restent consultables dans l'onglet Validations.",
+      });
+    }
+
+    res.json(null);
   } catch (err) { next(err); }
 });
 
