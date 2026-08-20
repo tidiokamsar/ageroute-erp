@@ -66,24 +66,48 @@ test("une adresse invalide est refusee", () => {
 });
 
 /**
- * Écart relevé lors de la désignation des signataires : l'API n'accepte que 9
- * des 14 rôles de l'énumération Prisma. Les rôles externes — BAILLEUR, BUDGET,
- * TRESOR, FER_AGT, BCRG — ne peuvent pas être attribués à la création. Ce test
- * fige le comportement actuel pour que l'écart soit visible et décidé, plutôt
- * que découvert en production.
+ * Écart relevé lors de la désignation des signataires, corrigé le 20/08/2026 :
+ * l'API n'acceptait que 9 des 14 rôles de l'énumération Prisma. BAILLEUR,
+ * BUDGET, TRESOR et FER_AGT étaient proposés par l'écran d'administration mais
+ * refusés par l'API — les sélectionner produisait une erreur. BCRG n'était
+ * proposé nulle part.
+ *
+ * Ce test est la garde contre une nouvelle divergence : toute valeur ajoutée à
+ * l'énumération `Role` de schema.prisma doit être ajoutée ici aussi.
  */
-test("les roles externes ne sont pas acceptes a la creation — ecart connu", () => {
+const ROLES_ATTENDUS = [
+  "ADMIN", "DG", "DAF", "DSF", "DMC", "UGP", "MISSION", "TECHNIQUE",
+  "ENTREPRISE", "AUDITEUR", "BAILLEUR", "BUDGET", "TRESOR", "FER_AGT", "BCRG",
+];
+
+test("les quinze roles de l'enumeration sont acceptes a la creation", () => {
+  for (const role of ROLES_ATTENDUS) {
+    const { colonnes } = separerMotDePasse(userCreateSchema.parse({ ...CORPS_VALIDE, role }));
+    assert.equal(colonnes.role, role, `le role ${role} doit etre accepte`);
+  }
+});
+
+test("les roles externes sont desormais attribuables", () => {
   for (const role of ["BAILLEUR", "BUDGET", "TRESOR", "FER_AGT", "BCRG"]) {
+    const { colonnes } = separerMotDePasse(userCreateSchema.parse({ ...CORPS_VALIDE, role }));
+    assert.equal(colonnes.role, role);
+  }
+});
+
+test("un role inexistant reste refuse", () => {
+  for (const role of ["DGA", "SUPERADMIN", "dsf", ""]) {
     assert.throws(
       () => userCreateSchema.parse({ ...CORPS_VALIDE, role }),
-      `le role ${role} est refuse par l'API alors qu'il existe en base`,
+      `le role ${role} n'existe pas en base et doit etre refuse`,
     );
   }
 });
 
-test("les neuf roles acceptes le restent", () => {
-  for (const role of ["ADMIN", "DG", "DAF", "DMC", "UGP", "MISSION", "TECHNIQUE", "ENTREPRISE", "AUDITEUR"]) {
-    const { colonnes } = separerMotDePasse(userCreateSchema.parse({ ...CORPS_VALIDE, role }));
-    assert.equal(colonnes.role, role);
-  }
+/**
+ * DSF — Direction de la Structuration Financière. Rôle de consultation créé le
+ * 20/08/2026 pour Abdoulaye DABO. Aucun des 14 rôles existants ne correspondait.
+ */
+test("le role DSF est attribuable et n'est pas un role de circuit", () => {
+  const { colonnes } = separerMotDePasse(userCreateSchema.parse({ ...CORPS_VALIDE, role: "DSF" }));
+  assert.equal(colonnes.role, "DSF");
 });

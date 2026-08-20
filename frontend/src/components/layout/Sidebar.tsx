@@ -34,9 +34,11 @@ interface NavSection {
 }
 
 // Groupes de rôles pour simplifier
-const ALL_INTERNAL = ["ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE","AUDITEUR","BAILLEUR","BUDGET","TRESOR","FER_AGT","BCRG"];
+const ALL_INTERNAL = ["ADMIN","DG","DAF","DSF","DMC","UGP","MISSION","TECHNIQUE","AUDITEUR","BAILLEUR","BUDGET","TRESOR","FER_AGT","BCRG"];
 const DIRECTION = ["ADMIN","DG","DAF","DMC","UGP"];
-const FINANCES = ["ADMIN","DG","DAF","BUDGET","TRESOR","FER_AGT","BCRG"];
+// DSF suit le financier en consultation. Il reste hors DIRECTION, hors CONTROLE
+// et hors AUDIT_ROLES : aucun circuit de validation, aucune tâche à traiter.
+const FINANCES = ["ADMIN","DG","DAF","DSF","BUDGET","TRESOR","FER_AGT","BCRG"];
 const CONTROLE = ["ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE"];
 const AUDIT_ROLES = ["ADMIN","DG","DAF","DMC","AUDITEUR"];
 
@@ -193,6 +195,7 @@ const ROLE_LABELS: Record<string, string> = {
   ADMIN:     "Administrateur",
   DG:        "Directeur Général",
   DAF:       "Dir. Admin & Fin.",
+  DSF:       "Dir. Structuration Fin.",
   DMC:       "Dir. Marchés & Contrats",
   UGP:       "Unité Gest. de Projet",
   MISSION:   "Équipe Mission",

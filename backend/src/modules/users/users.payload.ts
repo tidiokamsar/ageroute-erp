@@ -16,7 +16,28 @@ export const userCreateSchema = z.object({
   email: z.string().email(),
   nomComplet: z.string().min(1),
   password: z.string().min(8),
-  role: z.enum(["ADMIN", "DG", "DAF", "DMC", "UGP", "MISSION", "TECHNIQUE", "ENTREPRISE", "AUDITEUR"]),
+  // La liste doit refléter l'énumération `Role` de schema.prisma. Elle n'en
+  // couvrait que 9 sur 14 : BAILLEUR, BUDGET, TRESOR, FER_AGT et BCRG existaient
+  // en base et étaient proposés par l'écran d'administration, mais l'API les
+  // refusait — créer un représentant de bailleur ou du Trésor était impossible.
+  // DSF s'y ajoute (migration 2026-08-20-role-dsf.sql).
+  role: z.enum([
+    "ADMIN",
+    "DG",
+    "DAF",
+    "DSF",
+    "DMC",
+    "UGP",
+    "MISSION",
+    "TECHNIQUE",
+    "ENTREPRISE",
+    "AUDITEUR",
+    "BAILLEUR",
+    "BUDGET",
+    "TRESOR",
+    "FER_AGT",
+    "BCRG",
+  ]),
   actif: z.boolean().default(true),
   // Identité officielle portée sur les documents signés. Sans elle, les
   // cartouches de visa restaient vides même sur une pièce validée, et

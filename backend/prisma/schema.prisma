@@ -26,6 +26,10 @@ enum Role {
   TRESOR     // Direction Générale du Trésor / DNTCP
   FER_AGT    // Fonds d'Entretien Routier — §16.1
   BCRG       // Banque Centrale de la République de Guinée — §16.1
+  DSF        // Direction de la Structuration Financière — consultation et suivi
+             // financier. HORS CIRCUIT : n'intervient dans aucune des 11
+             // définitions de workflow et ne signe aucun décompte.
+             // Migration : 2026-08-20-role-dsf.sql
 }
 
 enum StatutEntreprise {

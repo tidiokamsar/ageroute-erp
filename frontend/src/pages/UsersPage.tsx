@@ -14,24 +14,31 @@ interface User {
   actif: boolean; derniereConnexion?: string; createdAt: string;
 }
 
+// Cette liste doit rester alignée sur l'énumération `Role` de schema.prisma ET
+// sur le schéma de `POST /api/users`. Elle proposait BAILLEUR, BUDGET, TRESOR et
+// FER_AGT alors que l'API les refusait : les sélectionner produisait une erreur.
+// BCRG manquait, et DSF s'y ajoute.
 const ROLES = [
-  "ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE",
-  "ENTREPRISE","AUDITEUR","BAILLEUR","BUDGET","TRESOR","FER_AGT",
+  "ADMIN","DG","DAF","DSF","DMC","UGP","MISSION","TECHNIQUE",
+  "ENTREPRISE","AUDITEUR","BAILLEUR","BUDGET","TRESOR","FER_AGT","BCRG",
 ];
 const ROLE_LABELS: Record<string,string> = {
-  ADMIN:"Administrateur", DG:"Direction Générale", DAF:"DAF", DMC:"Dir. Marchés",
+  ADMIN:"Administrateur", DG:"Direction Générale", DAF:"DAF",
+  DSF:"Dir. Structuration Financière", DMC:"Dir. Marchés",
   UGP:"UGP", MISSION:"Mission Contrôle", TECHNIQUE:"Dir. Technique",
   ENTREPRISE:"Entreprise", AUDITEUR:"Auditeur",
-  BAILLEUR:"Bailleur Externe", BUDGET:"Dir. Budget (MEF)", TRESOR:"Trésor Public", FER_AGT:"FER",
+  BAILLEUR:"Bailleur Externe", BUDGET:"Dir. Budget (MEF)", TRESOR:"Trésor Public",
+  FER_AGT:"FER", BCRG:"Banque Centrale",
 };
 const ROLE_COLORS: Record<string,string> = {
   ADMIN:"bg-red-100 text-red-800", DG:"bg-purple-100 text-purple-800",
-  DAF:"bg-blue-100 text-blue-800", DMC:"bg-indigo-100 text-indigo-800",
+  DAF:"bg-blue-100 text-blue-800", DSF:"bg-cyan-100 text-cyan-800",
+  DMC:"bg-indigo-100 text-indigo-800",
   UGP:"bg-teal-100 text-teal-800", MISSION:"bg-green-100 text-green-800",
   TECHNIQUE:"bg-amber-100 text-amber-800", ENTREPRISE:"bg-orange-100 text-orange-800",
   AUDITEUR:"bg-gray-100 text-gray-700", BAILLEUR:"bg-sky-100 text-sky-800",
   BUDGET:"bg-violet-100 text-violet-800", TRESOR:"bg-emerald-100 text-emerald-800",
-  FER_AGT:"bg-yellow-100 text-yellow-800",
+  FER_AGT:"bg-yellow-100 text-yellow-800", BCRG:"bg-slate-100 text-slate-800",
 };
 
 export default function UsersPage() {
