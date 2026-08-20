@@ -1,7 +1,13 @@
 import { useState, useEffect } from "react";
 import { api } from "./api";
 
-export type Role = "ADMIN" | "DG" | "DAF" | "DMC" | "UGP" | "MISSION" | "TECHNIQUE" | "ENTREPRISE" | "AUDITEUR";
+// Doit refléter l'énumération `Role` de backend/prisma/schema.prisma. Le type
+// n'en listait que 9 sur 14 : les rôles externes existaient en base et étaient
+// renvoyés par l'API, mais n'étaient pas typés ici. DSF s'y ajoute — Direction
+// de la Structuration Financière, consultation et suivi financier, hors circuit.
+export type Role =
+  | "ADMIN" | "DG" | "DAF" | "DSF" | "DMC" | "UGP" | "MISSION" | "TECHNIQUE"
+  | "ENTREPRISE" | "AUDITEUR" | "BAILLEUR" | "BUDGET" | "TRESOR" | "FER_AGT" | "BCRG";
 export interface AuthUser { id: string; email: string; nomComplet: string; role: Role; modules?: string[]; }
 
 let _user: AuthUser | null = null;

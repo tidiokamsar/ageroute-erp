@@ -16,9 +16,12 @@ export function imprimerBordereau(det: Record<string, unknown>, v: Record<string
       @media print{button{display:none}}</style>
   </head><body>
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
-      <div>
+      <div style="display:flex;align-items:center">
+        <img src="/ageroute-logo.png" alt="AGEROUTE" style="height:52px;width:auto;margin-right:12px" />
+        <div>
         <h1 style="margin:0;font-size:17px;color:#1B2A4A">AGEROUTE GUINÉE</h1>
         <p style="margin:2px 0;font-size:11px;color:#6b7280">Direction des Marchés et Contrats — Circuit de validation e-Décompte</p>
+        </div>
       </div>
       <div style="text-align:right;font-size:11px;color:#6b7280">
         <p style="margin:0">Imprimé le ${new Date().toLocaleString("fr-FR")}</p>

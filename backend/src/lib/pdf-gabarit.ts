@@ -11,13 +11,55 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import fs from "fs";
 
-const CHEMIN_LOGO = path.join(__dirname, "..", "assets", "ageroute-logo-pdf.jpg");
+/**
+ * Emplacement du logo — résolu parmi plusieurs candidats.
+ *
+ * Deux corrections combinées à la fusion du 20/08/2026 :
+ *
+ *  · le fichier retenu est `ageroute-logo-pdf.jpg`, version compressée à
+ *    17 Ko contre 4 835 Ko pour l'original. Chaque document officiel
+ *    réembarquait l'image : un dossier de deux pages pesait 4,8 Mo.
+ *
+ *  · le chemin est cherché parmi plusieurs emplacements. En développement le
+ *    code s'exécute depuis `src/lib`, en production depuis `dist/lib` : un
+ *    chemin relatif unique ne peut pas convenir aux deux. Une version
+ *    antérieure calculait `dist/assets` alors que le Dockerfile dépose le
+ *    fichier dans `/app/assets` — le logo était introuvable et l'en-tête
+ *    sortait sans emblème, sans la moindre erreur puisque le dessin est
+ *    conditionné par un `existsSync`.
+ *
+ * L'original non compressé sert de dernier recours : une installation qui ne
+ * l'aurait pas encore reçu garde un en-tête complet plutôt qu'un cadre vide.
+ */
+const CANDIDATS_LOGO = [
+  path.join(__dirname, "..", "assets", "ageroute-logo-pdf.jpg"),        // src/assets ou dist/assets
+  path.join(__dirname, "..", "..", "assets", "ageroute-logo-pdf.jpg"),  // /app/assets depuis dist/lib
+  path.join(process.cwd(), "assets", "ageroute-logo-pdf.jpg"),          // racine de l'application
+  path.join(__dirname, "..", "assets", "ageroute-logo.jpg"),            // repli : original non compressé
+  path.join(__dirname, "..", "..", "assets", "ageroute-logo.jpg"),
+  path.join(process.cwd(), "assets", "ageroute-logo.jpg"),
+];
+
+const CHEMIN_LOGO = CANDIDATS_LOGO.find((c) => fs.existsSync(c)) ?? CANDIDATS_LOGO[0];
+
+if (!fs.existsSync(CHEMIN_LOGO)) {
+  // Trace explicite : un logo manquant doit se voir dans les journaux, pas
+  // seulement à l'impression d'un document officiel.
+  console.warn(`[pdf-gabarit] Logo introuvable — cherché dans : ${CANDIDATS_LOGO.join(", ")}`);
+}
 
 export interface OptionsGabarit {
   titre: string;
   sousTitre?: string;
   reference?: string;
   landscape?: boolean;
+  /**
+   * Conserve les pages en mémoire pour pouvoir y revenir après coup.
+   * Indispensable à la pagination d'un dossier (« Page 3 / 7 ») : le nombre
+   * total de pages n'est connu qu'une fois tout le contenu écrit.
+   * Voir `paginer()` dans pdf-dossier.ts.
+   */
+  bufferPages?: boolean;
 }
 
 export interface Signataire {
@@ -34,6 +76,7 @@ export function creerDocumentOfficiel(opts: OptionsGabarit): PDFKit.PDFDocument 
     margin: 40,
     size: "A4",
     layout: opts.landscape ? "landscape" : "portrait",
+    bufferPages: opts.bufferPages ?? false,
     info: {
       Title: opts.titre,
       Author: "AGEROUTE Guinée",
@@ -103,6 +146,12 @@ export function ajouterPiedDePage(doc: PDFKit.PDFDocument, signataires: Signatai
   const nb = signataires.length;
   const espacement = (largeur - 80) / nb;
 
+  // ⚠️ Ce bloc s'écrit SOUS la marge basse (h-35, h-15). Sans neutraliser cette
+  // marge, PDFKit juge que le texte ne tient pas et ajoute une page vide à la
+  // fin de chaque document officiel — page qui ne contient que la fin du pied.
+  const margeBasse = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
+
   // Ligne de séparation
   doc.moveTo(40, hauteur - 80).lineTo(largeur - 40, hauteur - 80).strokeColor("#ddd").lineWidth(1).stroke();
 
@@ -113,12 +162,14 @@ export function ajouterPiedDePage(doc: PDFKit.PDFDocument, signataires: Signatai
     doc.text(sig.role, x - espacement / 2 + 10, hauteur - 75, { width: espacement - 20, align: "center" });
     doc.moveTo(x - espacement / 2 + 15, hauteur - 40).lineTo(x + espacement / 2 - 15, hauteur - 40)
       .strokeColor("#999").lineWidth(0.5).stroke();
-    doc.fontSize(5).text("Nom et signature", x - espacement / 2 + 10, hauteur - 35, { width: espacement - 20, align: "center" });
+    doc.fontSize(5).text("Nom et signature", x - espacement / 2 + 10, hauteur - 35, { width: espacement - 20, align: "center", lineBreak: false });
   });
 
   // Horodatage
   doc.fontSize(5).fillColor("#999").font("Helvetica")
-    .text(`Généré le ${new Date().toLocaleString("fr-FR")} par ERP AGEROUTE — Document officiel`, 40, hauteur - 15, { width: largeur - 80, align: "center" });
+    .text(`Généré le ${new Date().toLocaleString("fr-FR")} par ERP AGEROUTE — Document officiel`, 40, hauteur - 15, { width: largeur - 80, align: "center", lineBreak: false });
+
+  doc.page.margins.bottom = margeBasse;
 }
 
 /**

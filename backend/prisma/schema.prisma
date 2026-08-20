@@ -26,6 +26,10 @@ enum Role {
   TRESOR     // Direction Générale du Trésor / DNTCP
   FER_AGT    // Fonds d'Entretien Routier — §16.1
   BCRG       // Banque Centrale de la République de Guinée — §16.1
+  DSF        // Direction de la Structuration Financière — consultation et suivi
+             // financier. HORS CIRCUIT : n'intervient dans aucune des 11
+             // définitions de workflow et ne signe aucun décompte.
+             // Migration : 2026-08-20-role-dsf.sql
 }
 
 enum StatutEntreprise {
@@ -172,6 +176,15 @@ model User {
   id               String    @id @default(uuid())
   email            String    @unique
   nomComplet       String
+  // Identité officielle portée sur les documents signés. `nomComplet` reste
+  // l'affichage courant ; nom, prénom et fonction servent aux mentions
+  // officielles, où l'usage les sépare.
+  // Migration : 2026-08-19-user-signature.sql
+  nom              String?
+  prenom           String?
+  fonction         String?   // ex. « Chef de Mission de Contrôle »
+  // Spécimen de signature déposé — complète le cachet cryptographique.
+  signatureUrl     String?
   passwordHash     String
   role             Role      @default(MISSION)
   actif            Boolean   @default(true)
@@ -186,6 +199,7 @@ model User {
   delegationsSuppleant Delegation[] @relation("DelegationSuppleant")
   moduleAccess         UserModuleAccess[]
   affectationsMarches  MarcheAffectation[]
+  affectationsProjets  ProjetAffectation[]
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -307,6 +321,9 @@ model Projet {
   decomptes            Decompte[]
   historique           ProjetStatusHistory[]
   fundingAllocations   FundingAllocation[]
+  // Périmètre de visibilité : affecter un projet couvre tous ses marchés,
+  // y compris ceux ajoutés plus tard. Migration 2026-08-20-affectation-projets.sql
+  affectations         ProjetAffectation[]
 
   deletedAt            DateTime?
   createdAt            DateTime     @default(now())
@@ -1126,6 +1143,15 @@ model Document {
   // §18 CDC — versioning + horodatage
   estArchive  Boolean  @default(false)
   uploadePar  String?  // userId
+
+  // Circuit de validation des pièces : l'ENTREPRISE dépose, la MISSION et la
+  // DIRECTION TECHNIQUE valident — ou retournent avec un motif.
+  // Migration : 2026-08-19-documents-validation.sql
+  statutValidation String    @default("DEPOSE") // DEPOSE | VALIDE | RETOURNE
+  valideParId      String?
+  valideAt         DateTime?
+  motifRetour      String?
+
   createdAt   DateTime @default(now())
 
   @@map("documents")
@@ -1609,6 +1635,24 @@ model MarcheAffectation {
 
   @@unique([userId, marcheId])
   @@map("marche_affectations")
+  @@index([userId])
+}
+
+/// Affectation d'un agent à un PROJET.
+/// Le périmètre effectif d'un rôle scopé = marchés affectés directement
+/// ∪ marchés des projets affectés. Un marché ajouté plus tard à un projet
+/// affecté est donc couvert sans réintervention de l'administrateur.
+/// Migration : 2026-08-20-affectation-projets.sql
+model ProjetAffectation {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projetId  String
+  projet    Projet   @relation(fields: [projetId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, projetId])
+  @@map("projet_affectations")
   @@index([userId])
 }
 

@@ -16,6 +16,7 @@ import { prisma } from "../../lib/prisma";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { logAudit } from "../../lib/audit";
+import { formaterMontant } from "../../lib/montants";
 
 export const rapportBailleurRouter = Router();
 rapportBailleurRouter.use(requireAuth, requireRole("ADMIN", "DAF", "DG", "UGP", "BAILLEUR"));
@@ -202,7 +203,7 @@ async function calculerRapport(bailleur?: string, projetId?: string): Promise<Ra
 }
 
 function fmtGnf(v: bigint | number): string {
-  return new Intl.NumberFormat("fr-GN", { maximumFractionDigits: 0 }).format(Number(v));
+  return formaterMontant(v);
 }
 
 // ─── GET /rapport-bailleur — JSON ──────────────────────────────────────────────

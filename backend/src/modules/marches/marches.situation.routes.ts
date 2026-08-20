@@ -14,6 +14,7 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
 import { entrepriseIdOf } from "../../lib/scope";
+import { formaterMontant } from "../../lib/montants";
 
 export const situationBordereauRouter = Router();
 situationBordereauRouter.use(requireAuth);
@@ -181,7 +182,7 @@ async function calculerSituation(marcheId: string): Promise<SituationMarche> {
 }
 
 function fmtGnf(v: bigint | number): string {
-  return new Intl.NumberFormat("fr-GN", { maximumFractionDigits: 0 }).format(Number(v));
+  return formaterMontant(v);
 }
 
 // ─── GET /:marcheId/situation-bordereau — JSON ────────────────────────────────

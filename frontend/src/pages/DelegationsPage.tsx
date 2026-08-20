@@ -22,8 +22,11 @@ interface Delegation {
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: "Administrateur", DG: "Directeur Général", DAF: "Dir. Admin & Fin.",
+  DSF: "Dir. Structuration Fin.",
   DMC: "Dir. Marchés & Contrats", UGP: "Unité Gestion Projet", MISSION: "Mission",
   TECHNIQUE: "Dir. Technique", AUDITEUR: "Auditeur",
+  BAILLEUR: "Bailleur Externe", BUDGET: "Dir. Budget (MEF)", TRESOR: "Trésor Public",
+  FER_AGT: "FER", BCRG: "Banque Centrale",
 };
 
 function fmtDate(d?: string) { return d ? new Date(d).toLocaleDateString("fr-FR") : "—"; }

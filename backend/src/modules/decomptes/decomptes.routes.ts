@@ -10,9 +10,14 @@ import { chargerRegles, nombreRegles } from "../../lib/regles";
 import { calcDecompteRegles } from "./decomptes.calc.regles";
 import { construireSnapshot, rejouerCalcul, lireSnapshot } from "./decomptes.regles.audit";
 import { z } from "zod";
+import type { StatutDecompte } from "@prisma/client";
+import { decompteDocumentsRouter } from "./decomptes.documents.routes";
 
 export const decomptesRouter = Router();
 decomptesRouter.use(requireAuth);
+
+// Pièces justificatives réelles (fichiers) — voir decomptes.documents.routes.ts
+decomptesRouter.use("/:id/documents", decompteDocumentsRouter);
 
 decomptesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -32,8 +37,13 @@ decomptesRouter.get("/", async (req: Request, res: Response, next: NextFunction)
   } catch (err) { next(err); }
 });
 
-decomptesRouter.get("/stats", async (_req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await decomptesService.stats()); } catch (err) { next(err); }
+decomptesRouter.get("/stats", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Mêmes règles que la liste : isolation ENTREPRISE + affectations terrain.
+    const entrepriseId = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    const marcheIds = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
+    res.json(await decomptesService.stats({ entrepriseId, marcheIds }));
+  } catch (err) { next(err); }
 });
 
 decomptesRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
@@ -361,60 +371,75 @@ decomptesRouter.get("/:id/validations-avancees", async (req: Request, res: Respo
       where: { decompteId: req.params.id },
       orderBy: { valideAt: "desc" },
     });
-    res.json(validations);
+
+    // Identité du signataire — une pièce comptable doit dire QUI a validé, à
+    // quel titre, et porter sa signature. Le nom est resservi depuis le compte
+    // plutôt que depuis l'instantané `valideNom`, qui contenait l'adresse
+    // e-mail sur les validations anciennes.
+    const ids = [...new Set(validations.map((v) => v.validePar).filter(Boolean) as string[])];
+    const agents = ids.length
+      ? await prisma.user.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, nomComplet: true, nom: true, prenom: true, fonction: true, signatureUrl: true },
+        })
+      : [];
+    const parId = new Map(agents.map((a) => [a.id, a]));
+
+    res.json(validations.map((v) => {
+      const a = v.validePar ? parId.get(v.validePar) : undefined;
+      const nomAffiche = a
+        ? ([a.prenom, a.nom].filter(Boolean).join(" ") || a.nomComplet)
+        : v.valideNom;
+      return {
+        ...v,
+        signataire: {
+          nom: nomAffiche,
+          fonction: a?.fonction ?? null,
+          signatureUrl: a?.signatureUrl ?? null,
+        },
+      };
+    }));
   } catch (err) { next(err); }
 });
 
-decomptesRouter.post("/:id/validations-avancees", requireRole("ADMIN","DG","DAF","DMC","MISSION","TECHNIQUE"), async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Validation d'une étape — ROUTE RETIRÉE DU SERVICE le 20/08/2026.
+ *
+ * Elle écrivait `decompte.statut` directement, avec sa PROPRE table de
+ * correspondance étape -> statut, sans toucher au circuit de validation. D'où la
+ * divergence constatée en production : sur 8 décomptes, 3 portaient des
+ * validations sans aucune instance de circuit, et l'écran affichait un statut de
+ * décompte incompatible avec l'étape de workflow courante.
+ *
+ * Le circuit est désormais la source unique du parcours. `POST /api/workflow/
+ * :instanceId/action` écrit, dans UNE SEULE transaction : l'action de workflow,
+ * la ligne de validation (onglet Validations) et le statut du décompte. Il
+ * applique aussi RG9 — séparation des tâches.
+ *
+ * La route est conservée et répond explicitement, plutôt que supprimée : un
+ * appelant resté sur l'ancienne interface doit comprendre ce qui a changé, pas
+ * recevoir un 404 muet. Les données déjà écrites ne sont pas touchées.
+ */
+decomptesRouter.post("/:id/validations-avancees", requireRole("ADMIN","DG","DAF","DMC","MISSION","TECHNIQUE","UGP"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const body = z.object({
-      etape:       z.enum(["SOUMISSION","MISSION","TECHNIQUE","DMC","DAF","DG","UGP"]),
-      decision:    z.enum(["APPROUVE","REJETE","CORRECTION"]),
-      commentaire: z.string().min(5),
-      signatureRef:z.string().optional(),
-    }).parse(req.body);
-
     const { prisma } = await import("../../lib/prisma");
-    // RG9 — même personne ne peut pas soumettre et valider
-    if (body.decision !== "CORRECTION") {
-      const decompte = await prisma.decompte.findUnique({ where: { id: req.params.id } });
-      // RG9 temporairement désactivé
-    }
 
-    const val = await prisma.decompteValidation.create({
-      data: {
-        decompteId:   req.params.id,
-        etape:        body.etape,
-        decision:     body.decision,
-        commentaire:  body.commentaire,
-        validePar:    req.user.id,
-        valideNom:    req.user.email,
-        valideRole:   req.user.role,
-        signatureRef: body.signatureRef,
-      },
+    const instance = await prisma.workflowInstance.findFirst({
+      where: { decompteId: req.params.id, statut: "EN_COURS" },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
     });
 
-    // Mise à jour statut décompte selon décision
-    const statutMap: Record<string, string> = {
-      "SOUMISSION-APPROUVE": "SOUMIS",
-      "MISSION-APPROUVE":    "EN_CONTROLE_TECHNIQUE",
-      "TECHNIQUE-APPROUVE":  "EN_VALIDATION",
-      "DMC-APPROUVE":        "VISA_DAF",
-      "DAF-APPROUVE":        "VISA_DG",
-      "DG-APPROUVE":         "VALIDE",
-      "MISSION-REJETE":      "REJETE",
-      "TECHNIQUE-REJETE":    "REJETE",
-    };
-    const key = `${body.etape}-${body.decision}`;
-    if (statutMap[key]) {
-      await prisma.decompte.update({ where: { id: req.params.id }, data: { statut: statutMap[key] as never } });
-    }
-    if (body.decision === "CORRECTION") {
-      await prisma.decompte.update({ where: { id: req.params.id }, data: { statut: "BROUILLON" as never } });
-    }
-
-    res.status(201).json(val);
+    throw new ApiError(
+      410,
+      instance
+        ? `Route retirée du service. La validation passe par le circuit : POST /api/workflow/${instance.id}/action. ` +
+          "La ligne de l'onglet Validations y est écrite automatiquement, dans la même transaction — " +
+          "un appel séparé créerait un doublon."
+        : "Route retirée du service, et aucun circuit n'est ouvert pour ce décompte. " +
+          "Soumettez-le d'abord : POST /api/workflow/soumettre/" + req.params.id + ".",
+    );
   } catch (err) { next(err); }
 });
 
@@ -506,20 +531,30 @@ decomptesRouter.post("/:id/payment-traces", requireRole("ADMIN","DAF","DG"), asy
 });
 
 // KPIs enrichis §8 CDC
-decomptesRouter.get("/stats/enrichis", async (_req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.get("/stats/enrichis", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { prisma } = await import("../../lib/prisma");
+
+    // C'est CET endpoint que l'écran interroge (celui de /stats ne sert que de
+    // repli). Sans périmètre, un agent dont la liste ne montrait que ses deux
+    // marchés lisait « Total 8 » et le montant payé de toute l'agence.
+    const entrepriseId = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    const marcheIds = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
+    const base: Record<string, unknown> = { deletedAt: null };
+    if (entrepriseId) base.entrepriseId = entrepriseId;
+    if (marcheIds) base.marcheId = { in: marcheIds };
+
     const [total, brouillons, soumis, enControle, valides, payes, rejetes,
       montantAttenteRaw, montantPayeRaw] = await Promise.all([
-      prisma.decompte.count({ where: { deletedAt: null } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "BROUILLON" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "SOUMIS" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: { in: ["EN_CONTROLE","EN_VALIDATION","VISA_DAF","VISA_DG"] } } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "VALIDE" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "PAYE" } }),
-      prisma.decompte.count({ where: { deletedAt: null, statut: "REJETE" } }),
-      prisma.decompte.aggregate({ where: { deletedAt: null, statut: { notIn: ["PAYE","REJETE"] } }, _sum: { netAPayer: true } }),
-      prisma.decompte.aggregate({ where: { deletedAt: null, statut: "PAYE" }, _sum: { netAPayer: true } }),
+      prisma.decompte.count({ where: base }),
+      prisma.decompte.count({ where: { ...base, statut: "BROUILLON" } }),
+      prisma.decompte.count({ where: { ...base, statut: "SOUMIS" } }),
+      prisma.decompte.count({ where: { ...base, statut: { in: ["EN_CONTROLE","EN_VALIDATION","VISA_DAF","VISA_DG"] } } }),
+      prisma.decompte.count({ where: { ...base, statut: "VALIDE" } }),
+      prisma.decompte.count({ where: { ...base, statut: "PAYE" } }),
+      prisma.decompte.count({ where: { ...base, statut: "REJETE" } }),
+      prisma.decompte.aggregate({ where: { ...base, statut: { notIn: ["PAYE","REJETE"] } }, _sum: { netAPayer: true } }),
+      prisma.decompte.aggregate({ where: { ...base, statut: "PAYE" }, _sum: { netAPayer: true } }),
     ]);
     res.json({
       total, brouillons, soumis, enControle, valides, payes, rejetes,

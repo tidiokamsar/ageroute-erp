@@ -6,30 +6,39 @@ import { Input, Select, FormField } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { toast } from "../components/ui/Toast";
 import { Plus, Users, CheckCircle, XCircle, KeyRound, Pencil, Trash2, Search, ShieldCheck, Briefcase } from "lucide-react";
+import { FileUploadModal } from "../components/ui/FileUploadModal";
 
 interface User {
   id: string; email: string; nomComplet: string; role: string;
+  nom?: string | null; prenom?: string | null; fonction?: string | null; signatureUrl?: string | null;
   actif: boolean; derniereConnexion?: string; createdAt: string;
 }
 
+// Cette liste doit rester alignée sur l'énumération `Role` de schema.prisma ET
+// sur le schéma de `POST /api/users`. Elle proposait BAILLEUR, BUDGET, TRESOR et
+// FER_AGT alors que l'API les refusait : les sélectionner produisait une erreur.
+// BCRG manquait, et DSF s'y ajoute.
 const ROLES = [
-  "ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE",
-  "ENTREPRISE","AUDITEUR","BAILLEUR","BUDGET","TRESOR","FER_AGT",
+  "ADMIN","DG","DAF","DSF","DMC","UGP","MISSION","TECHNIQUE",
+  "ENTREPRISE","AUDITEUR","BAILLEUR","BUDGET","TRESOR","FER_AGT","BCRG",
 ];
 const ROLE_LABELS: Record<string,string> = {
-  ADMIN:"Administrateur", DG:"Direction Générale", DAF:"DAF", DMC:"Dir. Marchés",
+  ADMIN:"Administrateur", DG:"Direction Générale", DAF:"DAF",
+  DSF:"Dir. Structuration Financière", DMC:"Dir. Marchés",
   UGP:"UGP", MISSION:"Mission Contrôle", TECHNIQUE:"Dir. Technique",
   ENTREPRISE:"Entreprise", AUDITEUR:"Auditeur",
-  BAILLEUR:"Bailleur Externe", BUDGET:"Dir. Budget (MEF)", TRESOR:"Trésor Public", FER_AGT:"FER",
+  BAILLEUR:"Bailleur Externe", BUDGET:"Dir. Budget (MEF)", TRESOR:"Trésor Public",
+  FER_AGT:"FER", BCRG:"Banque Centrale",
 };
 const ROLE_COLORS: Record<string,string> = {
   ADMIN:"bg-red-100 text-red-800", DG:"bg-purple-100 text-purple-800",
-  DAF:"bg-blue-100 text-blue-800", DMC:"bg-indigo-100 text-indigo-800",
+  DAF:"bg-blue-100 text-blue-800", DSF:"bg-cyan-100 text-cyan-800",
+  DMC:"bg-indigo-100 text-indigo-800",
   UGP:"bg-teal-100 text-teal-800", MISSION:"bg-green-100 text-green-800",
   TECHNIQUE:"bg-amber-100 text-amber-800", ENTREPRISE:"bg-orange-100 text-orange-800",
   AUDITEUR:"bg-gray-100 text-gray-700", BAILLEUR:"bg-sky-100 text-sky-800",
   BUDGET:"bg-violet-100 text-violet-800", TRESOR:"bg-emerald-100 text-emerald-800",
-  FER_AGT:"bg-yellow-100 text-yellow-800",
+  FER_AGT:"bg-yellow-100 text-yellow-800", BCRG:"bg-slate-100 text-slate-800",
 };
 
 export default function UsersPage() {
@@ -43,6 +52,7 @@ export default function UsersPage() {
   const [pwdModal, setPwdModal] = useState<User|null>(null);
   const [newPwd, setNewPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
+  const [depotSignature, setDepotSignature] = useState(false);
 
   const { data: users, isLoading } = useQuery<User[]>({
     queryKey: ["users"],
@@ -80,7 +90,13 @@ export default function UsersPage() {
   );
 
   function openNew() { setForm({ role: "MISSION", actif: true }); setModal("new"); }
-  function openEdit(u:User) { setForm({ email:u.email, nomComplet:u.nomComplet, role:u.role, actif:u.actif }); setModal(u); }
+  function openEdit(u:User) {
+    setForm({
+      email:u.email, nomComplet:u.nomComplet, role:u.role, actif:u.actif,
+      nom:u.nom ?? "", prenom:u.prenom ?? "", fonction:u.fonction ?? "", signatureUrl:u.signatureUrl ?? "",
+    });
+    setModal(u);
+  }
 
   return (
     <div className="space-y-4">
@@ -133,7 +149,7 @@ export default function UsersPage() {
                       <KeyRound className="h-3.5 w-3.5 text-amber-500"/>
                     </Button>
                     <Button size="sm" variant="ghost" onClick={()=>setAccessUser(u)} title="Gérer les accès aux modules"><ShieldCheck className="h-3.5 w-3.5 text-blue-500"/></Button>
-                    <Button size="sm" variant="ghost" onClick={()=>setAffectUser(u)} title="Affecter des marchés (périmètre de travail)"><Briefcase className="h-3.5 w-3.5 text-teal-600"/></Button>
+                    <Button size="sm" variant="ghost" onClick={()=>setAffectUser(u)} title="Affecter des projets ou des marchés (périmètre de travail)"><Briefcase className="h-3.5 w-3.5 text-teal-600"/></Button>
                     <Button size="sm" variant="ghost" onClick={()=>setConfirmDel(u)}><Trash2 className="h-3.5 w-3.5 text-red-400"/></Button>
                   </div>
                 </td>
@@ -150,6 +166,37 @@ export default function UsersPage() {
       <Modal open={modal!==null} onClose={()=>setModal(null)} title={modal==="new"?"Nouvel utilisateur":"Modifier l'utilisateur"} size="md">
         <div className="space-y-3">
           <FormField label="Nom complet" required><Input value={String(form.nomComplet??"")} onChange={(e)=>setForm({...form,nomComplet:e.target.value})}/></FormField>
+
+          {/* Identité officielle — portée sur les documents signés. Le nom
+              complet reste l'affichage courant de l'application ; ces champs
+              alimentent les cartouches de visa, où l'usage sépare les deux. */}
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Prénom"><Input value={String(form.prenom??"")} onChange={(e)=>setForm({...form,prenom:e.target.value})} placeholder="Abdoulaye"/></FormField>
+            <FormField label="Nom"><Input value={String(form.nom??"")} onChange={(e)=>setForm({...form,nom:e.target.value})} placeholder="DABO"/></FormField>
+          </div>
+          <FormField label="Fonction (telle qu'elle figure sur les documents)">
+            <Input value={String(form.fonction??"")} onChange={(e)=>setForm({...form,fonction:e.target.value})} placeholder="Chef de Mission de Contrôle"/>
+          </FormField>
+
+          <FormField label="Signature numérique">
+            <div className="flex items-center gap-3">
+              {form.signatureUrl ? (
+                <img src={String(form.signatureUrl)} alt="Spécimen de signature" className="h-14 rounded border border-gray-200 bg-white object-contain px-2" />
+              ) : (
+                <span className="text-xs text-gray-400">Aucun spécimen déposé</span>
+              )}
+              <Button size="sm" variant="secondary" onClick={()=>setDepotSignature(true)}>
+                {form.signatureUrl ? "Remplacer" : "Déposer"}
+              </Button>
+              {Boolean(form.signatureUrl) && (
+                <Button size="sm" variant="ghost" onClick={()=>setForm({...form,signatureUrl:""})}>Retirer</Button>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              Apposée sur les décomptes, attachements et PV validés par cet agent. Elle complète le
+              cachet électronique, elle ne le remplace pas.
+            </p>
+          </FormField>
           <FormField label="Email" required><Input type="email" value={String(form.email??"")} onChange={(e)=>setForm({...form,email:e.target.value})}/></FormField>
           <FormField label="Rôle" required>
             <Select value={String(form.role??"")} onChange={(e)=>setForm({...form,role:e.target.value})}>
@@ -210,6 +257,14 @@ export default function UsersPage() {
       </Modal>
       {accessUser && <AccessModal user={accessUser} onClose={()=>setAccessUser(null)} />}
       {affectUser && <AffectModal user={affectUser} onClose={()=>setAffectUser(null)} />}
+
+      <FileUploadModal
+        open={depotSignature}
+        onClose={() => setDepotSignature(false)}
+        title="Déposer le spécimen de signature"
+        onFileUploaded={(url) => { setForm({ ...form, signatureUrl: url }); setDepotSignature(false); }}
+      />
+
     </div>
   );
 }
@@ -269,7 +324,8 @@ function AccessModal({ user, onClose }: { user: User; onClose: () => void }) {
   );
 }
 
-interface AffectMarche { id: string; reference: string; intitule: string; statut: string; entreprise?: { raisonSociale: string }; affecte: boolean; }
+interface AffectMarche { id: string; reference: string; intitule: string; statut: string; projetId?: string | null; entreprise?: { raisonSociale: string }; affecte: boolean; couvertParProjet: boolean; }
+interface AffectProjet { id: string; code: string; intitule: string; statut: string; affecte: boolean; nbMarches: number; }
 
 function AffectModal({ user, onClose }: { user: User; onClose: () => void }) {
   const qc = useQueryClient();
@@ -278,36 +334,98 @@ function AffectModal({ user, onClose }: { user: User; onClose: () => void }) {
     queryFn: () => api.get(`/users/${user.id}/affectations`).then((r) => r.data),
   });
   const marches: AffectMarche[] = data?.marches ?? [];
-  const [sel, setSel] = useState<Set<string> | null>(null);
-  const selected = sel ?? new Set(marches.filter((m) => m.affecte).map((m) => m.id));
+  const projets: AffectProjet[] = data?.projets ?? [];
+
+  const [selM, setSelM] = useState<Set<string> | null>(null);
+  const [selP, setSelP] = useState<Set<string> | null>(null);
+  const marchesCoches = selM ?? new Set(marches.filter((m) => m.affecte).map((m) => m.id));
+  const projetsCoches = selP ?? new Set(projets.filter((p) => p.affecte).map((p) => p.id));
+
+  // Un marché est visible s'il est coché OU si son projet l'est. Le calcul est
+  // fait ici en direct pour que l'écran reflète la sélection en cours, avant
+  // enregistrement — sinon l'administrateur ne verrait l'effet qu'après coup.
+  const marchesVisibles = marches.filter((m) => marchesCoches.has(m.id) || (m.projetId ? projetsCoches.has(m.projetId) : false));
+
   const mut = useMutation({
-    mutationFn: () => api.put(`/users/${user.id}/affectations`, { marcheIds: [...selected] }).then((r) => r.data),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["user-affectations", user.id] }); toast.success(`Périmètre enregistré (${r.nbAffectes} marché(s))`); onClose(); },
+    mutationFn: () => api.put(`/users/${user.id}/affectations`, { marcheIds: [...marchesCoches], projetIds: [...projetsCoches] }).then((r) => r.data),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["user-affectations", user.id] });
+      toast.success(`Périmètre enregistré — ${r.nbMarchesVisibles} marché(s) visible(s)`);
+      onClose();
+    },
     onError: (e) => toast.error(parseApiError(e)),
   });
-  function toggle(id: string) {
-    const next = new Set(selected);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    setSel(next);
+
+  function bascule(ensemble: Set<string>, setter: (s: Set<string>) => void, id: string) {
+    const suivant = new Set(ensemble);
+    if (suivant.has(id)) suivant.delete(id); else suivant.add(id);
+    setter(suivant);
   }
+
   return (
     <Modal open onClose={onClose} title={`Périmètre de travail — ${user.nomComplet}`} size="lg">
       <div className="p-4">
         <p className="text-xs text-gray-500 mb-3">
-          Cochez les marchés confiés à cet agent ({user.role}). Il ne verra alors que ces marchés,
-          leurs projets, entreprises, décomptes et attachements. <strong>Aucune case cochée = accès non restreint.</strong>
+          Définissez le périmètre de cet agent ({user.role}). Il ne verra que ces marchés,
+          leurs entreprises, décomptes et attachements.{" "}
+          <strong className="text-amber-700">Aucune case cochée = aucun accès</strong> — un agent
+          sans périmètre ne voit rien.
         </p>
-        <div className="space-y-1 max-h-[55vh] overflow-auto pr-1">
-          {marches.map((m) => (
-            <label key={m.id} className="flex items-center gap-3 py-2 px-2 border-b border-gray-50 cursor-pointer hover:bg-gray-50 rounded">
-              <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} className="h-4 w-4"/>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-navy font-mono">{m.reference} <span className="text-[10px] text-gray-400 font-sans">({m.statut})</span></p>
-                <p className="text-xs text-gray-500 truncate">{m.intitule} — {m.entreprise?.raisonSociale ?? ""}</p>
-              </div>
-            </label>
-          ))}
+
+        <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-900">
+          <strong>{marchesVisibles.length} marché(s) visible(s)</strong> avec cette sélection —
+          {" "}{projetsCoches.size} projet(s) et {marchesCoches.size} marché(s) cochés.
+          Affecter un projet couvre tous ses marchés, <strong>y compris ceux créés plus tard</strong>.
         </div>
+
+        {projets.length === 0 && marches.length === 0 && (
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+            Aucun projet ni marché à afficher. Créez-en d'abord un pour pouvoir définir un périmètre.
+          </p>
+        )}
+
+        <div className="max-h-[55vh] overflow-auto pr-1 space-y-4">
+          {projets.length > 0 && (
+            <section>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Projets</h4>
+              <div className="space-y-1">
+                {projets.map((p) => (
+                  <label key={p.id} className="flex items-center gap-3 py-2 px-2 border-b border-gray-50 cursor-pointer hover:bg-gray-50 rounded">
+                    <input type="checkbox" checked={projetsCoches.has(p.id)} onChange={() => bascule(projetsCoches, setSelP, p.id)} className="h-4 w-4"/>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-navy font-mono">{p.code} <span className="text-[10px] text-gray-400 font-sans">({p.statut})</span></p>
+                      <p className="text-xs text-gray-500 truncate">{p.intitule} — {p.nbMarches} marché(s)</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {marches.length > 0 && (
+            <section>
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Marchés</h4>
+              <div className="space-y-1">
+                {marches.map((m) => {
+                  const parProjet = m.projetId ? projetsCoches.has(m.projetId) : false;
+                  return (
+                    <label key={m.id} className={`flex items-center gap-3 py-2 px-2 border-b border-gray-50 rounded ${parProjet ? "bg-sky-50/60 cursor-default" : "cursor-pointer hover:bg-gray-50"}`}>
+                      <input type="checkbox" checked={marchesCoches.has(m.id) || parProjet} disabled={parProjet} onChange={() => bascule(marchesCoches, setSelM, m.id)} className="h-4 w-4"/>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-navy font-mono">
+                          {m.reference} <span className="text-[10px] text-gray-400 font-sans">({m.statut})</span>
+                          {parProjet && <span className="ml-2 text-[10px] font-sans text-sky-700">couvert par son projet</span>}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">{m.intitule} — {m.entreprise?.raisonSociale ?? ""}</p>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </div>
+
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="secondary" onClick={onClose}>Annuler</Button>
           <Button onClick={() => mut.mutate()} disabled={mut.isPending}>{mut.isPending ? "..." : "Enregistrer le périmètre"}</Button>

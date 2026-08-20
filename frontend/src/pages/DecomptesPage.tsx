@@ -16,9 +16,10 @@ import {
   Plus, Receipt, ChevronRight, Check, X, Send, FileDown, CreditCard,
   CheckCircle, XCircle, Trash2, Calculator, AlertTriangle, Shield,
   FileText, RefreshCw, MessageSquare, Eye, Stamp, Paperclip,
-  DollarSign, ClipboardCheck, Layers, GitBranch,
+  DollarSign, ClipboardCheck, Layers, GitBranch, Upload, RotateCcw,
 } from "lucide-react";
-import { BpmnPanel } from "../components/BpmnPanel";
+import { FileUploadModal } from "../components/ui/FileUploadModal";
+import { Badge } from "../components/ui/Badge";
 
 // ===== TYPES =====
 
@@ -42,7 +43,9 @@ interface DecompteLigne {
   statut: string; depassement: boolean; observations?: string;
 }
 
+interface Signataire { nom?: string | null; fonction?: string | null; signatureUrl?: string | null }
 interface DecompteValidation {
+  signataire?: Signataire;
   id: string; etape: string; decision: string; commentaire: string;
   validePar: string; valideNom?: string; valideRole?: string; signatureRef?: string; valideAt: string;
 }
@@ -126,7 +129,7 @@ const PIECES_CFG = [
   { key: "pvContradictoire",  label: "PV contradictoire",        requis: false },
 ];
 
-const TABS = ["Résumé","Lignes BPU","Calculs","Pièces","Validations","Workflow","Paiement","Audit","Historique"] as const;
+const TABS = ["Résumé","Lignes BPU","Calculs","Pièces","Validations","Workflow","Paiement","Audit","Historique","Attachements"] as const;
 
 const TYPE_OPT = [
   { value:"AVANCE",        label:"Avance de démarrage" },
@@ -218,6 +221,20 @@ export function DecomptesPage() {
     enabled: !!detailId && activeTab === 8,
   });
 
+  // Onglet Attachements (index 9) — ceux du décompte consulté, et ceux des
+  // autres décomptes du même marché : le constat contradictoire se lit en
+  // cumul, un décompte isolé ne dit pas ce qui a déjà été attaché.
+  const { data: attCourants } = useQuery({
+    queryKey: ["decompte-attachements", detailId],
+    queryFn: () => api.get(`/attachements?decompteId=${detailId}&pageSize=100`).then((r) => r.data),
+    enabled: !!detailId && activeTab === 9,
+  });
+  const { data: attAnterieurs } = useQuery({
+    queryKey: ["marche-attachements", detail?.marcheId, detailId],
+    queryFn: () => api.get(`/attachements?marcheId=${detail?.marcheId}&saufDecompteId=${detailId}&pageSize=100`).then((r) => r.data),
+    enabled: !!detailId && !!detail?.marcheId && activeTab === 9,
+  });
+
   const { data: paymentTraces, refetch: refetchPay } = useQuery({
     queryKey: ["dec-payment", detailId],
     queryFn: () => api.get(`/decomptes/${detailId}/payment-traces`).then((r) => r.data),
@@ -285,25 +302,23 @@ export function DecomptesPage() {
     onError: (e) => toast.error(parseApiError(e)),
   });
 
-  // Validation réelle : fait avancer l'instance de workflow (change le statut du décompte
-  // et passe la main au rôle suivant), puis journalise dans le registre des validations.
-  // L'ancien comportement n'écrivait QUE dans le registre — le statut ne bougeait jamais.
+  // Validation : UN SEUL appel, au circuit. Le serveur écrit dans la même
+  // transaction l'action de workflow, la ligne de l'onglet Validations et le
+  // statut du décompte — et applique RG9 (séparation des tâches).
+  //
+  // L'écran postait auparavant AUSSI sur /validations-avancees, « non bloquant ».
+  // Cette seconde écriture ferait désormais doublon : la projection est
+  // produite par le moteur. La route répond 410 et explique le changement.
   const valMut = useMutation({
     mutationFn: async (b: { etape?: unknown; decision?: unknown; commentaire?: unknown; signatureRef?: unknown }) => {
       if (!wfInst || wfInst.statut !== "EN_COURS") {
         throw new Error("Aucun circuit de validation actif — soumettez d'abord le décompte.");
       }
       const decisionWf = b.decision === "CORRECTION" ? "DEMANDE_CORRECTION" : String(b.decision ?? "APPROUVE");
-      const result = await api.post(`/workflow/${wfInst.id}/action`, {
-        decision: decisionWf,
-        commentaire: String(b.commentaire ?? ""),
-      }).then((r) => r.data);
-      // Registre des validations (trace signée) — non bloquant si indisponible
-      await api.post(`/decomptes/${detailId}/validations-avancees`, {
-        ...b,
-        etape: etapeCourante?.nom ?? b.etape,
-      }).catch(() => {});
-      return result;
+      const commentaire = b.signatureRef
+        ? `${String(b.commentaire ?? "")} [réf. saisie : ${String(b.signatureRef)}]`
+        : String(b.commentaire ?? "");
+      return api.post(`/workflow/${wfInst.id}/action`, { decision: decisionWf, commentaire }).then((r) => r.data);
     },
     onSuccess: (data: { message?: string; statut?: string }) => {
       qc.invalidateQueries();
@@ -353,11 +368,21 @@ export function DecomptesPage() {
     onError: (e) => toast.error(parseApiError(e)),
   });
 
-  const downloadPdf = async (id: string, ref: string) => {
+  /**
+   * Téléchargement d'un PDF.
+   *
+   * `dossier` = les onze sections (référentiel, calculs, lignes BPU, pièces,
+   * validations, circuit, paiements, attachements, historique, audit,
+   * cartouches de signature). C'est le document à joindre au dossier physique.
+   * `resume` = la fiche courte, pour une vérification rapide.
+   */
+  const downloadPdf = async (id: string, ref: string, variante: "dossier" | "resume" = "dossier") => {
+    const chemin = variante === "dossier" ? `/documents/decompte/${id}/dossier/pdf` : `/documents/decompte/${id}/pdf`;
+    const prefixe = variante === "dossier" ? "dossier" : "decompte";
     try {
-      const res = await api.get(`/signature/pdf/${id}`, { responseType: "blob" });
+      const res = await api.get(chemin, { responseType: "blob" });
       const url = URL.createObjectURL(res.data as Blob);
-      const a = document.createElement("a"); a.href = url; a.download = `decompte-${ref}.pdf`;
+      const a = document.createElement("a"); a.href = url; a.download = `${prefixe}-${ref}.pdf`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     } catch { toast.error("PDF indisponible"); }
   };
@@ -379,6 +404,18 @@ export function DecomptesPage() {
   }
 
   // ── JSX ───────────────────────────────────────────────────────────────────
+
+  /**
+   * Total d'une colonne du bordereau. Centralisé parce que le pied du tableau
+   * ne comptait que 14 cellules pour 16 colonnes : la retenue s'affichait sous
+   * « ARMP » et le net sous « TTC ». Un total mal placé sur une pièce
+   * comptable se lit comme une erreur de calcul.
+   */
+  const totalLignes = (champ: string): number =>
+    ((lignes as DecompteLigne[] | undefined) ?? []).reduce(
+      (somme, l) => somme + Number((l as unknown as Record<string, unknown>)[champ] ?? 0),
+      0,
+    );
 
   return (
     <div className="space-y-5">
@@ -525,9 +562,15 @@ export function DecomptesPage() {
                 <p className="text-xs text-gray-500">{det.entreprise.raisonSociale} — {det.marche.reference}</p>
               </div>
               <div className="flex gap-2 flex-wrap">
+                <button className="px-2.5 py-1.5 text-xs border border-navy/30 bg-navy/5 rounded-lg text-navy font-medium hover:bg-navy/10 flex items-center gap-1.5"
+                  title="Dossier complet — tous les onglets, avec cartouches de signature"
+                  onClick={() => downloadPdf(det.id, det.reference, "dossier")}>
+                  <FileDown className="h-3.5 w-3.5" /> Dossier complet
+                </button>
                 <button className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center gap-1.5"
-                  onClick={() => downloadPdf(det.id, det.reference)}>
-                  <FileDown className="h-3.5 w-3.5" /> PDF
+                  title="Fiche courte — récapitulatif financier et lignes BPU"
+                  onClick={() => downloadPdf(det.id, det.reference, "resume")}>
+                  <FileDown className="h-3.5 w-3.5" /> Résumé
                 </button>
                 {canWrite(role) && det.statut === "BROUILLON" && (
                   <button className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded-lg flex items-center gap-1.5"
@@ -668,17 +711,17 @@ export function DecomptesPage() {
                           <td className="px-2 py-2 font-mono font-bold text-gray-700">{l.codeArticle}</td>
                           <td className="px-2 py-2 max-w-[160px] truncate text-gray-700" title={l.designation}>{l.designation}</td>
                           <td className="px-2 py-2 text-gray-400">{l.unite}</td>
-                          <td className="px-2 py-2 text-right">{l.quantiteContrat}</td>
-                          <td className="px-2 py-2 text-right text-gray-400">{l.quantitePrecedent}</td>
-                          <td className="px-2 py-2 text-right font-semibold">{l.quantiteCourante}</td>
+                          <td className="px-2 py-2 text-right whitespace-nowrap tabular-nums">{l.quantiteContrat}</td>
+                          <td className="px-2 py-2 text-right text-gray-400 whitespace-nowrap tabular-nums">{l.quantitePrecedent}</td>
+                          <td className="px-2 py-2 text-right font-semibold whitespace-nowrap tabular-nums">{l.quantiteCourante}</td>
                           <td className={`px-2 py-2 text-right font-bold ${l.depassement ? "text-red-600" : "text-navy"}`}>{l.quantiteCumulee}</td>
-                          <td className="px-2 py-2 text-right text-gray-400">{fmtGnf(l.prixUnitaire)}</td>
-                          <td className="px-2 py-2 text-right">{fmtGnf(l.montantBrut)}</td>
-                          <td className="px-2 py-2 text-right text-cyan-600">{fmtGnf(l.montantTva)}</td>
-                          <td className="px-2 py-2 text-right text-orange-500">{fmtGnf((l as unknown as Record<string, unknown>).montantArmp as string ?? "0")}</td>
-                          <td className="px-2 py-2 text-right font-semibold text-slate-700">{fmtGnf((l as unknown as Record<string, unknown>).montantTtc as string ?? "0")}</td>
-                          <td className="px-2 py-2 text-right text-amber-600">{fmtGnf(l.montantRetenue)}</td>
-                          <td className="px-2 py-2 text-right font-black text-navy">{fmtGnf(l.montantNet)}</td>
+                          <td className="px-2 py-2 text-right text-gray-400 whitespace-nowrap tabular-nums">{fmtGnf(l.prixUnitaire)}</td>
+                          <td className="px-2 py-2 text-right whitespace-nowrap tabular-nums">{fmtGnf(l.montantBrut)}</td>
+                          <td className="px-2 py-2 text-right text-cyan-600 whitespace-nowrap tabular-nums">{fmtGnf(l.montantTva)}</td>
+                          <td className="px-2 py-2 text-right text-orange-500 whitespace-nowrap tabular-nums">{fmtGnf((l as unknown as Record<string, unknown>).montantArmp as string ?? "0")}</td>
+                          <td className="px-2 py-2 text-right font-semibold text-slate-700 whitespace-nowrap tabular-nums">{fmtGnf((l as unknown as Record<string, unknown>).montantTtc as string ?? "0")}</td>
+                          <td className="px-2 py-2 text-right text-amber-600 whitespace-nowrap tabular-nums">{fmtGnf(l.montantRetenue)}</td>
+                          <td className="px-2 py-2 text-right font-black text-navy whitespace-nowrap tabular-nums">{fmtGnf(l.montantNet)}</td>
                           <td className="px-2 py-2">
                             {l.depassement ? <span className="text-red-600 flex items-center gap-0.5 font-bold"><AlertTriangle className="h-3 w-3"/>!!</span> : <span className="text-green-500"><Check className="h-3 w-3"/></span>}
                           </td>
@@ -690,17 +733,19 @@ export function DecomptesPage() {
                         </tr>
                       ))}
                       {(!lignes || (lignes as DecompteLigne[]).length === 0) && (
-                        <tr><td colSpan={14} className="py-8 text-center text-gray-400">Aucune ligne BPU — ajoutez des articles</td></tr>
+                        <tr><td colSpan={16} className="py-8 text-center text-gray-400">Aucune ligne BPU — ajoutez des articles</td></tr>
                       )}
                     </tbody>
                     {lignes && (lignes as DecompteLigne[]).length > 0 && (
                       <tfoot className="bg-gray-50 border-t border-gray-200">
                         <tr>
                           <td colSpan={8} className="px-2 py-2 font-black text-gray-500 uppercase text-[10px]">Total</td>
-                          <td className="px-2 py-2 text-right font-bold">{fmtGnf((lignes as DecompteLigne[]).reduce((s, l) => s + Number(l.montantBrut), 0))}</td>
-                          <td className="px-2 py-2 text-right text-blue-500">{fmtGnf((lignes as DecompteLigne[]).reduce((s, l) => s + Number(l.montantTva), 0))}</td>
-                          <td className="px-2 py-2 text-right text-amber-500">{fmtGnf((lignes as DecompteLigne[]).reduce((s, l) => s + Number(l.montantRetenue), 0))}</td>
-                          <td className="px-2 py-2 text-right font-black text-navy">{fmtGnf((lignes as DecompteLigne[]).reduce((s, l) => s + Number(l.montantNet), 0))}</td>
+                          <td className="px-2 py-2 text-right font-bold whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantBrut"))}</td>
+                          <td className="px-2 py-2 text-right text-cyan-600 whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantTva"))}</td>
+                          <td className="px-2 py-2 text-right text-orange-500 whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantArmp"))}</td>
+                          <td className="px-2 py-2 text-right font-semibold text-slate-700 whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantTtc"))}</td>
+                          <td className="px-2 py-2 text-right text-amber-600 whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantRetenue"))}</td>
+                          <td className="px-2 py-2 text-right font-black text-navy whitespace-nowrap tabular-nums">{fmtGnf(totalLignes("montantNet"))}</td>
                           <td colSpan={2} />
                         </tr>
                       </tfoot>
@@ -848,41 +893,7 @@ export function DecomptesPage() {
 
             {/* ── TAB 3 PIÈCES ─────────────────────────────────────────────── */}
             {activeTab === 3 && (
-              <div>
-                {(() => {
-                  const ps = piecesStats(det.piecesObligatoires);
-                  return (
-                    <div className={`mb-4 flex items-center gap-3 px-4 py-3 rounded-lg border ${ps.reqOk === ps.reqTotal ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
-                      {ps.reqOk === ps.reqTotal ? <CheckCircle className="h-5 w-5 text-green-500" /> : <AlertTriangle className="h-5 w-5 text-red-500" />}
-                      <div>
-                        <p className={`font-semibold text-sm ${ps.reqOk === ps.reqTotal ? "text-green-700" : "text-red-700"}`}>{ps.reqOk}/{ps.reqTotal} pièces obligatoires</p>
-                        <p className="text-xs text-gray-500">{ps.ok}/{ps.total} au total (pièces conditionnelles incluses)</p>
-                      </div>
-                    </div>
-                  );
-                })()}
-                <div className="space-y-2">
-                  {PIECES_CFG.map((p) => {
-                    const checked = det.piecesObligatoires?.[p.key as keyof Pieces] ?? false;
-                    return (
-                      <div key={p.key} className={`flex items-center justify-between rounded-lg px-4 py-3 border ${checked ? "bg-green-50 border-green-200" : p.requis ? "bg-red-50 border-red-200" : "bg-gray-50 border-gray-200"}`}>
-                        <div className="flex items-center gap-3">
-                          {checked ? <CheckCircle className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-red-400" />}
-                          <span className="text-sm font-medium text-gray-700">{p.label}</span>
-                          {!p.requis && <span className="text-xs text-gray-400">(si applicable)</span>}
-                          {p.requis && !checked && <span className="text-xs text-red-600 font-bold">REQUIS</span>}
-                        </div>
-                        {canWrite(role) && (
-                          <button className={`px-3 py-1 text-xs rounded-lg font-semibold transition-colors ${checked ? "bg-red-50 text-red-500 hover:bg-red-100" : "bg-green-50 text-green-600 hover:bg-green-100"}`}
-                            onClick={() => piecesMut.mutate({ id: det.id, pieces: { ...det.piecesObligatoires, [p.key]: !checked } })}>
-                            {checked ? "Retirer" : "Confirmer"}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+              <PiecesJustificatives decompteId={det.id} role={role} />
             )}
 
             {/* ── TAB 4 VALIDATIONS ─────────────────────────────────────────── */}
@@ -908,9 +919,21 @@ export function DecomptesPage() {
                           <span className={`text-xs font-bold ${v.decision === "APPROUVE" ? "text-green-700" : v.decision === "REJETE" ? "text-red-700" : "text-orange-700"}`}>{v.decision}</span>
                           {v.signatureRef && <span className="text-[10px] text-gray-400 font-mono">#{v.signatureRef.slice(0, 8)}</span>}
                         </div>
-                        <span className="text-[10px] text-gray-400">{new Date(v.valideAt).toLocaleString("fr-FR")} — {v.valideNom ?? v.validePar} ({v.valideRole})</span>
+                        <span className="text-[10px] text-gray-400">{new Date(v.valideAt).toLocaleString("fr-FR")}</span>
                       </div>
                       <p className="text-sm text-gray-700">{v.commentaire}</p>
+
+                      {/* Cartouche de signature — une pièce comptable doit dire
+                          qui a validé, à quel titre, et porter sa signature. */}
+                      <div className="mt-2 flex items-end justify-between gap-3 border-t border-white/70 pt-2">
+                        <div className="text-xs">
+                          <p className="font-semibold text-gray-800">{v.signataire?.nom ?? v.valideNom ?? v.validePar}</p>
+                          <p className="text-gray-500">{v.signataire?.fonction ?? v.valideRole}</p>
+                        </div>
+                        {v.signataire?.signatureUrl
+                          ? <img src={v.signataire.signatureUrl} alt="Signature" className="h-12 object-contain" />
+                          : <span className="text-[10px] italic text-gray-400">Aucun spécimen de signature déposé</span>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -975,16 +998,6 @@ export function DecomptesPage() {
                   </div>
                 )}
 
-                {/* Circuit BPMN générique en complément */}
-                <div className="mt-6 border-t border-gray-100 pt-4">
-                  <p className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Circuit BPMN 5 étapes</p>
-                  <BpmnPanel
-                    moduleType="DECOMPTE"
-                    entityId={det.id}
-                    currentUserRole={role ?? "MISSION"}
-                    canSubmit={canWrite(role) && det.statut === "BROUILLON"}
-                  />
-                </div>
               </div>
             )}
 
@@ -1117,6 +1130,29 @@ export function DecomptesPage() {
                     </Button>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 9 && (
+              <div className="space-y-5">
+                <p className="text-xs text-gray-500">
+                  Les attachements constatent les quantités réellement exécutées. Ceux du décompte
+                  consulté en constituent la base de calcul ; les antérieurs donnent le cumul déjà
+                  attaché sur le marché.
+                </p>
+
+                <ListeAttachements
+                  titre="Attachements de ce décompte"
+                  vide="Aucun attachement rattaché à ce décompte."
+                  lignes={(attCourants?.data ?? []) as AttachementLigne[]}
+                />
+
+                <ListeAttachements
+                  titre="Attachements antérieurs du marché"
+                  vide="Aucun attachement sur les autres décomptes de ce marché."
+                  lignes={(attAnterieurs?.data ?? []) as AttachementLigne[]}
+                  montrerDecompte
+                />
               </div>
             )}
 
@@ -1284,6 +1320,264 @@ export function DecomptesPage() {
         </div>
       </Modal>
 
+    </div>
+  );
+}
+
+// ─── Attachements rattachés à un décompte ────────────────────────────────────
+export interface AttachementLigne {
+  id: string;
+  code?: string | null;
+  reference?: string | null;
+  typeAttachement?: string | null;
+  statut: string;
+  periodeDebut?: string | null;
+  periodeFin?: string | null;
+  montantTotalGnf?: string | number | null;
+  createdAt?: string | null;
+  decompte?: { reference?: string | null } | null;
+}
+
+/**
+ * Liste compacte d'attachements. Utilisée deux fois dans le détail d'un
+ * décompte : les siens, puis ceux des décomptes antérieurs du même marché.
+ */
+function ListeAttachements({
+  titre, vide, lignes, montrerDecompte = false,
+}: {
+  titre: string; vide: string; lignes: AttachementLigne[]; montrerDecompte?: boolean;
+}) {
+  const periode = (a: AttachementLigne) =>
+    a.periodeDebut || a.periodeFin
+      ? `${a.periodeDebut ? new Date(a.periodeDebut).toLocaleDateString("fr-FR") : "—"} → ${a.periodeFin ? new Date(a.periodeFin).toLocaleDateString("fr-FR") : "—"}`
+      : "—";
+
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-semibold text-gray-700">
+        {titre} <span className="font-normal text-gray-400">({lignes.length})</span>
+      </h3>
+      {lignes.length === 0 ? (
+        <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500">{vide}</p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-gray-100">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-left text-gray-500">
+              <tr>
+                <th className="px-3 py-2 font-medium">Référence</th>
+                {montrerDecompte && <th className="px-3 py-2 font-medium">Décompte</th>}
+                <th className="px-3 py-2 font-medium">Type</th>
+                <th className="px-3 py-2 font-medium">Période</th>
+                <th className="px-3 py-2 text-right font-medium">Montant</th>
+                <th className="px-3 py-2 font-medium">Statut</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {lignes.map((a) => (
+                <tr key={a.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono text-navy">{a.code ?? a.reference ?? a.id.slice(0, 8)}</td>
+                  {montrerDecompte && <td className="px-3 py-2 font-mono text-gray-500">{a.decompte?.reference ?? "—"}</td>}
+                  <td className="px-3 py-2">{a.typeAttachement ?? "—"}</td>
+                  <td className="px-3 py-2 text-gray-500">{periode(a)}</td>
+                  <td className="px-3 py-2 text-right font-medium">{a.montantTotalGnf != null ? fmtGnf(a.montantTotalGnf) : "—"}</td>
+                  <td className="px-3 py-2"><StatutBadge statut={a.statut} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Pièces justificatives : de vrais fichiers ───────────────────────────────
+interface PieceDocument {
+  id: string; nom: string; url: string; mimeType?: string | null;
+  tailleOctets?: number | null; version: number; createdAt: string;
+  statutValidation: "DEPOSE" | "VALIDE" | "RETOURNE";
+  motifRetour?: string | null; valideAt?: string | null;
+  deposePar?: string | null; roleDeposant?: string | null;
+}
+interface PieceNature {
+  cle: string; libelle: string; requis: boolean;
+  fourni: boolean; documents: PieceDocument[];
+}
+
+/**
+ * Bordereau des pièces du dossier.
+ *
+ * Auparavant l'onglet n'affichait que des cases à cocher : on déclarait qu'une
+ * facture existait sans jamais la fournir. Chaque nature accepte désormais un
+ * fichier, qui reste attaché au décompte et suit le dossier jusqu'au paiement.
+ * Déposer une pièce déjà pourvue crée une nouvelle version — l'ancienne reste
+ * consultable, une pièce justificative ne s'écrase pas.
+ */
+function PiecesJustificatives({ decompteId, role }: { decompteId: string; role?: string | null }) {
+  const qc = useQueryClient();
+  const [depotPour, setDepotPour] = useState<PieceNature | null>(null);
+  const [retourPour, setRetourPour] = useState<PieceDocument | null>(null);
+  const [motif, setMotif] = useState("");
+
+  // L'entreprise titulaire dépose ses justificatifs ; la Mission de contrôle et
+  // la Direction Technique les valident ou les retournent à corriger.
+  const peutDeposer = role === "ENTREPRISE" || role === "ADMIN";
+  const peutControler = ["MISSION", "TECHNIQUE", "DMC", "ADMIN"].includes(role ?? "");
+
+  const { data, isLoading } = useQuery<{ pieces: PieceNature[]; requisFournis: number; requisTotal: number; fournis: number }>({
+    queryKey: ["decompte-pieces", decompteId],
+    queryFn: () => api.get(`/decomptes/${decompteId}/documents`).then((r) => r.data),
+  });
+
+  const rattacher = useMutation({
+    mutationFn: (corps: object) => api.post(`/decomptes/${decompteId}/documents`, corps),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["decompte-pieces", decompteId] });
+      qc.invalidateQueries({ queryKey: ["decomptes"] });
+      toast.success("Pièce déposée");
+      setDepotPour(null);
+    },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  const valider = useMutation({
+    mutationFn: (documentId: string) => api.post(`/decomptes/${decompteId}/documents/${documentId}/valider`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["decompte-pieces", decompteId] }); toast.success("Pièce validée"); },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  const retourner = useMutation({
+    mutationFn: ({ documentId, motif }: { documentId: string; motif: string }) =>
+      api.post(`/decomptes/${decompteId}/documents/${documentId}/retourner`, { motif }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["decompte-pieces", decompteId] });
+      toast.success("Pièce retournée à l'entreprise");
+      setRetourPour(null); setMotif("");
+    },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  const retirer = useMutation({
+    mutationFn: (documentId: string) => api.delete(`/decomptes/${decompteId}/documents/${documentId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["decompte-pieces", decompteId] });
+      toast.success("Pièce retirée du dossier — elle reste archivée");
+    },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  if (isLoading) return <p className="text-sm text-gray-500">Chargement des pièces…</p>;
+
+  const pieces = data?.pieces ?? [];
+  const complet = (data?.requisFournis ?? 0) === (data?.requisTotal ?? 0);
+
+  return (
+    <div>
+      <div className={`mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 ${complet ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}>
+        {complet ? <CheckCircle className="h-5 w-5 text-green-500" /> : <AlertTriangle className="h-5 w-5 text-red-500" />}
+        <div>
+          <p className={`text-sm font-semibold ${complet ? "text-green-700" : "text-red-700"}`}>
+            {data?.requisFournis ?? 0}/{data?.requisTotal ?? 0} pièces obligatoires fournies
+          </p>
+          <p className="text-xs text-gray-500">{data?.fournis ?? 0}/{pieces.length} au total — les pièces accompagnent le dossier jusqu'au paiement</p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {pieces.map((p) => (
+          <div key={p.cle} className={`rounded-lg border px-4 py-3 ${p.fourni ? "border-green-200 bg-green-50" : p.requis ? "border-red-200 bg-red-50" : "border-gray-200 bg-gray-50"}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                {p.fourni ? <CheckCircle className="h-4 w-4 text-green-500" /> : <XCircle className="h-4 w-4 text-red-400" />}
+                <span className="text-sm font-medium text-gray-700">{p.libelle}</span>
+                {!p.requis && <span className="text-xs text-gray-400">(si applicable)</span>}
+                {p.requis && !p.fourni && <span className="text-xs font-bold text-red-600">REQUIS</span>}
+              </div>
+              {peutDeposer ? (
+                <Button size="sm" variant={p.fourni ? "secondary" : "primary"} onClick={() => setDepotPour(p)}>
+                  <Upload className="h-3.5 w-3.5" /> {p.fourni ? "Nouvelle version" : "Déposer"}
+                </Button>
+              ) : peutControler && !p.fourni ? (
+                <span className="text-xs text-gray-400">En attente de l'entreprise</span>
+              ) : null}
+            </div>
+
+            {p.documents.length > 0 && (
+              <ul className="mt-2 space-y-1 border-t border-white/60 pt-2">
+                {p.documents.map((d) => (
+                  <li key={d.id} className="text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <a href={d.url} target="_blank" rel="noreferrer" className="truncate font-medium text-navy hover:underline" title={d.nom}>
+                        {d.nom} <span className="font-normal text-gray-400">v{d.version}</span>
+                      </a>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge
+                          label={d.statutValidation === "VALIDE" ? "Validée" : d.statutValidation === "RETOURNE" ? "Retournée" : "Déposée"}
+                          color={d.statutValidation === "VALIDE" ? "green" : d.statutValidation === "RETOURNE" ? "red" : "blue"}
+                        />
+                        <span className="text-gray-500">
+                          {d.deposePar ?? "—"}{d.roleDeposant && ` (${d.roleDeposant})`} · {new Date(d.createdAt).toLocaleDateString("fr-FR")}
+                        </span>
+                        {peutControler && d.statutValidation !== "VALIDE" && (
+                          <Button size="sm" variant="ghost" title="Valider cette pièce" onClick={() => valider.mutate(d.id)}>
+                            <Check className="h-3.5 w-3.5 text-green-600" />
+                          </Button>
+                        )}
+                        {peutControler && d.statutValidation !== "RETOURNE" && (
+                          <Button size="sm" variant="ghost" title="Retourner à l'entreprise" onClick={() => setRetourPour(d)}>
+                            <RotateCcw className="h-3.5 w-3.5 text-amber-600" />
+                          </Button>
+                        )}
+                        {peutDeposer && (
+                          <button className="text-red-300 hover:text-red-500" title="Retirer du dossier" onClick={() => retirer.mutate(d.id)}>
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {d.statutValidation === "RETOURNE" && d.motifRetour && (
+                      <p className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">
+                        À corriger : {d.motifRetour}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <Modal open={Boolean(retourPour)} onClose={() => { setRetourPour(null); setMotif(""); }} title="Retourner la pièce à l'entreprise">
+        <div className="space-y-3 p-4">
+          <p className="text-sm text-gray-600">
+            L'entreprise devra déposer une nouvelle version. Indiquez précisément ce qui doit être corrigé :
+            le motif lui est communiqué et reste dans la piste d'audit.
+          </p>
+          <Textarea rows={3} value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Facture non signée, montant différent du décompte…" />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => { setRetourPour(null); setMotif(""); }}>Annuler</Button>
+            <Button
+              disabled={motif.trim().length < 10 || retourner.isPending}
+              onClick={() => retourPour && retourner.mutate({ documentId: retourPour.id, motif })}
+            >
+              <RotateCcw className="h-4 w-4" /> Retourner
+            </Button>
+          </div>
+          {motif.trim().length > 0 && motif.trim().length < 10 && (
+            <p className="text-xs text-amber-700">Le motif doit compter au moins 10 caractères.</p>
+          )}
+        </div>
+      </Modal>
+
+      <FileUploadModal
+        open={Boolean(depotPour)}
+        onClose={() => setDepotPour(null)}
+        title={depotPour ? `Déposer — ${depotPour.libelle}` : "Déposer une pièce"}
+        onFileUploaded={(url, nom) => {
+          if (depotPour) rattacher.mutate({ type: depotPour.cle, nom, url });
+        }}
+      />
     </div>
   );
 }

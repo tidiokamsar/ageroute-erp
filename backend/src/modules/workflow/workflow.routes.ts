@@ -14,9 +14,17 @@ import { notifyWorkflowStep } from "../notifications/notifications.service";
 import { assertEntrepriseConforme } from "../conformite/conformite.service";
 import { rolesEffectifs } from "../../lib/delegations";
 import { roleAutorise } from "../../lib/roles-circuit";
-import { chargerRegles } from "../../lib/regles";
 import { etapesCircuitFinancier } from "../../lib/circuit-definitions";
 import { z } from "zod";
+// Moteur unique de validation : RG9, statut d'étape et projection de la ligne
+// de validation. Voir lib/moteur-validation.ts pour le contexte.
+import {
+  verifierSeparationTaches, statutPourRoleEtape, libelleEtapeValidation,
+  decisionValidation, produitUneValidation,
+} from "../../lib/moteur-validation";
+import { chargerRegles, booleenRegles } from "../../lib/regles";
+import { motifStatutMarche } from "../../lib/eligibilite-depot";
+import { getMarchesAffectes } from "../../lib/affectations";
 
 export const workflowRouter = Router();
 workflowRouter.use(requireAuth);
@@ -24,6 +32,8 @@ workflowRouter.use(requireAuth);
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const DECISIONS = ["APPROUVE","REJETE","DEMANDE_CORRECTION","DEMANDE_COMPLEMENT","SUSPENDRE","AUDIT"] as const;
+// Identique au type `Decision` de lib/moteur-validation.ts, dont il est la
+// source : la liste DECISIONS alimente aussi le schema zod de la route.
 type Decision = typeof DECISIONS[number];
 
 const ROLES_SUPERVISEURS = ["DG","ADMIN"];
@@ -57,7 +67,11 @@ workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response
     if (decompte.statut !== "BROUILLON") throw new ApiError(400, "Seul un décompte BROUILLON peut être soumis");
 
     await assertEntrepriseConforme(decompte.entrepriseId);
-    if (decompte.marche.statut !== "ACTIF") throw new ApiError(400, "Le marché n'est pas actif");
+    // `ACTIF` est un alias historique : AUCUN marché ne le porte en base (trois
+    // sont EN_EXECUTION, un SIGNE). Cette condition rendait la soumission
+    // impossible sur 100 % des marchés. Voir lib/eligibilite-depot.ts.
+    const motifMarche = motifStatutMarche(decompte.marche.statut);
+    if (motifMarche) throw new ApiError(400, `Soumission impossible — ${motifMarche}`);
 
     // F5 — au moins un attachement pour ce marché (validé ou en cours)
     const attExistant = await prisma.attachement.count({
@@ -148,9 +162,50 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
       throw new ApiError(403, "Traitement suspendu par la Direction Générale — aucune action possible");
     }
 
-    // Enregistrer l'action
-    await prisma.workflowAction.create({
-      data: { instanceId: instance.id, etapeId: etapeCourante.id, userId: req.user.id, decision, commentaire },
+    // ── RG9 — séparation des tâches ───────────────────────────────────────────
+    // Une personne n'engage qu'une étape du circuit. Les intervenants antérieurs
+    // sont lus dans LES DEUX registres : actions de workflow et lignes de
+    // validation — l'historique d'avant l'unification vit dans le second.
+    const reglesEffectives = await chargerRegles({ marcheId: instance.decompte?.marcheId ?? undefined });
+    const [actionsAnterieures, validationsAnterieures] = await Promise.all([
+      prisma.workflowAction.findMany({ where: { instanceId: instance.id }, select: { userId: true } }),
+      instance.decompteId
+        ? prisma.decompteValidation.findMany({ where: { decompteId: instance.decompteId }, select: { validePar: true } })
+        : Promise.resolve([] as Array<{ validePar: string }>),
+    ]);
+    const intervenantsAnterieurs = [
+      ...actionsAnterieures.map((a) => a.userId),
+      ...validationsAnterieures.map((v) => v.validePar),
+    ];
+    const rg9 = verifierSeparationTaches({
+      utilisateurId: req.user.id,
+      intervenantsAnterieurs,
+      decision: decision as Decision,
+      active: booleenRegles(reglesEffectives, "WF_SEPARATION_TACHES"),
+    });
+    if (!rg9.autorise) throw new ApiError(403, rg9.motif!);
+
+    // Enregistrer l'action ET, pour les décisions engageantes, sa PROJECTION
+    // dans l'onglet Validations — dans la même transaction. C'est ce couplage
+    // qui manquait : l'onglet Workflow avançait sans que l'onglet Validations
+    // en sache rien, et réciproquement.
+    await prisma.$transaction(async (tx) => {
+      await tx.workflowAction.create({
+        data: { instanceId: instance.id, etapeId: etapeCourante.id, userId: req.user!.id, decision, commentaire },
+      });
+      if (instance.decompteId && produitUneValidation(decision as Decision)) {
+        await tx.decompteValidation.create({
+          data: {
+            decompteId: instance.decompteId,
+            etape: libelleEtapeValidation(etapeCourante.roleRequis),
+            decision: decisionValidation(decision as Decision),
+            commentaire: commentaire ?? "(sans commentaire)",
+            validePar: req.user!.id,
+            valideNom: req.user!.email,
+            valideRole: req.user!.role,
+          },
+        });
+      }
     });
     await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "WorkflowInstance", entityId: instance.id, after: { decision, etape: etapeCourante.nom, commentaire } });
 
@@ -206,10 +261,11 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
     await prisma.workflowInstance.update({ where: { id: instance.id }, data: { etapeActuelle: prochainIndex } });
     const prochaineEtape = instance.definition.etapes[prochainIndex];
 
-    let prochainStatut = "EN_VALIDATION";
-    if (["MISSION","TECHNIQUE"].includes(prochaineEtape.roleRequis)) prochainStatut = "EN_CONTROLE";
-    else if (prochaineEtape.roleRequis === "DG") prochainStatut = "EN_VALIDATION";
-    await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: prochainStatut as never } });
+    // Table de correspondance UNIQUE (lib/moteur-validation.ts). Elle vivait
+    // auparavant en deux exemplaires divergents : ici, et dans la route
+    // validations-avancees — d'où deux statuts possibles pour la même étape.
+    const prochainStatut = statutPourRoleEtape(prochaineEtape.roleRequis);
+    await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: prochainStatut } });
 
     await notifyWorkflowStep(prochaineEtape, instance.decompte?.reference ?? "", instance.id).catch(() => {});
 
@@ -236,8 +292,18 @@ workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: Next
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const isSuperv = (await rolesEffectifs(req.user.id, req.user.role)).includes("DG") || req.user.role === "ADMIN";
 
+    // Périmètre d'affectation — même règle que les listes (marchés, décomptes,
+    // attachements). Sans ce filtre, un agent MISSION voyait les tâches de TOUS
+    // les marchés dès lors que l'étape courante requérait son rôle, y compris
+    // ceux d'une autre équipe de contrôle : les listes étaient cloisonnées, les
+    // tâches ne l'étaient pas.
+    const marchesAffectes = isSuperv ? null : await getMarchesAffectes(req.user.id, req.user.role);
+
     const instances = await prisma.workflowInstance.findMany({
-      where: { statut: "EN_COURS" as const },
+      where: {
+        statut: "EN_COURS" as const,
+        ...(marchesAffectes !== null ? { decompte: { marcheId: { in: marchesAffectes } } } : {}),
+      },
       include: includeInstance,
       orderBy: { createdAt: "asc" },
     });
@@ -365,6 +431,19 @@ workflowRouter.get("/instance/:id", async (req: Request, res: Response, next: Ne
 });
 
 // ─── Instance par décompte ────────────────────────────────────────────────────
+/**
+ * Circuit d'un décompte.
+ *
+ * Renvoie `null` quand aucune instance n'existe — mais un `null` sec ne
+ * distingue pas deux situations très différentes : un décompte jamais soumis,
+ * et un décompte ANTÉRIEUR à l'unification des circuits, validé et payé à
+ * l'époque où la validation s'écrivait hors du workflow.
+ *
+ * Constaté le 20/08/2026 : 3 décomptes sur 8, tous au statut PAYE, portaient
+ * cinq validations chacun sans aucune instance. Leur reconstituer un circuit
+ * a posteriori fabriquerait un historique qui n'a pas eu lieu. On les qualifie
+ * plutôt, et l'écran le dit.
+ */
 workflowRouter.get("/decompte/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const instance = await prisma.workflowInstance.findFirst({
@@ -372,7 +451,28 @@ workflowRouter.get("/decompte/:decompteId", async (req: Request, res: Response, 
       include: includeInstance,
       orderBy: { createdAt: "desc" },
     });
-    res.json(instance ?? null);
+    if (instance) return res.json(instance);
+
+    const [nbValidations, decompte] = await Promise.all([
+      prisma.decompteValidation.count({ where: { decompteId: req.params.decompteId } }),
+      prisma.decompte.findUnique({ where: { id: req.params.decompteId }, select: { statut: true } }),
+    ]);
+
+    if (nbValidations > 0) {
+      return res.json({
+        instance: null,
+        anterieurAuDispositif: true,
+        nbValidations,
+        statutDecompte: decompte?.statut ?? null,
+        message:
+          `Dossier antérieur à l'unification des circuits : ${nbValidations} validation(s) ` +
+          "ont été enregistrées avant que le circuit ne devienne la source unique du parcours. " +
+          "Aucune instance n'est reconstituée — l'historique du circuit n'a pas eu lieu et ne " +
+          "sera pas fabriqué. Les validations restent consultables dans l'onglet Validations.",
+      });
+    }
+
+    res.json(null);
   } catch (err) { next(err); }
 });
 

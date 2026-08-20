@@ -5,6 +5,8 @@ import { entrepriseCreateSchema, entrepriseUpdateSchema, documentSchema, contact
 import { entreprisesService, checkEligibilite, computeScore } from "./entreprises.service";
 import { ApiError } from "../../middleware/error.middleware";
 import { z } from "zod";
+import { entrepriseIdOf } from "../../lib/scope";
+import { getMarchesAffectes } from "../../lib/affectations";
 
 export const entreprisesRouter = Router();
 entreprisesRouter.use(requireAuth);
@@ -19,7 +21,25 @@ entreprisesRouter.get("/stats", async (_req: Request, res: Response, next: NextF
 
 entreprisesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètre : titulaires des marchés affectés, ou sa propre entreprise
+    // pour un compte ENTREPRISE.
+    let entrepriseIds: string[] | null = null;
+    if (req.user?.role === "ENTREPRISE") {
+      const mienne = await entrepriseIdOf(req.user.id);
+      entrepriseIds = mienne ? [mienne] : [];
+    } else if (req.user) {
+      const affectes = await getMarchesAffectes(req.user.id, req.user.role);
+      if (affectes) {
+        const { prisma } = await import("../../lib/prisma");
+        const marches = await prisma.marche.findMany({
+          where: { id: { in: affectes } }, select: { entrepriseId: true },
+        });
+        entrepriseIds = [...new Set(marches.map((m) => m.entrepriseId))];
+      }
+    }
+
     res.json(await entreprisesService.list({
+      entrepriseIds,
       page:      Number(req.query.page) || 1,
       pageSize:  Number(req.query.pageSize) || 20,
       search:    req.query.search as string,

@@ -10,12 +10,13 @@ import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
 import { entrepriseIdOf } from "../../lib/scope";
 import { creerDocumentOfficiel, ajouterPiedDePage, ajouterEncadreSynthese, ajouterTableau } from "../../lib/pdf-gabarit";
+import { formaterMontant } from "../../lib/montants";
 
 export const documentsOfficielsRouter = Router();
 documentsOfficielsRouter.use(requireAuth);
 
 function fmtGnf(v: bigint | number | null | undefined): string {
-  return new Intl.NumberFormat("fr-GN", { maximumFractionDigits: 0 }).format(Number(v ?? 0));
+  return formaterMontant(v);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

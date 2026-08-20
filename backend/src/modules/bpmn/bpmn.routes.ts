@@ -15,6 +15,7 @@ import { rolesEffectifs } from "../../lib/delegations";
 import { entrepriseIdOf } from "../../lib/scope";
 import { etapesCircuitFinancier } from "../../lib/circuit-definitions";
 import { z } from "zod";
+import { getMarchesAffectes } from "../../lib/affectations";
 
 export const bpmnRouter = Router();
 bpmnRouter.use(requireAuth);
@@ -450,6 +451,33 @@ bpmnRouter.get("/mes-taches", async (req: Request, res: Response, next: NextFunc
         WHERE bi.statut = 'EN_COURS' AND bs.role_requis IN (${Prisma.join(mesRoles)})
         ORDER BY bi.created_at ASC
       `;
+    }
+
+    // Périmètre d'affectation — même règle que les listes et que le workflow
+    // classique. Sans ce filtre, un agent scopé voyait les tâches de marchés
+    // qui ne lui sont pas confiés dès lors que l'étape requérait son rôle.
+    // Les instances portent `entity_id` : pour le module DECOMPTE il s'agit de
+    // l'identifiant du décompte, que l'on rattache à son marché.
+    const marchesAffectes = isSuperv ? null : await getMarchesAffectes(req.user.id, req.user.role);
+    if (marchesAffectes !== null) {
+      const [decomptes, attachements] = await Promise.all([
+        prisma.decompte.findMany({
+          where: { marcheId: { in: marchesAffectes }, deletedAt: null },
+          select: { id: true },
+        }),
+        prisma.attachement.findMany({
+          where: { decompte: { marcheId: { in: marchesAffectes } } },
+          select: { id: true },
+        }),
+      ]);
+      const autorises: Record<string, Set<string>> = {
+        DECOMPTE: new Set(decomptes.map((d) => d.id)),
+        ATTACHEMENT: new Set(attachements.map((a) => a.id)),
+        MARCHE: new Set(marchesAffectes),
+      };
+      // PROJET et CONFORMITE ne se rattachent à aucun marché : un rôle scopé
+      // n'y a pas d'étape à traiter, on refuse plutôt que d'ouvrir par défaut.
+      instances = instances.filter((inst) => autorises[inst.module_type]?.has(inst.entity_id) ?? false);
     }
 
     // Enrichir avec les jours en cours

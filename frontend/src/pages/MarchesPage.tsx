@@ -21,7 +21,6 @@ import {
   TrendingDown, ArrowRight, Activity, CreditCard, RotateCcw, Map, Building2,
   ChevronRight, Info, XCircle, Layers,
 } from "lucide-react";
-import { BpmnPanel } from "../components/BpmnPanel";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, ResponsiveContainer } from "recharts";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -47,6 +46,10 @@ interface Marche {
   projet?: { id: string; code: string; nom: string };
   lots?: Lot[];
   _count?: { decomptes: number; bpuArticles: number };
+  // Cumul des décomptes du marché et son taux, calculés par le serveur.
+  // Sans eux, la colonne « Consommé » affichait une valeur écrite en dur à 0.
+  montantConsommeGnf?: string;
+  tauxConsommation?: number;
   createdAt: string;
 }
 
@@ -371,6 +374,22 @@ export function MarchesPage() {
   function openDetail(m: Marche)  { setDetail(m); setDetailTab("identification"); }
   function f(k: string, v: unknown) { setForm(p => ({ ...p, [k]: v })); }
 
+  /**
+   * Dossier complet du marché — rendu SERVEUR en PDF, contrairement à
+   * `imprimerSituation` qui compose une page HTML dans le navigateur.
+   * Un document destiné à un bailleur ou à un auditeur doit être produit par le
+   * serveur : c'est la seule version dont on maîtrise le contenu.
+   */
+  async function telechargerDossierMarche(id: string, reference: string) {
+    try {
+      const res = await api.get(`/documents/marche/${id}/dossier/pdf`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `dossier-marche-${reference}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { toast.error("Dossier indisponible"); }
+  }
+
   function imprimerSituation(sit: any, m: Marche) {
     const tc  = sit.financier.tauxConsommation;
     const tp  = sit.financier.tauxPaiement;
@@ -408,9 +427,12 @@ export function MarchesPage() {
         @media print{button{display:none}}</style>
     </head><body>
       <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:16px">
-        <div>
-          <h1 style="margin:0;font-size:18px;color:#1e3a8a">AGEROUTE GUINÉE</h1>
-          <p style="margin:2px 0;font-size:11px;color:#6b7280">Direction des Marchés et Contrats</p>
+        <div style="display:flex;align-items:center">
+          <img src="/ageroute-logo.png" alt="AGEROUTE" style="height:52px;width:auto;margin-right:12px" />
+          <div>
+            <h1 style="margin:0;font-size:18px;color:#1e3a8a">AGEROUTE GUINÉE</h1>
+            <p style="margin:2px 0;font-size:11px;color:#6b7280">Direction des Marchés et Contrats</p>
+          </div>
         </div>
         <div style="text-align:right;font-size:11px;color:#6b7280">
           <p>Date : ${new Date().toLocaleDateString("fr-FR")}</p>
@@ -512,7 +534,6 @@ export function MarchesPage() {
     { key:"situation",      label:"Situation §13",   icon:TrendingUp },
     { key:"courbes",        label:"Courbe S",        icon:Activity },
     { key:"historique",     label:"Historique",      icon:Activity },
-    { key:"workflow",       label:"Workflow BPMN",   icon:GitBranch },
   ];
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -593,7 +614,10 @@ export function MarchesPage() {
                   <td className="px-4 py-3"><FinancementBadge financement={m.financement}/></td>
                   <td className="px-4 py-3 font-mono text-sm font-semibold text-gray-800">{fmtGnf(m.montantInitialGnf)}</td>
                   <td className="px-4 py-3 w-32">
-                    <ProgressBar value={0} max={montant} />
+                    {/* La valeur etait ecrite en dur a 0 : la colonne affichait
+                        0 % pour tous les marches, y compris ceux a un tiers
+                        d'execution. Le cumul vient desormais du serveur. */}
+                    <ProgressBar value={Number(m.montantConsommeGnf ?? 0)} max={montant} />
                   </td>
                   <td className={`px-4 py-3 text-xs ${isRetard?"text-red-600 font-bold":""}`}>
                     {fmtDate(m.dateFinPrevue)}
@@ -649,6 +673,11 @@ export function MarchesPage() {
                     <RotateCcw className="h-3.5 w-3.5 mr-1"/>Changer le statut
                   </Button>
                 )}
+                <Button size="sm" variant="secondary"
+                  title="Dossier complet du marché — les quatorze sections, en PDF"
+                  onClick={() => telechargerDossierMarche(detail.id, detail.reference)}>
+                  <FileText className="h-3.5 w-3.5 mr-1"/>Dossier complet
+                </Button>
                 {canWrite(user?.role) && (
                   <Button size="sm" onClick={() => { openEdit(detail); setDetail(null); }}>
                     <Pencil className="h-3.5 w-3.5 mr-1"/>Modifier
@@ -1229,18 +1258,6 @@ export function MarchesPage() {
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
-
-            {/* ── Tab Workflow BPMN ── */}
-            {detailTab === "workflow" && (
-              <div className="py-2">
-                <BpmnPanel
-                  moduleType="MARCHE"
-                  entityId={detail.id}
-                  currentUserRole={user!.role}
-                  canSubmit={canWrite(user?.role)}
-                />
               </div>
             )}
 

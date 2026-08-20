@@ -10,6 +10,7 @@ import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { z } from "zod";
+import { assertMarcheAutorise, filtreParMarche } from "../../lib/perimetre";
 
 export const receptionsRouter = Router();
 receptionsRouter.use(requireAuth);
@@ -33,6 +34,7 @@ const schema = z.object({
 // Réceptions d'un marché
 receptionsRouter.get("/marche/:marcheId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertMarcheAutorise(req, req.params.marcheId);
     const receptions = await prisma.reception.findMany({
       where: { marcheId: req.params.marcheId },
       orderBy: { createdAt: "asc" },
@@ -45,7 +47,8 @@ receptionsRouter.get("/marche/:marcheId", async (req: Request, res: Response, ne
 receptionsRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { statut, type, page = "1" } = req.query;
-    const where: Record<string,unknown> = {};
+    // Périmètre : un PV de réception porte sur un marché.
+    const where: Record<string,unknown> = { ...(await filtreParMarche(req)) };
     if (statut) where.statut = statut;
     if (type) where.type = type;
     const p = Math.max(1, Number(page));

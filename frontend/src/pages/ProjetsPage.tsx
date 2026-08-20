@@ -16,7 +16,6 @@ import {
   TrendingUp, AlertTriangle, CheckCircle, Clock, XCircle,
   Building2, RefreshCw, ArrowRight, Gauge, Activity, Flag, GitBranch,
 } from "lucide-react";
-import { BpmnPanel } from "../components/BpmnPanel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -895,16 +894,7 @@ export function ProjetsPage() {
           {/* TAB 10 — WORKFLOW BPMN */}
           {activeTab === 10 && (
             <div className="space-y-2">
-              <div className="flex items-center gap-2 mb-4">
-                <GitBranch className="w-4 h-4 text-[#1B2A4A]" />
-                <h3 className="text-sm font-semibold text-gray-700">Circuit BPMN — Validation du projet</h3>
-              </div>
-              <BpmnPanel
-                moduleType="PROJET"
-                entityId={det.id}
-                currentUserRole={user!.role}
-                canSubmit={canWrite(user?.role)}
-              />
+
             </div>
           )}
 
