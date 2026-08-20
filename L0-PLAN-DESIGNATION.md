@@ -30,7 +30,8 @@ Cinq éléments, et cinq seulement, bloquent le démarrage. Aucun n'est techniqu
 | D1 | Domaine des trois comptes à créer | **Levé** — `@ageroute.gov.gn` confirmé |
 | D2 | Rôle de Moïse SIDIBÉ et de Famo MANSARÉ | **Levé** — DG et DAF |
 | D3 | Qualité exercée des trois personnes | **Déduite du rôle, à confirmer** |
-| D4 | **Membres des groupes MISSION, TECHNIQUE et UGP** — personne n'y est désigné | **Ouvert** |
+| D4 | **Membres des groupes TECHNIQUE et UGP** — coordinateurs de projet internes, créés par l'administrateur | **Ouvert** |
+| D4 bis | **Chef de Mission** — désigné par la mission de contrôle (prestataire **externe**), compte créé ensuite par l'administrateur, **puis marchés supervisés à affecter** | **Ouvert** |
 | D5 | **Personnes habilitées** côté entreprises et organismes externes | **Ouvert** |
 | D6 | Deux titulaires pour le rôle DG | **Levé le 20/08/2026** — Abdoulaye DABO est Directeur de la Structuration Financière, rôle `DSF` créé hors circuit |
 

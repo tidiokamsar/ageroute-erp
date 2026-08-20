@@ -97,27 +97,57 @@ Un membre non signataire peut consulter et préparer, mais pas valider.
 
 | Groupe | Compte fonctionnel remplacé | Membres — nom, prénom, identifiant | Signataires autorisés | Qualité exercée de chacun |
 |---|---|---|---|---|
-| **MISSION** | `mission@ageroute.gov.gn` | | | |
-| **TECHNIQUE** | `technique@ageroute.gov.gn` | | | |
+| **TECHNIQUE** | `technique@ageroute.gov.gn` | coordinateurs de projet — à désigner | | Coordinateur de projet |
+| **UGP** | `ugp@ageroute.gov.gn` | coordinateurs de projet — à désigner | | Coordinateur de projet |
 | **DMC** | `dmc@ageroute.gov.gn` | Mohamed lamine Keita *(déjà nominatif)* + | | |
 | **DAF** | `daf@ageroute.gov.gn` | **Famo MANSARÉ** | Famo MANSARÉ | Directeur Administratif et Financier |
 | **DGA** | *(rôle à créer)* | Moussa CAMARA | Moussa CAMARA | Directeur Général Adjoint |
-| **DG** | `dg@ageroute.gov.gn` | **Moïse SIDIBÉ** + Abdoulaye DABO ⟶ ⚠️ *voir partie 1* | à trancher | Directeur Général |
-| **UGP** | `ugp@ageroute.gov.gn` | | | |
+| **DG** | `dg@ageroute.gov.gn` | **Moïse SIDIBÉ** | Moïse SIDIBÉ | Directeur Général |
+| **DSF** | *(rôle créé)* | Abdoulaye DABO | *(consultation seule — ne signe pas)* | Directeur de la Structuration Financière |
 | **AUDITEUR** | `auditeur@ageroute.gov.gn` | | *(consultation seule)* | |
+
+**TECHNIQUE et UGP sont des coordinateurs de projet internes**, recrutés par l'AGEROUTE. Ils sont
+créés par l'administrateur, qui leur assigne le rôle correspondant. Leur certificat est délivré
+sous la responsabilité de l'Agence, comme pour la DAF ou la DMC.
 
 ### Groupes externes — désignation par l'organisme concerné
 
 Ces personnes ne relèvent pas de l'AGEROUTE. Leur certificat sera délivré par leur propre
-organisme. La Direction Générale saisit chaque organisme pour obtenir les désignations.
+organisme ou sous sa responsabilité. La Direction Générale saisit chaque organisme.
 
-| Groupe | Organisme | Interlocuteur à saisir | Personnes désignées | Organisme saisi le |
+| Groupe | Organisme | Qui désigne | Personnes désignées | Organisme saisi le |
 |---|---|---|---|---|
-| **BUDGET** | Direction du Budget — MEF | | | |
-| **TRESOR** | Direction Générale du Trésor | | | |
-| **FER_AGT** | Fonds d'Entretien Routier | | | |
-| **BAILLEUR** | un représentant par bailleur | | | |
-| **BCRG** | Banque Centrale | | | |
+| **MISSION** | Mission de contrôle *(prestataire externe)* | **la mission de contrôle désigne son chef de Mission** ; l'administrateur AGEROUTE crée le compte et lui assigne le rôle | | |
+| **BUDGET** | Direction du Budget — MEF | le MEF | | |
+| **TRESOR** | Direction Générale du Trésor | le Trésor | | |
+| **FER_AGT** | Fonds d'Entretien Routier | le FER | | |
+| **BAILLEUR** | un représentant par bailleur | chaque bailleur | | |
+| **BCRG** | Banque Centrale | la BCRG | | |
+
+### ⚠️ MISSION est externe — trois conséquences
+
+**1. Un chef de Mission par contrat de supervision, pas un pour l'Agence.** Chaque marché est
+supervisé par une mission de contrôle, qui peut différer d'un marché à l'autre. Il y aura donc
+**plusieurs comptes MISSION simultanés**, chacun limité à ses marchés. Le système le prévoit
+déjà : `MISSION` fait partie des rôles à périmètre — sans affectation de marché, un compte
+MISSION ne voit **rien**. L'administrateur doit donc, après création, affecter les marchés
+supervisés ; sans cette étape le compte est créé mais aveugle.
+
+**2. Le compte a la durée du contrat, pas celle d'une carrière.** Quand la mission de contrôle
+change ou que son contrat s'achève, le compte doit être **désactivé** — et les documents qu'elle
+a signés restent valables, puisque la signature est horodatée. Une revue périodique des comptes
+MISSION actifs est à prévoir : c'est le point d'entrée du circuit, celui qui constate les
+quantités réalisées.
+
+**3. Le certificat pose une question à trancher.** Le chef de Mission signe le constat
+contradictoire qui fonde le décompte, mais il n'est pas agent de l'AGEROUTE. Trois options :
+certificat délivré à titre personnel par un prestataire reconnu ; certificat délivré sous la
+responsabilité de la société de supervision ; ou certificat émis par l'Agence pour la durée du
+contrat. Le choix relève de la Direction juridique et dépend des réponses de l'ARPT. Il est
+ajouté au §10 de l'audit.
+
+Dans tous les cas, le pouvoir du chef de Mission doit être **rattaché au contrat de supervision**,
+au même titre que le pouvoir d'engager d'un mandataire d'entreprise.
 
 ### Entreprises titulaires
 
@@ -139,7 +169,8 @@ Aucun compte n'est supprimé. Chacun change de nature.
 
 | Compte | Devient | Conserve | Perd |
 |---|---|---|---|
-| `mission@`, `technique@`, `dmc@`, `daf@`, `dg@`, `ugp@` | groupe fonctionnel | réception et répartition des tâches, consultation du périmètre | **toute capacité de signature et de validation** |
+| `technique@`, `dmc@`, `daf@`, `dg@`, `ugp@` | groupe fonctionnel interne | réception et répartition des tâches, consultation du périmètre | **toute capacité de signature et de validation** |
+| `mission@` | groupe **externe** — les chefs de Mission sont des prestataires | réception des dossiers à constater | **toute capacité de signature et de validation** |
 | `budget@`, `tresor@`, `fer@`, `bailleur@` | groupe externe | réception des dossiers | **toute capacité de signature** |
 | `colas@`, `sogea@`, `sored@`, `entreprise@` | groupe société | dépôt de pièces, suivi | **signature d'engagement** |
 | `admin@`, `support@` | comptes techniques | administration | aucune signature métier — déjà le cas |

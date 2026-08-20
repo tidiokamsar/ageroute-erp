@@ -359,13 +359,13 @@ fonction organisationnelle.** Le groupe reçoit et répartit les tâches ; il ne
 
 | Compte fonctionnel actuel | Rôle / groupe cible | Personnes membres | Signataire autorisé | Certificat nominatif requis |
 |---|---|---|---|---|
-| `mission@ageroute.gov.gn` | Groupe `MISSION` — **non signataire** | à désigner par la Direction | compte personnel du membre traitant | **Oui**, un par membre signataire |
-| `technique@ageroute.gov.gn` | Groupe `TECHNIQUE` — non signataire | à désigner | compte personnel du membre traitant | **Oui** |
+| `mission@ageroute.gov.gn` | Groupe `MISSION` — **externe, non signataire** | **chef de Mission désigné par la mission de contrôle**, compte créé par l'administrateur AGEROUTE | compte personnel du chef de Mission | **Oui** — un par chef de Mission, question d'émetteur à trancher (§10) |
+| `technique@ageroute.gov.gn` | Groupe `TECHNIQUE` — interne, non signataire | coordinateurs de projet AGEROUTE | compte personnel du coordinateur | **Oui** |
 | `dmc@ageroute.gov.gn` | Groupe `DMC` — non signataire | Mohamed lamine Keita (déjà nominatif) + à compléter | `mohamed.keita@ageroute.gov.gn` | **Oui** |
 | `daf@ageroute.gov.gn` | Groupe `DAF` — non signataire | à désigner | compte personnel du DAF | **Oui** |
 | `dg@ageroute.gov.gn` | Groupe `DG` — non signataire | Abdoulaye DABO (déjà nominatif) | `abdoulaye.dabo@ageroute.gov.gn` | **Oui** |
 | *(à créer)* | Rôle `DGA` — non signataire | **Moussa CAMARA** | compte personnel `moussa.camara@…` | **Oui** |
-| `ugp@ageroute.gov.gn` | Groupe `UGP` — non signataire | à désigner | compte personnel du membre traitant | **Oui** |
+| `ugp@ageroute.gov.gn` | Groupe `UGP` — interne, non signataire | coordinateurs de projet AGEROUTE | compte personnel du coordinateur | **Oui** |
 | `budget@ageroute.gov.gn` | Groupe `BUDGET` (externe MEF) — non signataire | agents désignés par le MEF | compte personnel de l'agent | **Oui** — délivré côté MEF |
 | `tresor@ageroute.gov.gn` | Groupe `TRESOR` (externe) — non signataire | agents désignés par le Trésor | compte personnel de l'agent | **Oui** — délivré côté Trésor |
 | `fer@ageroute.gov.gn` | Groupe `FER_AGT` (externe) — non signataire | agents désignés par le FER | compte personnel de l'agent | **Oui** — délivré côté FER |
@@ -603,6 +603,18 @@ sans effet.
     d'archives publiques guinéenne n'impose une durée supérieure pour certains actes.
 11. Les bailleurs (BAD, BM, UE, BID, FER) imposent-ils leurs propres exigences de signature ?
 12. Le PDF signé devient-il l'original juridique, ou le papier reste-t-il l'original ?
+13. **Quel certificat pour le chef de Mission, qui n'est pas agent de l'Agence ?** La mission de
+    contrôle est un **prestataire externe** : elle désigne son chef de Mission, dont le compte est
+    ensuite créé par l'administrateur AGEROUTE. Or c'est lui qui signe le constat contradictoire
+    fondant le décompte — la première signature de la chaîne. Trois options : certificat personnel
+    délivré par un prestataire reconnu ; certificat délivré sous la responsabilité de la société de
+    supervision ; certificat émis par l'Agence pour la durée du contrat. Dans les trois cas, le
+    pouvoir du signataire doit être rattaché au **contrat de supervision**, comme le pouvoir
+    d'engager d'un mandataire d'entreprise l'est aux statuts.
+14. **Que devient la valeur des signatures d'une mission de contrôle dont le contrat s'est
+    achevé ?** Le compte sera désactivé et le certificat expirera. Les documents signés
+    antérieurement restent valables par l'horodatage — mais il faut le confirmer par écrit, car
+    c'est exactement le cas de figure que la conservation décennale doit couvrir.
 
 **Point d'attention.** Tant que les questions 1 à 3 restent sans réponse écrite, **aucune
 implémentation de production n'est possible** : sans prestataire reconnu ni TSA admise, une
