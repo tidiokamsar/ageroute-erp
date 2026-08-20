@@ -371,6 +371,22 @@ export function MarchesPage() {
   function openDetail(m: Marche)  { setDetail(m); setDetailTab("identification"); }
   function f(k: string, v: unknown) { setForm(p => ({ ...p, [k]: v })); }
 
+  /**
+   * Dossier complet du marché — rendu SERVEUR en PDF, contrairement à
+   * `imprimerSituation` qui compose une page HTML dans le navigateur.
+   * Un document destiné à un bailleur ou à un auditeur doit être produit par le
+   * serveur : c'est la seule version dont on maîtrise le contenu.
+   */
+  async function telechargerDossierMarche(id: string, reference: string) {
+    try {
+      const res = await api.get(`/documents/marche/${id}/dossier/pdf`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `dossier-marche-${reference}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { toast.error("Dossier indisponible"); }
+  }
+
   function imprimerSituation(sit: any, m: Marche) {
     const tc  = sit.financier.tauxConsommation;
     const tp  = sit.financier.tauxPaiement;
@@ -652,6 +668,11 @@ export function MarchesPage() {
                     <RotateCcw className="h-3.5 w-3.5 mr-1"/>Changer le statut
                   </Button>
                 )}
+                <Button size="sm" variant="secondary"
+                  title="Dossier complet du marché — les quatorze sections, en PDF"
+                  onClick={() => telechargerDossierMarche(detail.id, detail.reference)}>
+                  <FileText className="h-3.5 w-3.5 mr-1"/>Dossier complet
+                </Button>
                 {canWrite(user?.role) && (
                   <Button size="sm" onClick={() => { openEdit(detail); setDetail(null); }}>
                     <Pencil className="h-3.5 w-3.5 mr-1"/>Modifier

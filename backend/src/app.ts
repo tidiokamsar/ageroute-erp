@@ -33,6 +33,7 @@ import { exportRouter } from "./modules/export/export.routes";
 import { rapportBailleurRouter } from "./modules/export/rapport-bailleur.routes";
 import { documentsOfficielsRouter } from "./modules/documents/documents-officiels.routes";
 import { dossierDecompteRouter } from "./modules/documents/dossier-decompte.routes";
+import { dossierMarcheRouter } from "./modules/documents/dossier-marche.routes";
 import { fundingRouter } from "./modules/funding/funding.routes";
 import { portailRouter } from "./modules/portail/portail.routes";
 import { revisionRouter } from "./modules/revision/revision.routes";
@@ -140,6 +141,7 @@ export function createApp() {
   // Le dossier complet est monté AVANT les documents unitaires : les deux
   // partagent le préfixe /decompte/:id, et le premier routeur qui répond gagne.
   app.use("/api/documents", dossierDecompteRouter);
+  app.use("/api/documents", dossierMarcheRouter);
   app.use("/api/documents", documentsOfficielsRouter);
   // portail entreprise : rôle contrôlé en routeur (entrepriseOnly)
   app.use("/api/portail", portailRouter);
