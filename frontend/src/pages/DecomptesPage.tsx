@@ -371,11 +371,21 @@ export function DecomptesPage() {
     onError: (e) => toast.error(parseApiError(e)),
   });
 
-  const downloadPdf = async (id: string, ref: string) => {
+  /**
+   * Téléchargement d'un PDF.
+   *
+   * `dossier` = les onze sections (référentiel, calculs, lignes BPU, pièces,
+   * validations, circuit, paiements, attachements, historique, audit,
+   * cartouches de signature). C'est le document à joindre au dossier physique.
+   * `resume` = la fiche courte, pour une vérification rapide.
+   */
+  const downloadPdf = async (id: string, ref: string, variante: "dossier" | "resume" = "dossier") => {
+    const chemin = variante === "dossier" ? `/documents/decompte/${id}/dossier/pdf` : `/documents/decompte/${id}/pdf`;
+    const prefixe = variante === "dossier" ? "dossier" : "decompte";
     try {
-      const res = await api.get(`/signature/pdf/${id}`, { responseType: "blob" });
+      const res = await api.get(chemin, { responseType: "blob" });
       const url = URL.createObjectURL(res.data as Blob);
-      const a = document.createElement("a"); a.href = url; a.download = `decompte-${ref}.pdf`;
+      const a = document.createElement("a"); a.href = url; a.download = `${prefixe}-${ref}.pdf`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     } catch { toast.error("PDF indisponible"); }
   };
@@ -555,9 +565,15 @@ export function DecomptesPage() {
                 <p className="text-xs text-gray-500">{det.entreprise.raisonSociale} — {det.marche.reference}</p>
               </div>
               <div className="flex gap-2 flex-wrap">
+                <button className="px-2.5 py-1.5 text-xs border border-navy/30 bg-navy/5 rounded-lg text-navy font-medium hover:bg-navy/10 flex items-center gap-1.5"
+                  title="Dossier complet — tous les onglets, avec cartouches de signature"
+                  onClick={() => downloadPdf(det.id, det.reference, "dossier")}>
+                  <FileDown className="h-3.5 w-3.5" /> Dossier complet
+                </button>
                 <button className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center gap-1.5"
-                  onClick={() => downloadPdf(det.id, det.reference)}>
-                  <FileDown className="h-3.5 w-3.5" /> PDF
+                  title="Fiche courte — récapitulatif financier et lignes BPU"
+                  onClick={() => downloadPdf(det.id, det.reference, "resume")}>
+                  <FileDown className="h-3.5 w-3.5" /> Résumé
                 </button>
                 {canWrite(role) && det.statut === "BROUILLON" && (
                   <button className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded-lg flex items-center gap-1.5"

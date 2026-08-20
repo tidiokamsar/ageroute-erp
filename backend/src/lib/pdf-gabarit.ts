@@ -40,6 +40,13 @@ export interface OptionsGabarit {
   sousTitre?: string;
   reference?: string;
   landscape?: boolean;
+  /**
+   * Conserve les pages en mémoire pour pouvoir y revenir après coup.
+   * Indispensable à la pagination d'un dossier (« Page 3 / 7 ») : le nombre
+   * total de pages n'est connu qu'une fois tout le contenu écrit.
+   * Voir `paginer()` dans pdf-dossier.ts.
+   */
+  bufferPages?: boolean;
 }
 
 export interface Signataire {
@@ -56,6 +63,7 @@ export function creerDocumentOfficiel(opts: OptionsGabarit): PDFKit.PDFDocument 
     margin: 40,
     size: "A4",
     layout: opts.landscape ? "landscape" : "portrait",
+    bufferPages: opts.bufferPages ?? false,
     info: {
       Title: opts.titre,
       Author: "AGEROUTE Guinée",
