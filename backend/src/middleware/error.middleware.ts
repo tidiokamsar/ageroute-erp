@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
+import { erreurJournalisable } from "../lib/masquage";
 
 export class ApiError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -14,7 +15,9 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
   if (err instanceof ZodError) {
     return res.status(400).json({ error: "Données invalides", details: err.flatten().fieldErrors });
   }
-  console.error(err);
+  // Jamais `console.error(err)` : le message d'une erreur Prisma contient le
+  // payload refusé, mot de passe compris.
+  console.error(erreurJournalisable(err));
   res.status(500).json({ error: "Erreur interne du serveur" });
 }
 

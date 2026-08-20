@@ -6,25 +6,12 @@ import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+// Schéma et découpage du payload : extraits pour être testables sans express ni
+// Prisma, selon la convention de tests du dépôt.
+import { userCreateSchema, separerMotDePasse } from "./users.payload";
 
 export const usersRouter = Router();
 usersRouter.use(requireAuth, requireRole("ADMIN"));
-
-const userCreateSchema = z.object({
-  email: z.string().email(),
-  nomComplet: z.string().min(1),
-  password: z.string().min(8),
-  role: z.enum(["ADMIN", "DG", "DAF", "DMC", "UGP", "MISSION", "TECHNIQUE", "ENTREPRISE", "AUDITEUR"]),
-  actif: z.boolean().default(true),
-  // Identité officielle portée sur les documents signés. Sans elle, les
-  // cartouches de visa restaient vides même sur une pièce validée, et
-  // l'historique des validations affichait l'adresse e-mail du valideur.
-  nom: z.string().optional(),
-  prenom: z.string().optional(),
-  fonction: z.string().optional(),
-  // Spécimen de signature déposé via /api/uploads — apposé sur les documents.
-  signatureUrl: z.string().optional(),
-});
 
 usersRouter.get("/", async (_req: Request, res: Response, next: NextFunction) => {
   try {
@@ -36,9 +23,9 @@ usersRouter.get("/", async (_req: Request, res: Response, next: NextFunction) =>
 usersRouter.post("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
-    const data = userCreateSchema.parse(req.body);
-    const passwordHash = await bcrypt.hash(data.password, 12);
-    const created = await prisma.user.create({ data: { ...data, passwordHash } });
+    const { password, colonnes } = separerMotDePasse(userCreateSchema.parse(req.body));
+    const passwordHash = await bcrypt.hash(password, 12);
+    const created = await prisma.user.create({ data: { ...colonnes, passwordHash } });
     await logAudit({ userId: req.user.id, action: "CREATE", entityType: "User", entityId: created.id });
     res.status(201).json({ id: created.id, email: created.email, nomComplet: created.nomComplet, role: created.role });
   } catch (err) { next(err); }
