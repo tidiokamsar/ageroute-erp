@@ -11,6 +11,8 @@ import { Router, Request, Response, NextFunction } from "express";
 import { prisma } from "../../lib/prisma";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { ApiError } from "../../middleware/error.middleware";
+import { verifierEligibiliteDepot } from "../../lib/eligibilite-depot";
+import { notifyWorkflowStep } from "../notifications/notifications.service";
 import { logAudit } from "../../lib/audit";
 import { notifyNextStep } from "../../lib/mailer";
 
@@ -141,53 +143,197 @@ portailRouter.get("/mes-receptions", entrepriseOnly, wrap(async (req, res) => {
   res.json(receptions);
 }));
 
-// ─── GET /api/portail/suivi/:decompteId — état BPMN d'un décompte ─────────────
+// ─── GET /api/portail/eligibilite/:marcheId ──────────────────────────────────
+/**
+ * Ce que l'entreprise a le droit de faire sur ce marché, AVANT de saisir.
+ *
+ * Sans cette route, l'entreprise remplissait tout le formulaire et découvrait le
+ * refus au moment de l'envoi — parfois pour une caution expirée qu'elle aurait pu
+ * faire proroger entre-temps. Le blocage doit être connu au début, pas à la fin.
+ */
+portailRouter.get("/eligibilite/:marcheId", entrepriseOnly, wrap(async (req, res) => {
+  const entrepriseId = await getEntrepriseId(req.user!.id);
+  if (!entrepriseId) throw new ApiError(404, "Aucune entreprise liée");
+
+  const marche = await prisma.marche.findFirst({
+    where: { id: req.params.marcheId, entrepriseId, deletedAt: null },
+    select: { id: true, reference: true, statut: true },
+  });
+  if (!marche) throw new ApiError(404, "Marché introuvable");
+
+  const { checkEligibilite } = await import("../entreprises/entreprises.service");
+  const [{ raisons }, garanties, nbAttachements] = await Promise.all([
+    checkEligibilite(entrepriseId),
+    prisma.garantie.findMany({ where: { marcheId: marche.id }, select: { type: true, active: true, dateExpiration: true } }),
+    prisma.attachement.count({ where: { decompte: { marcheId: marche.id, deletedAt: null } } }),
+  ]);
+
+  const controle = verifierEligibiliteDepot({
+    blocagesEntreprise: raisons,
+    statutMarche: marche.statut,
+    garanties,
+    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    nbAttachements,
+    maintenant: new Date(),
+  });
+
+  res.json({ marche, ...controle, garanties });
+}));
+
+// ─── GET /api/portail/suivi/:decompteId — parcours réel du décompte ───────────
+/**
+ * Suivi d'un décompte par l'entreprise qui l'a déposé.
+ *
+ * ⚠️ Cette route lisait les tables BPMN, qui comptent 0 instance et 0 action
+ * depuis toujours. L'entreprise recevait donc systématiquement une instance
+ * nulle, aucune étape et aucun journal : elle ne pouvait ni voir où en était son
+ * dossier, ni savoir qu'un complément lui était demandé.
+ *
+ * Elle lit désormais le circuit réel, et rend TOUT ce dont une entreprise a
+ * besoin pour agir : l'étape courante et qui la détient, l'historique des
+ * décisions, les visas, ses pièces avec leur statut et le motif de retour, et
+ * les paiements. C'est la vue qui lui permet de s'exécuter sans téléphoner.
+ */
 portailRouter.get("/suivi/:decompteId", entrepriseOnly, wrap(async (req, res) => {
   const entrepriseId = await getEntrepriseId(req.user!.id);
   if (!entrepriseId) throw new ApiError(404, "Aucune entreprise liée");
 
   const decompte = await prisma.decompte.findFirst({
     where: { id: req.params.decompteId, entrepriseId, deletedAt: null },
-    include: { marche: { select: { reference: true, intitule: true } } },
+    include: {
+      marche: { select: { reference: true, intitule: true, statut: true } },
+      paiements: {
+        where: { deletedAt: null }, orderBy: { createdAt: "asc" },
+        select: { reference: true, montantGnf: true, statut: true, dateExecution: true },
+      },
+      documents: {
+        where: { estArchive: false }, orderBy: { createdAt: "asc" },
+        select: { id: true, type: true, nom: true, version: true, statutValidation: true, motifRetour: true, valideAt: true, createdAt: true },
+      },
+      validationsAvancees: {
+        orderBy: { valideAt: "asc" },
+        select: { etape: true, decision: true, commentaire: true, valideRole: true, valideAt: true },
+      },
+    },
   });
   if (!decompte) throw new ApiError(404, "Décompte introuvable");
 
-  const rows = await prisma.$queryRaw<Array<{
-    id: string; statut: string; etape_actuelle: number;
-    step_nom: string | null; step_role: string | null; sla_jours: number | null; total_etapes: number;
-  }>>`
-    SELECT bi.id, bi.statut, bi.etape_actuelle,
-           bs.nom AS step_nom, bs.role_requis AS step_role, bs.sla_jours,
-           (SELECT COUNT(*) FROM bpmn_steps WHERE definition_id = bi.definition_id)::int AS total_etapes
-    FROM bpmn_instances bi
-    LEFT JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle
-    WHERE bi.module_type = 'DECOMPTE' AND bi.entity_id = ${decompte.id}
-  `;
-  const instance = rows[0] ?? null;
+  const instance = await prisma.workflowInstance.findFirst({
+    where: { decompteId: decompte.id },
+    orderBy: { createdAt: "desc" },
+    include: {
+      definition: { include: { etapes: { orderBy: { ordre: "asc" } } } },
+      actions: { orderBy: { createdAt: "asc" }, include: { etape: { select: { nom: true, roleRequis: true } } } },
+    },
+  });
 
-  // Toutes les étapes
-  const steps = instance ? await prisma.$queryRaw<Array<{
-    ordre: number; nom: string; type: string; role_requis: string | null; sla_jours: number; is_system: boolean;
-  }>>`SELECT ordre, nom, type, role_requis, sla_jours, is_system FROM bpmn_steps
-      WHERE definition_id = (SELECT definition_id FROM bpmn_instances WHERE id = ${instance.id})
-      ORDER BY ordre` : [];
+  const etapes = instance
+    ? instance.definition.etapes.map((e, i) => ({
+        ordre: i + 1,
+        nom: e.nom,
+        roleRequis: e.roleRequis,
+        etat: i < instance.etapeActuelle ? "FRANCHIE" : i === instance.etapeActuelle ? "EN_COURS" : "A_VENIR",
+      }))
+    : [];
 
-  // Journal des actions
-  const actions = instance ? await prisma.$queryRaw<Array<{
-    decision: string; commentaire: string; created_at: Date;
-    decideur_nom: string | null; step_nom: string | null;
-  }>>`
-    SELECT ba.decision, ba.commentaire, ba.created_at,
-           u.nom_complet AS decideur_nom, bs.nom AS step_nom
-    FROM bpmn_actions ba
-    JOIN bpmn_instances bi ON bi.id = ba.instance_id
-    JOIN bpmn_steps bs ON bs.id = ba.step_id
-    LEFT JOIN users u ON u.id = ba.decideur_id
-    WHERE ba.instance_id = ${instance.id}
-    ORDER BY ba.created_at ASC
-  ` : [];
+  // Ce que l'entreprise doit faire, s'il y a lieu. Une pièce retournée ne compte
+  // pas comme fournie : c'est l'action attendue d'elle, et elle doit la voir.
+  const piecesRetournees = decompte.documents.filter((d) => d.statutValidation === "RETOURNE");
+  const actionAttendue =
+    decompte.statut === "BROUILLON"
+      ? "Ce décompte est un brouillon : il n'est pas encore entré dans le circuit. Envoyez-le pour démarrer la validation."
+      : piecesRetournees.length > 0
+        ? `${piecesRetournees.length} pièce(s) vous ont été retournée(s) : corrigez-les et redéposez-les.`
+        : null;
 
-  res.json({ decompte, instance, steps, actions });
+  res.json({
+    decompte,
+    instance: instance
+      ? { id: instance.id, statut: instance.statut, etapeActuelle: instance.etapeActuelle, circuit: instance.definition.nom }
+      : null,
+    anterieurAuDispositif: !instance && decompte.validationsAvancees.length > 0,
+    etapes,
+    etapeCourante: etapes.find((e) => e.etat === "EN_COURS") ?? null,
+    actions: instance?.actions.map((a) => ({
+      etape: a.etape?.nom ?? a.etape?.roleRequis,
+      decision: a.decision,
+      commentaire: a.commentaire,
+      date: a.createdAt,
+    })) ?? [],
+    piecesRetournees,
+    actionAttendue,
+  });
+}));
+
+// ─── POST /api/portail/soumettre/:decompteId — envoyer un brouillon ───────────
+/**
+ * Envoi d'un brouillon dans le circuit par l'entreprise elle-même.
+ *
+ * L'entreprise pouvait créer un brouillon mais pas l'envoyer : la seule route de
+ * soumission passe par le module workflow, fermé à son rôle. Son décompte restait
+ * donc indéfiniment à l'état BROUILLON, invisible des services.
+ *
+ * Le verrou de dépôt est appliqué ici aussi : un brouillon créé avant
+ * l'expiration d'une caution ne doit pas pouvoir entrer dans le circuit après.
+ */
+portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, res) => {
+  const entrepriseId = await getEntrepriseId(req.user!.id);
+  if (!entrepriseId) throw new ApiError(404, "Aucune entreprise liée");
+
+  const decompte = await prisma.decompte.findFirst({
+    where: { id: req.params.decompteId, entrepriseId, deletedAt: null },
+    include: { marche: true },
+  });
+  if (!decompte) throw new ApiError(404, "Décompte introuvable");
+  if (decompte.statut !== "BROUILLON") {
+    throw new ApiError(400, `Ce décompte est déjà dans le circuit (statut « ${decompte.statut.replace(/_/g, " ")} »).`);
+  }
+
+  const { checkEligibilite } = await import("../entreprises/entreprises.service");
+  const [{ raisons }, garanties, nbAttachements, dejaOuvert] = await Promise.all([
+    checkEligibilite(entrepriseId),
+    prisma.garantie.findMany({ where: { marcheId: decompte.marcheId }, select: { type: true, active: true, dateExpiration: true } }),
+    prisma.attachement.count({ where: { decompte: { marcheId: decompte.marcheId, deletedAt: null } } }),
+    prisma.workflowInstance.findFirst({ where: { decompteId: decompte.id }, select: { id: true } }),
+  ]);
+  if (dejaOuvert) throw new ApiError(409, "Un circuit est déjà ouvert pour ce décompte.");
+
+  const controle = verifierEligibiliteDepot({
+    blocagesEntreprise: raisons,
+    statutMarche: decompte.marche.statut,
+    garanties,
+    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    nbAttachements,
+    maintenant: new Date(),
+  });
+  if (!controle.autorise) throw new ApiError(403, `Envoi bloqué — ${controle.blocages.join(" ")}`);
+
+  const definition = await prisma.workflowDefinition.findFirst({
+    where: { financement: decompte.marche.financement, actif: true },
+    include: { etapes: { orderBy: { ordre: "asc" } } },
+  });
+  if (!definition) throw new ApiError(400, `Aucun circuit défini pour le financement ${decompte.marche.financement}.`);
+
+  const instance = await prisma.workflowInstance.create({
+    data: { definitionId: definition.id, decompteId: decompte.id, etapeActuelle: 0, statut: "EN_COURS" },
+  });
+  await prisma.decompte.update({ where: { id: decompte.id }, data: { statut: "DEPOSE" } });
+  await logAudit({
+    userId: req.user!.id, action: "UPDATE", entityType: "Decompte", entityId: decompte.id,
+    after: { statut: "DEPOSE", origine: "portail-entreprise", wfInstanceId: instance.id },
+  });
+
+  // Notification du PREMIER intervenant — sans elle, le dossier attend que
+  // quelqu'un pense à regarder.
+  if (definition.etapes.length > 0) {
+    await notifyWorkflowStep(definition.etapes[0], decompte.reference, instance.id).catch(() => {});
+  }
+
+  res.json({
+    message: `Décompte envoyé — circuit « ${definition.nom} » démarré, ${definition.etapes.length} étapes.`,
+    premiereEtape: definition.etapes[0]?.nom ?? null,
+    avertissements: controle.avertissements,
+  });
 }));
 
 // ─── POST /api/portail/deposer-decompte — soumettre un décompte ───────────────
@@ -203,22 +349,38 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
     where: { id: marcheId, entrepriseId, deletedAt: null },
   });
   if (!marche) throw new ApiError(403, "Marché non trouvé ou non accessible");
-  if (marche.statut !== "ACTIF") throw new ApiError(400, `Dépôt impossible : marché "${marche.statut}"`);
 
-  // Mêmes règles bloquantes que la route interne (§5 CDC) : conformité obligatoire
+  // ── Verrou de dépôt (lib/eligibilite-depot.ts) ────────────────────────────
+  // La condition précédente exigeait `statut === "ACTIF"`. Or AUCUN marché ne
+  // porte ce statut — ACTIF est un alias historique. Le dépôt échouait donc
+  // pour 100 % des marchés. Et la régularité des garanties n'était contrôlée
+  // nulle part : une caution de bonne exécution expirée depuis trois semaines
+  // n'empêchait rien.
   const { checkEligibilite } = await import("../entreprises/entreprises.service");
-  const { eligible, raisons } = await checkEligibilite(entrepriseId);
-  if (!eligible) throw new ApiError(403, `Dépôt bloqué — ${raisons.join(" ; ")}`);
+  const [{ raisons }, garanties, nbAttachements] = await Promise.all([
+    checkEligibilite(entrepriseId),
+    prisma.garantie.findMany({
+      where: { marcheId },
+      select: { type: true, active: true, dateExpiration: true },
+    }),
+    prisma.attachement.count({ where: { decompte: { marcheId, deletedAt: null } } }),
+  ]);
 
-    // F5 — au moins un attachement pour ce marché (validé ou en cours)
-    // Le blocage strict sur valide=true est desserré en phase pilote :
-    // l'attachement doit exister, sa validation Mission/Technique suit.
-    const attachementExistant = await prisma.attachement.count({
-      where: { decompte: { marcheId, deletedAt: null } },
-    });
-    if (attachementExistant === 0) {
-      throw new ApiError(400, "Aucun attachement pour ce marché — créez au moins un attachement avant de déposer un décompte");
-    }
+  const controle = verifierEligibiliteDepot({
+    blocagesEntreprise: raisons,
+    statutMarche: marche.statut,
+    garanties,
+    // Toute garantie de bonne exécution déjà enregistrée sur le marché rend
+    // son maintien obligatoire : on n'autorise pas un dépôt sur un marché dont
+    // la caution a été souscrite puis laissée expirer.
+    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    nbAttachements,
+    maintenant: new Date(),
+  });
+
+  if (!controle.autorise) {
+    throw new ApiError(403, `Dépôt bloqué — ${controle.blocages.join(" ")}`);
+  }
 
   // Référence à partir du nombre de décomptes existants du marché
   const nbExistants = await prisma.decompte.count({ where: { marcheId } });

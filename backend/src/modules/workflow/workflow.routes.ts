@@ -23,6 +23,7 @@ import {
   decisionValidation, produitUneValidation,
 } from "../../lib/moteur-validation";
 import { chargerRegles, booleenRegles } from "../../lib/regles";
+import { motifStatutMarche } from "../../lib/eligibilite-depot";
 import { getMarchesAffectes } from "../../lib/affectations";
 
 export const workflowRouter = Router();
@@ -66,7 +67,11 @@ workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response
     if (decompte.statut !== "BROUILLON") throw new ApiError(400, "Seul un décompte BROUILLON peut être soumis");
 
     await assertEntrepriseConforme(decompte.entrepriseId);
-    if (decompte.marche.statut !== "ACTIF") throw new ApiError(400, "Le marché n'est pas actif");
+    // `ACTIF` est un alias historique : AUCUN marché ne le porte en base (trois
+    // sont EN_EXECUTION, un SIGNE). Cette condition rendait la soumission
+    // impossible sur 100 % des marchés. Voir lib/eligibilite-depot.ts.
+    const motifMarche = motifStatutMarche(decompte.marche.statut);
+    if (motifMarche) throw new ApiError(400, `Soumission impossible — ${motifMarche}`);
 
     // F5 — au moins un attachement pour ce marché (validé ou en cours)
     const attExistant = await prisma.attachement.count({
