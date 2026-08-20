@@ -145,15 +145,43 @@ amont.
 
 ---
 
+## 5 bis. Incident du 20/08/2026 — la création d'utilisateur était cassée
+
+La première tentative de création des comptes a échoué en 500 sur les deux. Le défaut n'était pas
+dans la demande mais dans l'ERP.
+
+`POST /api/users` transmettait à Prisma le corps validé **`password` compris**, alors que seule la
+colonne `passwordHash` existe sur le modèle `User`. Prisma refusait l'argument inconnu. **Aucun
+utilisateur ne pouvait donc être créé**, ni par l'API ni par l'écran d'administration, depuis la
+mise en service. Les 20 comptes existants venaient des scripts de peuplement, en SQL direct — ce
+qui explique que le défaut n'ait jamais été vu.
+
+Second défaut découvert au passage : le gestionnaire d'erreurs journalisait l'erreur brute, et le
+message d'une erreur Prisma incorpore le payload refusé. **Une création d'utilisateur en échec
+écrivait le mot de passe en clair dans `docker logs`.**
+
+Les deux sont corrigés — branche `fix/creation-utilisateur`, commit `cfafb45`, déployé le
+20/08/2026. Tests : 141/141. Le mot de passe temporaire exposé lors de la tentative ratée était
+une chaîne aléatoire jamais utilisée, sur un compte inexistant, et les journaux du conteneur ont
+été remis à zéro par sa recréation.
+
+**Ce que cet incident enseigne pour la suite.** La désignation a servi de test de recette : elle a
+révélé un défaut bloquant que six mois d'exploitation n'avaient pas fait apparaître, parce que
+personne n'avait jamais créé de compte par l'interface. Les étapes 4 à 6 — rôle `DGA`,
+versionnement, insertion dans les circuits — touchent des chemins tout aussi peu exercés. La
+répétition sur copie restaurée n'est pas une formalité.
+
+---
+
 ## 6. Journal d'exécution
 
 À remplir au fur et à mesure. Une étape non datée est une étape non faite.
 
 | Étape | Jouée sur copie le | Vérifiée le | Appliquée en production le | Par |
 |---|---|---|---|---|
-| 1 — Sauvegarde et copie | | | | |
-| 2 — Trois comptes personnels | | | | |
-| 3 — Qualités exercées | | | | |
+| 1 — Sauvegarde et copie | sans objet | 20/08/2026 | **20/08/2026** — 317 Ko, `a269db33…`, copie dans `F:\ERP-sauvegarde\dumps\` | Claude |
+| 2 — Comptes personnels | sans objet | 20/08/2026 | **20/08/2026 — 2 sur 3** : Moïse SIDIBÉ (DG) et Famo MANSARÉ (DAF), créés **dormants**. Moussa CAMARA attend le rôle `DGA`. | Claude |
+| 3 — Qualités exercées | sans objet | 20/08/2026 | **20/08/2026** — renseignées sur les deux comptes créés. Reste à faire sur les 20 comptes préexistants. | Claude |
 | 4 — Rôle DGA *(non réversible)* | | | | |
 | 5 — Versionnement des circuits | | | | |
 | 6 — Étape DGA dans les 11 circuits | | | | |

@@ -47,11 +47,20 @@ après application de la décision.
 
 **Désignations confirmées le 20/08/2026.** Domaine confirmé : `@ageroute.gov.gn`.
 
-| Personne | Identifiant | Rôle | Qualité exercée (à confirmer) |
-|---|---|---|---|
-| Moïse SIDIBÉ | `moise.sidibe@ageroute.gov.gn` | **DG** | Directeur Général |
-| Famo MANSARÉ | `famo.mansare@ageroute.gov.gn` | **DAF** | Directeur Administratif et Financier |
-| Moussa CAMARA | `moussa.camara@ageroute.gov.gn` | **DGA** | Directeur Général Adjoint |
+| Personne | Identifiant | Rôle | Qualité exercée (à confirmer) | État du compte |
+|---|---|---|---|---|
+| Moïse SIDIBÉ | `moise.sidibe@ageroute.gov.gn` | **DG** | Directeur Général | **créé le 20/08/2026 — dormant** |
+| Famo MANSARÉ | `famo.mansare@ageroute.gov.gn` | **DAF** | Directeur Administratif et Financier | **créé le 20/08/2026 — dormant** |
+| Moussa CAMARA | `moussa.camara@ageroute.gov.gn` | **DGA** | Directeur Général Adjoint | **en attente** — le rôle `DGA` n'existe pas encore |
+
+**Ce que « dormant » veut dire.** Les deux comptes existent, portent leur identité et leur qualité,
+et figurent au journal d'audit. Ils sont créés `actif = false`, avec un mot de passe aléatoire de
+28 caractères qui n'a été ni conservé ni transmis : **personne ne peut s'y connecter**. La
+désignation est donc enregistrée sans ouvrir d'accès.
+
+Pour les mettre en service, un administrateur définit le mot de passe via « Réinitialiser mot de
+passe » puis active le compte — au moment où la personne est effectivement accueillie, et pas
+avant.
 
 Les qualités exercées ci-dessus sont **déduites du rôle** et doivent être confirmées : elles
 figureront dans la preuve de signature et seront lues dix ans plus tard. Si l'intitulé exact du
