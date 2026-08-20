@@ -5,8 +5,9 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../lib/api";
-import { useAuth, authStore } from "../lib/auth";
+import { api, parseApiError } from "../lib/api";
+import { toast } from "../components/ui/Toast";
+import { useAuth, authStore } from "../lib/auth";
 import { FileUploadModal } from "../components/ui/FileUploadModal";
 
 // ─── ICÔNES (HeroIcons inline SVG léger) ─────────────────────────────────────
@@ -130,7 +131,12 @@ interface Decompte {
   tva: string; retenueGarantie: string; netAPayer: string;
   createdAt: string; observations: string | null;
   marche: { id: string; reference: string; intitule: string; montantInitialGnf: string } | null;
-  bpmn: { statut: string; etape: number; stepNom?: string } | null;
+  // L'étape venait des tables BPMN, vides depuis toujours : la colonne « Étape »
+  // affichait « — » pour tous les décomptes, y compris ceux en cours de contrôle.
+  // Elle vient désormais du circuit réel.
+  etapeCourante: { circuit: string; etape: string; role: string; position: string } | null;
+  nbPieces?: number;
+  peutEtreEnvoye?: boolean;
 }
 interface Garantie {
   id: string; marcheId: string; type: string; montantGnf: string;
@@ -199,8 +205,40 @@ function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () 
   const net = ttc - precompte - rg - armp;
   const marcheChoisi = marches.find(m => m.id === form.marcheId);
 
+  // Éligibilité au dépôt, interrogée dès qu'un marché est choisi.
+  // Sans cela l'entreprise remplissait tout le formulaire pour découvrir le refus
+  // à l'envoi — parfois pour une caution expirée qu'elle aurait pu faire proroger.
+  const eligibiliteQ = useQuery<{
+    autorise: boolean; blocages: string[]; avertissements: string[];
+  }>({
+    queryKey: ["portail-eligibilite", form.marcheId],
+    queryFn: () => api.get(`/portail/eligibilite/${form.marcheId}`).then(r => r.data),
+    enabled: !!form.marcheId,
+  });
+  const eligibilite = eligibiliteQ.data;
+
   return (
     <div className="space-y-6">
+      {eligibilite && !eligibilite.autorise && (
+        <div className="rounded-xl border-2 border-red-300 bg-red-50 p-4">
+          <p className="text-sm font-bold text-red-800">Dépôt impossible sur ce marché</p>
+          <ul className="mt-2 space-y-1">
+            {eligibilite.blocages.map((b, i) => (
+              <li key={i} className="text-xs text-red-700">• {b}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-red-600">
+            Régularisez ces points, puis revenez déposer. Inutile de saisir le décompte : il serait refusé.
+          </p>
+        </div>
+      )}
+      {eligibilite?.avertissements?.length ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+          {eligibilite.avertissements.map((a, i) => (
+            <p key={i} className="text-xs text-amber-800">⚠ {a}</p>
+          ))}
+        </div>
+      ) : null}
       {/* Marché + type */}
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -355,7 +393,8 @@ function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () 
         </p>
       )}
       <button onClick={() => mut.mutate()}
-        disabled={!form.marcheId || form.lignes.length === 0 || form.pieces.length === 0 || mut.isPending || uploading}
+        disabled={!form.marcheId || form.lignes.length === 0 || form.pieces.length === 0 || mut.isPending || uploading
+          || (eligibilite ? !eligibilite.autorise : false)}
         className="w-full py-3 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 disabled:opacity-40 transition"
         style={{ background: "#1B2A4A" }}>
         {mut.isPending ? IC.spin : IC.plus}
@@ -396,6 +435,11 @@ export default function PortailEntreprisePage() {
   const paiementsQ = useQuery<Paiement[]>({ queryKey: ["portail-paiements"], queryFn: () => api.get("/portail/mes-paiements").then(r => r.data).catch(() => []) });
   const receptionsQ = useQuery({ queryKey: ["portail-receptions"], queryFn: () => api.get("/portail/mes-receptions").then(r => r.data).catch(() => []) });
   const attachementsQ = useQuery<Array<Record<string, any>>>({ queryKey: ["portail-attachements"], queryFn: () => api.get("/portail/mes-attachements").then(r => r.data).catch(() => []) });
+
+  // Décompte dont l'entreprise consulte le suivi. Elle ne pouvait ouvrir aucun
+  // de ses décomptes : ni voir où en était son dossier, ni savoir qu'un
+  // complément lui était demandé.
+  const [suiviId, setSuiviId] = useState<string | null>(null);
 
   const profil = profilQ.data;
   const marches = marchesQ.data ?? [];
@@ -756,9 +800,11 @@ export default function PortailEntreprisePage() {
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {decomptes.map(d => (
-                      <tr key={d.id} className="hover:bg-gray-50/50 transition">
+                      <tr key={d.id} onClick={() => setSuiviId(d.id)}
+                        className="hover:bg-blue-50/50 transition cursor-pointer"
+                        title="Ouvrir le suivi de ce décompte">
                         <td className="px-4 py-3">
-                          <span className="font-mono font-bold text-blue-700 text-xs">{d.reference}</span>
+                          <span className="font-mono font-bold text-blue-700 text-xs underline decoration-dotted">{d.reference}</span>
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-500 max-w-[140px]">
                           <div className="truncate">{d.marche?.reference ?? "—"}</div>
@@ -767,7 +813,17 @@ export default function PortailEntreprisePage() {
                         <td className="px-4 py-3 text-sm font-semibold">{fmtGnf(d.montantPeriodeHtGnf)}</td>
                         <td className="px-4 py-3 text-sm font-bold text-blue-700">{fmtGnf(d.netAPayer)}</td>
                         <td className="px-4 py-3"><StatutBadge statut={d.statut} cfg={DECOMPTE_STATUT_CFG} /></td>
-                        <td className="px-4 py-3 text-xs text-gray-400">{d.bpmn?.stepNom ?? "—"}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {d.etapeCourante ? (
+                            <div>
+                              <div className="font-semibold text-gray-700">{d.etapeCourante.etape}</div>
+                              <div className="text-[10px] text-gray-400">étape {d.etapeCourante.position}</div>
+                            </div>
+                          ) : d.peutEtreEnvoye ? (
+                            <span className="text-[11px] font-semibold text-amber-700">Non envoyé</span>
+                          ) : <span className="text-gray-400">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-gray-500">{d.nbPieces ?? 0}</td>
                         <td className="px-4 py-3 text-xs text-gray-400">{fmtDate(d.createdAt)}</td>
                       </tr>
                     ))}
@@ -989,6 +1045,8 @@ export default function PortailEntreprisePage() {
         />
       )}
 
+      {suiviId && <SuiviDecompte decompteId={suiviId} onClose={() => setSuiviId(null)} />}
+
     </div>
   );
 }
@@ -1107,6 +1165,151 @@ function PiecesDossier({ decompteId, reference, onClose }: { decompteId: string;
         title={depotPour ? `Déposer — ${depotPour.libelle}` : "Déposer une pièce"}
         onFileUploaded={(url, nom) => { if (depotPour) rattacher.mutate({ type: depotPour.cle, nom, url }); }}
       />
+    </div>
+  );
+}
+
+/**
+ * Suivi d'un décompte, vu par l'entreprise.
+ *
+ * Jusqu'ici l'entreprise ne pouvait ouvrir aucun de ses décomptes : ni voir où
+ * en était son dossier, ni savoir qu'un complément lui était demandé, ni envoyer
+ * un brouillon. Ce panneau répond aux quatre questions qu'elle se pose :
+ * où en est-il, qui le détient, que dois-je faire, et qu'ai-je déjà fourni.
+ */
+function SuiviDecompte({ decompteId, onClose }: { decompteId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["portail-suivi", decompteId],
+    queryFn: () => api.get(`/portail/suivi/${decompteId}`).then(r => r.data),
+  });
+
+  const envoi = useMutation({
+    mutationFn: () => api.post(`/portail/soumettre/${decompteId}`).then(r => r.data),
+    onSuccess: (r: { message?: string; premiereEtape?: string }) => {
+      qc.invalidateQueries({ queryKey: ["portail-decomptes"] });
+      qc.invalidateQueries({ queryKey: ["portail-suivi", decompteId] });
+      toast.success(r?.message ?? "Décompte envoyé au circuit");
+    },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
+  const d = data?.decompte;
+  const etapes: Array<{ ordre: number; nom: string; roleRequis: string; etat: string }> = data?.etapes ?? [];
+  const actions: Array<{ etape: string; decision: string; commentaire: string | null; date: string }> = data?.actions ?? [];
+  const pieces: Array<Record<string, any>> = d?.documents ?? [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="max-h-[88vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 flex items-center justify-between border-b border-gray-100 bg-white px-5 py-4">
+          <div>
+            <p className="font-mono text-sm font-black text-navy">{d?.reference ?? "…"}</p>
+            <p className="text-xs text-gray-500">{d?.marche?.reference} — {d?.marche?.intitule}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        <div className="space-y-5 p-5">
+          {isLoading && <p className="text-sm text-gray-400">Chargement…</p>}
+
+          {/* Ce que l'entreprise doit faire — en premier, car c'est le motif de sa visite */}
+          {data?.actionAttendue && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Action attendue de vous</p>
+              <p className="mt-1 text-sm text-amber-900">{data.actionAttendue}</p>
+              {d?.statut === "BROUILLON" && (
+                <button onClick={() => envoi.mutate()} disabled={envoi.isPending}
+                  className="mt-3 rounded-lg bg-navy px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                  {envoi.isPending ? "Envoi…" : "Envoyer au circuit de validation"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {data?.anterieurAuDispositif && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
+              Dossier antérieur à l'unification des circuits : les validations enregistrées à
+              l'époque restent consultables, mais aucun parcours n'a été reconstitué.
+            </div>
+          )}
+
+          {/* Où en est le dossier */}
+          <section>
+            <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-400">Parcours du dossier</h4>
+            {etapes.length === 0 ? (
+              <p className="text-sm text-gray-400">Ce décompte n'est pas encore entré dans un circuit.</p>
+            ) : (
+              <ol className="space-y-1">
+                {etapes.map((e) => (
+                  <li key={e.ordre} className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${
+                    e.etat === "EN_COURS" ? "bg-blue-50 border border-blue-200"
+                    : e.etat === "FRANCHIE" ? "bg-green-50/60" : "bg-gray-50"}`}>
+                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                      e.etat === "FRANCHIE" ? "bg-green-600 text-white"
+                      : e.etat === "EN_COURS" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-500"}`}>
+                      {e.etat === "FRANCHIE" ? "✓" : e.ordre}
+                    </span>
+                    <span className="flex-1 font-medium text-gray-700">{e.nom}</span>
+                    <span className="text-[11px] text-gray-400">{e.roleRequis}</span>
+                    {e.etat === "EN_COURS" && <span className="text-[10px] font-bold text-blue-700">EN COURS</span>}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+
+          {/* Historique des décisions */}
+          <section>
+            <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-400">Historique des décisions</h4>
+            {actions.length === 0 ? (
+              <p className="text-sm text-gray-400">Aucune décision enregistrée à ce jour.</p>
+            ) : (
+              <ul className="space-y-1">
+                {actions.map((a, i) => (
+                  <li key={i} className="rounded-lg border border-gray-100 px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-700">{a.etape}</span>
+                      <span className="text-[11px] text-gray-400">{fmtDate(a.date)}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      <span className="font-semibold">{a.decision}</span>
+                      {a.commentaire ? ` — ${a.commentaire}` : ""}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Pièces — avec le motif de retour, qui dit à l'entreprise quoi corriger */}
+          <section>
+            <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-400">Pièces déposées</h4>
+            {pieces.length === 0 ? (
+              <p className="text-sm text-gray-400">Aucune pièce déposée.</p>
+            ) : (
+              <ul className="space-y-1">
+                {pieces.map((p) => (
+                  <li key={p.id} className={`rounded-lg border px-3 py-2 ${
+                    p.statutValidation === "RETOURNE" ? "border-red-200 bg-red-50" : "border-gray-100"}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-sm text-gray-700">{p.nom}</span>
+                      <span className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-bold ${
+                        p.statutValidation === "VALIDE" ? "bg-green-100 text-green-700"
+                        : p.statutValidation === "RETOURNE" ? "bg-red-100 text-red-700"
+                        : "bg-gray-100 text-gray-600"}`}>{p.statutValidation}</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400">{p.type} · version {p.version}</p>
+                    {p.motifRetour && (
+                      <p className="mt-1 text-xs font-medium text-red-700">Motif du retour : {p.motifRetour}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
     </div>
   );
 }

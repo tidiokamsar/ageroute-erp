@@ -82,26 +82,47 @@ portailRouter.get("/mes-decomptes", entrepriseOnly, wrap(async (req, res) => {
     orderBy: { createdAt: "desc" },
     include: {
       marche: { select: { reference: true, intitule: true, montantInitialGnf: true } },
+      _count: { select: { documents: true } },
     },
   });
 
-  // Enrichir avec l'état BPMN pour chaque décompte
-  const ids = decomptes.map(d => d.id);
-  let bpmnMap: Record<string, { statut: string; etape: number; stepNom?: string }> = {};
+  // Étape courante de chaque décompte.
+  //
+  // ⚠️ Cet enrichissement interrogeait les tables BPMN, qui comptent 0 instance
+  // depuis toujours : la colonne « Étape » du portail affichait donc « — » pour
+  // tous les décomptes, y compris ceux en cours de contrôle. L'entreprise ne
+  // pouvait pas savoir qui détenait son dossier.
+  const ids = decomptes.map((d) => d.id);
+  const etapeParDecompte: Record<string, { circuit: string; etape: string; role: string; position: string } | null> = {};
+
   if (ids.length > 0) {
-    const instances = await prisma.$queryRaw<Array<{ entity_id: string; statut: string; etape_actuelle: number; step_nom: string | null }>>`
-      SELECT bi.entity_id, bi.statut, bi.etape_actuelle,
-             bs.nom AS step_nom
-      FROM bpmn_instances bi
-      LEFT JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle
-      WHERE bi.module_type = 'DECOMPTE' AND bi.entity_id = ANY(${ids}::text[])
-    `;
-    for (const row of instances) {
-      bpmnMap[row.entity_id] = { statut: row.statut, etape: row.etape_actuelle, stepNom: row.step_nom ?? undefined };
+    const instances = await prisma.workflowInstance.findMany({
+      where: { decompteId: { in: ids } },
+      orderBy: { createdAt: "desc" },
+      include: { definition: { include: { etapes: { orderBy: { ordre: "asc" } } } } },
+    });
+    for (const inst of instances) {
+      if (!inst.decompteId || etapeParDecompte[inst.decompteId]) continue;
+      const courante = inst.definition.etapes[inst.etapeActuelle];
+      etapeParDecompte[inst.decompteId] = courante
+        ? {
+            circuit: inst.definition.nom,
+            etape: courante.nom,
+            role: courante.roleRequis,
+            position: `${inst.etapeActuelle + 1}/${inst.definition.etapes.length}`,
+          }
+        : { circuit: inst.definition.nom, etape: "Circuit achevé", role: "", position: `${inst.definition.etapes.length}/${inst.definition.etapes.length}` };
     }
   }
 
-  res.json(decomptes.map(d => ({ ...d, bpmn: bpmnMap[d.id] ?? null })));
+  res.json(decomptes.map((d) => ({
+    ...d,
+    etapeCourante: etapeParDecompte[d.id] ?? null,
+    nbPieces: d._count.documents,
+    // Un brouillon n'est pas encore dans le circuit : l'entreprise doit pouvoir
+    // l'envoyer, et l'écran doit le lui proposer.
+    peutEtreEnvoye: d.statut === "BROUILLON",
+  })));
 }));
 
 // ─── GET /api/portail/mes-garanties — cautions de mes marchés ─────────────────
