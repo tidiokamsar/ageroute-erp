@@ -66,23 +66,25 @@ Les qualités exercées ci-dessus sont **déduites du rôle** et doivent être c
 figureront dans la preuve de signature et seront lues dix ans plus tard. Si l'intitulé exact du
 poste diffère, c'est lui qui doit être inscrit.
 
-### ⚠️ Point à trancher — deux titulaires pour le rôle DG
+### ✅ Point tranché — Abdoulaye DABO n'est pas Directeur Général
 
-Moïse SIDIBÉ est désigné **DG**. Or `abdoulaye.dabo@ageroute.gov.gn` porte déjà ce rôle et
-constitue l'un des trois seuls comptes nominatifs existants.
+Le rôle DG avait momentanément deux titulaires. La Direction a tranché le 20/08/2026 :
+**Abdoulaye DABO est Directeur de la Structuration Financière.**
 
-Trois lectures possibles, qui n'ont pas les mêmes conséquences :
+Aucun des 14 rôles existants ne correspondait. Un rôle **`DSF`** a été créé, **hors circuit** —
+le circuit de validation en service n'a pas été touché :
 
-| Lecture | Conséquence |
-|---|---|
-| Moïse SIDIBÉ est le Directeur Général en fonction | le compte d'Abdoulaye DABO doit être désactivé ou reversé vers un autre rôle |
-| Abdoulaye DABO reste Directeur Général | le rôle de Moïse SIDIBÉ est à corriger |
-| Les deux exercent, l'un par intérim ou délégation | l'intérim doit être formalisé comme une **délégation datée**, pas comme un second titulaire |
+- il ne figure dans **aucune** des 11 définitions de workflow ni dans le circuit financier ;
+- il n'est pas soumis au périmètre d'affectation ;
+- **aucune route ne l'autorise à valider, signer ou payer** ;
+- modules ouverts en consultation : tableau de bord, BI, projets, marchés, décomptes, garanties,
+  financements, paiements, circuit de paiement ;
+- modules fermés : Mes tâches, journal d'audit, utilisateurs, paramétrage.
 
-**Ce point doit être tranché avant création du compte.** Deux titulaires simultanés du rôle DG
-signifieraient deux personnes habilitées à ordonnancer le même décompte — exactement ce que la
-séparation des tâches doit empêcher. Le système ne saurait pas laquelle est légitime, et la
-preuve de signature non plus.
+`abdoulaye.dabo@ageroute.gov.gn` porte désormais le rôle `DSF` et la qualité « Directeur de la
+Structuration Financière ». Le rôle DG revient à Moïse SIDIBÉ seul.
+
+Un test automatique échoue si `DSF` entre un jour dans une définition de circuit.
 
 ---
 

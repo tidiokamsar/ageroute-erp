@@ -32,14 +32,12 @@ Cinq éléments, et cinq seulement, bloquent le démarrage. Aucun n'est techniqu
 | D3 | Qualité exercée des trois personnes | **Déduite du rôle, à confirmer** |
 | D4 | **Membres des groupes MISSION, TECHNIQUE et UGP** — personne n'y est désigné | **Ouvert** |
 | D5 | **Personnes habilitées** côté entreprises et organismes externes | **Ouvert** |
-| **D6** | **Deux titulaires pour le rôle DG** — Moïse SIDIBÉ désigné, Abdoulaye DABO déjà en place | **Ouvert — bloquant pour l'étape 2** |
+| D6 | Deux titulaires pour le rôle DG | **Levé le 20/08/2026** — Abdoulaye DABO est Directeur de la Structuration Financière, rôle `DSF` créé hors circuit |
 
-D1 et D2 sont levés. **D6 est apparu à leur place** et bloque la création du compte de Moïse
-SIDIBÉ : créer un second DG sans trancher reviendrait à habiliter deux personnes à ordonnancer le
-même décompte. Les comptes de Famo MANSARÉ (DAF) et de Moussa CAMARA (DGA) ne sont pas concernés
-— aucun titulaire nominatif n'existe pour ces deux rôles.
+D1, D2 et D6 sont levés. Le rôle DG revient à Moïse SIDIBÉ seul.
 
-D4 est indispensable **avant la bascule**, pas avant la création.
+D4 est indispensable **avant la bascule**, pas avant la création. C'est aujourd'hui le principal
+point ouvert : MISSION et TECHNIQUE sont les deux premières étapes des onze circuits.
 
 ---
 
@@ -119,14 +117,15 @@ son groupe compte **au moins un signataire désigné, avec un compte personnel a
 | Groupe | Signataire désigné | Peut basculer ? |
 |---|---|---|
 | DMC | Mohamed lamine Keita | oui |
-| DAF | Famo MANSARÉ | après étape 2 |
-| DGA | Moussa CAMARA | après étapes 2 et 4 |
-| DG | Moïse SIDIBÉ **ou** Abdoulaye DABO | **non — D6 à trancher** |
+| DAF | Famo MANSARÉ | oui — compte créé |
+| DG | Moïse SIDIBÉ | oui — compte créé |
+| DGA | Moussa CAMARA | après création du rôle `DGA` |
 | MISSION | — | **non** |
 | TECHNIQUE | — | **non** |
 | UGP | — | **non** |
+| DSF | *sans objet* — rôle de consultation, ne signe pas | sans objet |
 
-Quatre groupes sur sept ne peuvent pas basculer. La bascule est donc **groupe par groupe**,
+Trois groupes sur sept ne peuvent pas basculer. La bascule est donc **groupe par groupe**,
 jamais globale. Un basculement global le même jour arrêterait la validation des décomptes.
 
 Le cas du DG mérite attention : c'est la **dernière étape interne** des onze circuits. Un blocage
@@ -181,7 +180,8 @@ répétition sur copie restaurée n'est pas une formalité.
 |---|---|---|---|---|
 | 1 — Sauvegarde et copie | sans objet | 20/08/2026 | **20/08/2026** — 317 Ko, `a269db33…`, copie dans `F:\ERP-sauvegarde\dumps\` | Claude |
 | 2 — Comptes personnels | sans objet | 20/08/2026 | **20/08/2026 — 2 sur 3** : Moïse SIDIBÉ (DG) et Famo MANSARÉ (DAF), créés **dormants**. Moussa CAMARA attend le rôle `DGA`. | Claude |
-| 3 — Qualités exercées | sans objet | 20/08/2026 | **20/08/2026** — renseignées sur les deux comptes créés. Reste à faire sur les 20 comptes préexistants. | Claude |
+| 3 — Qualités exercées | sans objet | 20/08/2026 | **20/08/2026** — renseignées sur les deux comptes créés et sur Abdoulaye DABO. Reste à faire sur les 19 autres. | Claude |
+| 3 bis — Rôle `DSF` *(non réversible)* | **20/08/2026** — conteneur jetable, dump restauré, migration jouée deux fois pour prouver l'idempotence | 20/08/2026 | **20/08/2026** — `ALTER TYPE ADD VALUE`, puis Abdoulaye DABO passé en `DSF`. Commit `fd06422`. | Claude |
 | 4 — Rôle DGA *(non réversible)* | | | | |
 | 5 — Versionnement des circuits | | | | |
 | 6 — Étape DGA dans les 11 circuits | | | | |
