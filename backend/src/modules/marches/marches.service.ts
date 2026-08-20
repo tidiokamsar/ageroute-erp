@@ -37,7 +37,36 @@ export const marchesService = {
       }),
       prisma.marche.count({ where }),
     ]);
-    return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
+
+    // Cumul décompté par marché — alimente la colonne « Consommé » de la liste.
+    // Elle affichait 0 % pour tous les marchés depuis toujours : l'écran passait
+    // une valeur écrite en dur, faute de recevoir le cumul. Les décomptes
+    // existaient pourtant (28 %, 32 %, 16 % sur les trois marchés actifs au
+    // 20/08/2026), si bien que la Direction lisait une consommation nulle sur
+    // des marchés à un tiers d'exécution.
+    //
+    // Un groupBy plutôt qu'un `_sum` par ligne : une seule requête pour toute
+    // la page, quel que soit le nombre de marchés affichés.
+    const cumuls = data.length === 0 ? [] : await prisma.decompte.groupBy({
+      by: ["marcheId"],
+      where: { marcheId: { in: data.map((m) => m.id) }, deletedAt: null },
+      _sum: { netAPayer: true },
+    });
+    const parMarche = new Map(cumuls.map((c) => [c.marcheId, c._sum.netAPayer ?? 0n]));
+
+    const enrichi = data.map((m) => {
+      const cumul = parMarche.get(m.id) ?? 0n;
+      const reference = m.montantActualiseGnf ?? m.montantInitialGnf;
+      return {
+        ...m,
+        montantConsommeGnf: cumul,
+        // Pourcentage calculé en entier pour éviter tout flottant sur des
+        // montants en GNF ; deux décimales conservées.
+        tauxConsommation: reference > 0n ? Number((cumul * 10000n) / reference) / 100 : 0,
+      };
+    });
+
+    return { data: enrichi, total, page, pageSize, totalPages: Math.ceil(total / pageSize) || 1 };
   },
 
   async getById(id: string) {

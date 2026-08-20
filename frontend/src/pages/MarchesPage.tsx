@@ -46,6 +46,10 @@ interface Marche {
   projet?: { id: string; code: string; nom: string };
   lots?: Lot[];
   _count?: { decomptes: number; bpuArticles: number };
+  // Cumul des décomptes du marché et son taux, calculés par le serveur.
+  // Sans eux, la colonne « Consommé » affichait une valeur écrite en dur à 0.
+  montantConsommeGnf?: string;
+  tauxConsommation?: number;
   createdAt: string;
 }
 
@@ -610,7 +614,10 @@ export function MarchesPage() {
                   <td className="px-4 py-3"><FinancementBadge financement={m.financement}/></td>
                   <td className="px-4 py-3 font-mono text-sm font-semibold text-gray-800">{fmtGnf(m.montantInitialGnf)}</td>
                   <td className="px-4 py-3 w-32">
-                    <ProgressBar value={0} max={montant} />
+                    {/* La valeur etait ecrite en dur a 0 : la colonne affichait
+                        0 % pour tous les marches, y compris ceux a un tiers
+                        d'execution. Le cumul vient desormais du serveur. */}
+                    <ProgressBar value={Number(m.montantConsommeGnf ?? 0)} max={montant} />
                   </td>
                   <td className={`px-4 py-3 text-xs ${isRetard?"text-red-600 font-bold":""}`}>
                     {fmtDate(m.dateFinPrevue)}

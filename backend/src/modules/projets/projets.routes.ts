@@ -51,8 +51,35 @@ const projetCreateSchema = z.object({
 });
 
 const includeBase = {
-  _count: { select: { marches: true, decomptes: true, attachements: true, historique: true } },
+  _count: { select: { marches: true, historique: true } },
 };
+
+/**
+ * Décomptes et attachements rattachés à un projet.
+ *
+ * ⚠️ Les relations DIRECTES `Decompte.projetId` et `Attachement.projetId` ne sont
+ * jamais renseignées : les décomptes se créent depuis un marché, et rien ne
+ * recopie le projet du marché. Constaté le 20/08/2026 : 8 décomptes sur 8 et 8
+ * attachements sur 8 avec `projetId` à NULL, tandis que les 4 marchés portaient
+ * bien le leur. Les écrans Projet affichaient donc « 0 décompte, 0 attachement »
+ * et un avancement de 0 % sur des projets qui en comptaient trois de chacun.
+ *
+ * On compte par la CHAÎNE projet -> marché -> décompte -> attachement, tout en
+ * acceptant le lien direct s'il venait à être renseigné : ainsi la correction ne
+ * dépend d'aucune reprise de données et ne peut pas se désynchroniser.
+ */
+function filtreDecomptesDuProjet(projetId: string) {
+  return {
+    deletedAt: null,
+    OR: [{ projetId }, { marche: { projetId } }],
+  };
+}
+
+function filtreAttachementsDuProjet(projetId: string) {
+  return {
+    OR: [{ projetId }, { decompte: { marche: { projetId } } }],
+  };
+}
 
 // GET /projets
 projetsRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
@@ -74,7 +101,15 @@ projetsRouter.get("/", async (req: Request, res: Response, next: NextFunction) =
       prisma.projet.findMany({ where, skip: (page-1)*pageSize, take: pageSize, orderBy: { createdAt: "desc" }, include: includeBase }),
       prisma.projet.count({ where }),
     ]);
-    res.json({ data, total, page, pageSize, totalPages: Math.ceil(total/pageSize)||1 });
+    // Comptages par la chaîne marché (voir filtreDecomptesDuProjet).
+    const enrichi = await Promise.all(data.map(async (p) => {
+      const [nbDecomptes, nbAttachements] = await Promise.all([
+        prisma.decompte.count({ where: filtreDecomptesDuProjet(p.id) }),
+        prisma.attachement.count({ where: filtreAttachementsDuProjet(p.id) }),
+      ]);
+      return { ...p, _count: { ...p._count, decomptes: nbDecomptes, attachements: nbAttachements } };
+    }));
+    res.json({ data: enrichi, total, page, pageSize, totalPages: Math.ceil(total/pageSize)||1 });
   } catch (err) { next(err); }
 });
 
@@ -115,21 +150,35 @@ projetsRouter.get("/:id", async (req: Request, res: Response, next: NextFunction
           include: { entreprise: { select: { raisonSociale: true } } },
           orderBy: { createdAt: "desc" },
         },
-        decomptes: {
-          where: { deletedAt: null },
-          select: { id: true, reference: true, statut: true, montantPeriodeHtGnf: true, montantTtcGnf: true, netAPayer: true, createdAt: true },
-          orderBy: { createdAt: "desc" },
-          take: 30,
-        },
-        attachements: {
-          select: { id: true, code: true, statut: true, montantHtGnf: true, montantTtcGnf: true, natureTravaux: true, createdAt: true },
-          orderBy: { createdAt: "desc" },
-          take: 30,
-        },
       },
     });
     if (!projet) throw new ApiError(404, "Projet introuvable");
-    res.json(projet);
+
+    // Décomptes et attachements par la CHAÎNE marché : les relations directes
+    // ne sont jamais renseignées (voir filtreDecomptesDuProjet).
+    const [decomptes, attachements, nbDecomptes, nbAttachements] = await Promise.all([
+      prisma.decompte.findMany({
+        where: filtreDecomptesDuProjet(projet.id),
+        select: { id: true, reference: true, statut: true, montantPeriodeHtGnf: true, montantTtcGnf: true, netAPayer: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+      }),
+      prisma.attachement.findMany({
+        where: filtreAttachementsDuProjet(projet.id),
+        select: { id: true, code: true, statut: true, montantHtGnf: true, montantTtcGnf: true, natureTravaux: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+      }),
+      prisma.decompte.count({ where: filtreDecomptesDuProjet(projet.id) }),
+      prisma.attachement.count({ where: filtreAttachementsDuProjet(projet.id) }),
+    ]);
+
+    res.json({
+      ...projet,
+      decomptes,
+      attachements,
+      _count: { ...projet._count, decomptes: nbDecomptes, attachements: nbAttachements },
+    });
   } catch (err) { next(err); }
 });
 
@@ -216,22 +265,29 @@ projetsRouter.get("/:id/kpis", async (req: Request, res: Response, next: NextFun
     const projet = await prisma.projet.findFirst({
       where: { id: req.params.id, deletedAt: null },
       include: {
-        _count: { select: { marches: true, decomptes: true, attachements: true } },
-        decomptes: { select: { statut: true, montantPeriodeHtGnf: true, netAPayer: true } },
+        _count: { select: { marches: true } },
         marches:   { select: { statut: true, montantInitialGnf: true }, where: { deletedAt: null } },
       },
     });
     if (!projet) throw new ApiError(404, "Projet introuvable");
 
+    // Décomptes par la CHAÎNE marché : la relation directe n'est jamais
+    // renseignée, si bien que l'avancement financier valait 0 % sur tous les
+    // projets, y compris ceux dont les marchés étaient à un tiers d'exécution.
+    const decomptesProjet = await prisma.decompte.findMany({
+      where: filtreDecomptesDuProjet(projet.id),
+      select: { statut: true, montantPeriodeHtGnf: true, netAPayer: true },
+    });
+
     const totalMarcheHt   = projet.marches.reduce((s, m) => s + Number(m.montantInitialGnf), 0);
-    const totalDecompteHt = projet.decomptes.reduce((s, d) => s + Number(d.montantPeriodeHtGnf), 0);
-    const totalPaye       = projet.decomptes.filter((d) => d.statut === "PAYE").reduce((s, d) => s + Number(d.netAPayer), 0);
+    const totalDecompteHt = decomptesProjet.reduce((s, d) => s + Number(d.montantPeriodeHtGnf), 0);
+    const totalPaye       = decomptesProjet.filter((d) => d.statut === "PAYE").reduce((s, d) => s + Number(d.netAPayer), 0);
     const budget          = Number(projet.budgetReviseGnf) || Number(projet.budgetInitialGnf) || 1;
     const avancFinancier  = budget > 0 ? Math.round(totalPaye / budget * 10000) / 100 : 0;
     const tauxDecaiss     = budget > 0 ? Math.round(Number(projet.montantPayeGnf) / budget * 10000) / 100 : 0;
 
     const dsm: Record<string, number> = {};
-    for (const d of projet.decomptes) dsm[d.statut] = (dsm[d.statut] ?? 0) + 1;
+    for (const d of decomptesProjet) dsm[d.statut] = (dsm[d.statut] ?? 0) + 1;
 
     let ecartJours: number | null = null;
     if (projet.datePrevFinTravaux) ecartJours = Math.floor((projet.datePrevFinTravaux.getTime() - Date.now()) / 86400000);
@@ -251,8 +307,8 @@ projetsRouter.get("/:id/kpis", async (req: Request, res: Response, next: NextFun
       scoreRisque:         projet.scoreRisque,
       niveauConfiance:     projet.niveauConfiance,
       nombreMarches:       projet._count.marches,
-      nombreDecomptes:     projet._count.decomptes,
-      nombreAttachements:  projet._count.attachements,
+      nombreDecomptes:     decomptesProjet.length,
+      nombreAttachements:  await prisma.attachement.count({ where: filtreAttachementsDuProjet(projet.id) }),
       decompteParStatut:   dsm,
       totalMarcheHtGnf:    totalMarcheHt.toString(),
       totalDecompteHtGnf:  totalDecompteHt.toString(),
