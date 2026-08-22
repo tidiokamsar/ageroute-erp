@@ -1171,7 +1171,7 @@ model CircuitFinancier {
   type          String                  // FER | BAILLEUR | BUDGET
   bailleurNom   String?                 // pour les circuits bailleur
   etapeActuelle Int                     @default(0)
-  statut        String                  @default("EN_COURS") // EN_COURS | PAYE | REJETE
+  statut        String                  @default("EN_COURS") // EN_COURS | TERMINE | REJETE
   dateCreation  DateTime                @default(now())
   etapes        CircuitFinancierEtape[]
 

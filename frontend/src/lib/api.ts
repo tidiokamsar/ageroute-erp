@@ -49,6 +49,11 @@ export function parseApiError(err: unknown): string {
  */
 export function fmtGnf(val: string | number | bigint | null | undefined): string {
   if (val == null) return "—";
-  const nombre = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(Number(val));
-  return `${nombre.replace(/[    ]/g, " ")} GNF`;
+  const valeur = typeof val === "string" && /^-?\d+$/.test(val)
+    ? BigInt(val)
+    : typeof val === "bigint"
+      ? val
+      : Number(val);
+  const nombre = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(valeur);
+  return nombre.replace(/[    ]/g, " ") + " GNF";
 }

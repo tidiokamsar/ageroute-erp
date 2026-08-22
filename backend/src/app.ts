@@ -98,8 +98,8 @@ export function createApp() {
   // ─── Contrôle d'accès par module (override administrateur, §P0-4 AGENTS.md) ──
   // Piège documenté : requireAuth doit TOUJOURS précéder checkModuleAccess,
   // sinon req.user est indéfini et tout le monde reçoit 401.
-  // checkModuleAccess ne bloque que les retraits explicites (non régressif) ;
-  // le rôle continue de décider par défaut, l'ADMIN n'est jamais bloqué.
+  // checkModuleAccess applique la liste effective rôle + overrides et refuse
+  // par défaut tout module absent ; l'ADMIN n'est jamais bloqué.
   app.use("/api/entreprises", requireAuth, checkModuleAccess("entreprises"), entreprisesRouter);
   app.use("/api/marches", requireAuth, checkModuleAccess("marches"), marchesRouter);
   app.use("/api/marches/:marcheId/bpu", requireAuth, checkModuleAccess("marches"), bpuRouter);
