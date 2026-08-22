@@ -156,8 +156,20 @@ signatureAuditRouter.post("/", async (req: Request, res: Response, next: NextFun
     let sig: SigSignature | null = null;
     if (signerUserId || signerRole) {
       const targetUserId = signerUserId ?? req.user.id;
-      const targetRole = signerRole ?? req.user.role;
-      const signerUser = await prisma.user.findUnique({ where: { id: targetUserId }, select: { nomComplet: true } });
+      // Le rôle du signataire est DÉRIVÉ DU SERVEUR, jamais du corps de la
+      // requête. L'ancienne version acceptait `signerRole` tel que fourni par le
+      // client : n'importe quel appelant pouvait attribuer une signature « DG »
+      // à un compte qui ne l'est pas — attribution d'autorité falsifiable,
+      // constat bloquant de la revue du 22/08/2026 et principe n°5 de l'audit
+      // signature. `signerRole` reste accepté pour compatibilité, mais il est
+      // ignoré : seul le rôle enregistré du compte désigné fait foi.
+      const signerUser = await prisma.user.findFirst({ where: { id: targetUserId, actif: true }, select: { nomComplet: true, role: true } });
+      if (!signerUser) throw new ApiError(404, "Signataire introuvable ou inactif");
+      const targetRole = signerUser.role;
+      if (signerRole && signerRole !== targetRole) {
+        await logAudit({ userId: req.user.id, action: "REJECT", entityType: "SignatureObject", entityId: obj.id,
+          after: { motif: "roleClientIgnore", roleDemande: signerRole, roleRetenu: targetRole, signataire: targetUserId } });
+      }
 
       [sig] = await prisma.$queryRaw<SigSignature[]>`
         INSERT INTO sig_signatures (sig_object_id, signer_user_id, signer_role, signer_nom, signature_method)

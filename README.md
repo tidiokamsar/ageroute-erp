@@ -41,8 +41,8 @@ frontend/
     pages/               une page par module + portail entreprise
     components/          layout (Sidebar, GlobalSearch), ui (Modal, ConfirmDialog, SecureFile…)
     lib/                 api (JWT + refresh), secureFile (URL signées), auth
-deploy.sh                déploiement serveur (pg_dump auto, SQL via psql)
-PROMPT-DEPLOIEMENT-*.md  runbooks de déploiement (standard / environnement restreint)
+DEPLOIEMENT.md           PROCÉDURE CANONIQUE de déploiement — remplace deploy.sh (retiré le 22/08/2026)
+PROMPT-DEPLOIEMENT-*.md  runbooks historiques, conservés pour mémoire — ne plus suivre
 ```
 
 ## Démarrage (développement)

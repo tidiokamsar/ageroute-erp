@@ -18,7 +18,7 @@ circuitFinancierRouter.use(requireAuth);
 // F12 — définitions unifiées : voir lib/circuit-definitions.ts
 import { etapesCircuitFinancier, type EtapeCircuit } from "../../lib/circuit-definitions";
 import { roleAutorise } from "../../lib/roles-circuit";
-import { chargerRegles } from "../../lib/regles";
+import { chargerRegles } from "../../lib/regles";
 import { filtreParDecompte } from "../../lib/perimetre";
 function etapesPourFinancement(financement: string, bailleurNom?: string): EtapeCircuit[] {
   return etapesCircuitFinancier(financement);
@@ -156,6 +156,60 @@ circuitFinancierRouter.get("/decompte/:decompteId", async (req: Request, res: Re
 });
 
 // Tous les circuits, avec filtre de statut optionnel (tableau de bord DAF/DG)
+/**
+ * Deux routes appelées par l'écran « Circuit financier » (FinancierPage) avec
+ * un rafraîchissement toutes les 30 s, et qui N'EXISTAIENT PAS côté serveur :
+ * l'écran répondait 404 en silence, les compteurs restaient à zéro et la liste
+ * des décomptes validés DG en attente de circuit était toujours vide.
+ * Constat « routes fantômes » de la revue du 22/08/2026.
+ *
+ * Déclarées AVANT `GET /` et `GET /decompte/:id` ; leurs premiers segments
+ * littéraux (`stats`, `pending`) ne collisionnent avec aucune route paramétrée.
+ */
+circuitFinancierRouter.get("/stats/daf", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const [enCoursCircuit, terminesCircuit, paiementsValides, paiementsEnAttente, montantPaye] = await Promise.all([
+      prisma.circuitFinancier.count({ where: { statut: "EN_COURS" } }),
+      prisma.circuitFinancier.count({ where: { statut: "TERMINE" } }),
+      prisma.paiement.count({ where: { deletedAt: null, statut: "EXECUTE" } }),
+      prisma.paiement.count({ where: { deletedAt: null, statut: { in: ["EN_ATTENTE", "ORDONNE"] } } }),
+      prisma.paiement.aggregate({ where: { deletedAt: null, statut: "EXECUTE" }, _sum: { montantGnf: true } }),
+    ]);
+    res.json({
+      enCoursCircuit,
+      terminesCircuit,
+      paiementsValides,
+      paiementsEnAttente,
+      // BigInt sérialisé en chaîne par le patch global — jamais converti en Number.
+      montantPayeGnf: (montantPaye._sum.montantGnf ?? 0n).toString(),
+    });
+  } catch (err) { next(err); }
+});
+
+circuitFinancierRouter.get("/pending", async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Décomptes validés par la DG dont le circuit financier n'a pas été ouvert.
+    const decomptes = await prisma.decompte.findMany({
+      where: { deletedAt: null, statut: "VALIDE_DG", circuitFinancier: null },
+      select: {
+        id: true, reference: true, netAPayer: true,
+        marche: { select: { intitule: true, financement: true } },
+        entreprise: { select: { raisonSociale: true } },
+      },
+      orderBy: { updatedAt: "asc" },
+    });
+    // Forme plate attendue par l'écran (marche_intitule, entreprise, financement).
+    res.json(decomptes.map((d) => ({
+      id: d.id,
+      reference: d.reference,
+      netAPayer: d.netAPayer.toString(),
+      marche_intitule: d.marche.intitule,
+      financement: d.marche.financement,
+      entreprise: d.entreprise.raisonSociale,
+    })));
+  } catch (err) { next(err); }
+});
+
 circuitFinancierRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { statut } = z.object({ statut: z.enum(["EN_COURS", "TERMINE", "REJETE"]).optional() }).parse(req.query);

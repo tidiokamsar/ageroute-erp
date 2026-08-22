@@ -74,10 +74,29 @@ paiementsRouter.delete("/:id", requireRole("ADMIN"), async (req: Request, res: R
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
     // §3.4 AGENTS.md — soft delete uniquement, avec trace de l'état avant suppression
-    const before = await prisma.paiement.findUnique({ where: { id: req.params.id } });
+    const before = await prisma.paiement.findFirst({ where: { id: req.params.id, deletedAt: null } });
     if (!before) throw new ApiError(404, "Paiement introuvable");
-    await prisma.paiement.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
-    await logAudit({ userId: req.user.id, action: "DELETE", entityType: "Paiement", entityId: req.params.id, before });
+
+    // Un paiement CONFIRMÉ par la banque n'est plus supprimable — revue du
+    // 22/08/2026. Le supprimer laissait le décompte PAYE tandis que le paiement
+    // disparaissait des cumuls : le système affirmait un règlement dont il
+    // n'avait plus la trace. Une erreur bancaire se corrige par une
+    // contrepassation motivée (écriture inverse, append-only), jamais par
+    // l'effacement de la preuve.
+    if (before.statut === "EXECUTE" || before.confirmeAt) {
+      throw new ApiError(
+        409,
+        "Paiement confirmé par la banque : suppression interdite. Enregistrez une contrepassation motivée (paiement inverse) plutôt que d'effacer la preuve du règlement.",
+      );
+    }
+
+    // Suppression et audit dans la même transaction : l'ancienne version
+    // écrivait l'audit après coup — une panne entre les deux laissait un
+    // paiement effacé sans aucune trace de qui l'avait fait.
+    await prisma.$transaction(async (tx) => {
+      await tx.paiement.update({ where: { id: req.params.id }, data: { deletedAt: new Date() } });
+      await logAudit({ userId: req.user!.id, action: "DELETE", entityType: "Paiement", entityId: req.params.id, before, tx });
+    });
     res.status(204).send();
   } catch (err) { next(err); }
 });
