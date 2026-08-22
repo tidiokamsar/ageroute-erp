@@ -100,11 +100,25 @@ workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response
     const existingInstance = await prisma.workflowInstance.findFirst({ where: { decompteId: decompte.id } });
     if (existingInstance) throw new ApiError(409, "Une instance de workflow existe déjà pour ce décompte");
 
-    const instance = await prisma.workflowInstance.create({
-      data: { definitionId: wfDef.id, decompteId: decompte.id, etapeActuelle: 0, statut: "EN_COURS" },
+    // Soumission ATOMIQUE, et TRACÉE comme une action de circuit.
+    // Constat A2 de la revue du 20/08/2026 : la soumission n'écrivait ni dans
+    // workflow_actions ni dans les validations — le soumetteur était donc
+    // INVISIBLE pour RG9, et « soumettre puis valider la 1re étape » passait
+    // sans obstacle. L'action « SOUMISSION » rattachée à la première étape
+    // rend le soumetteur opposable à la séparation des tâches.
+    const instance = await prisma.$transaction(async (tx) => {
+      const inst = await tx.workflowInstance.create({
+        data: { definitionId: wfDef.id, decompteId: decompte.id, etapeActuelle: 0, statut: "EN_COURS" },
+      });
+      if (wfDef.etapes.length > 0) {
+        await tx.workflowAction.create({
+          data: { instanceId: inst.id, etapeId: wfDef.etapes[0].id, userId: req.user!.id, decision: "SOUMISSION", commentaire: "Dépôt du décompte au circuit" },
+        });
+      }
+      await tx.decompte.update({ where: { id: decompte.id }, data: { statut: "DEPOSE" } });
+      await logAudit({ userId: req.user!.id, action: "UPDATE", entityType: "Decompte", entityId: decompte.id, after: { statut: "DEPOSE", wfInstanceId: inst.id }, tx });
+      return inst;
     });
-    await prisma.decompte.update({ where: { id: decompte.id }, data: { statut: "DEPOSE" } });
-    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "Decompte", entityId: decompte.id, after: { statut: "DEPOSE", wfInstanceId: instance.id } });
 
     if (wfDef.etapes.length > 0) {
       await notifyWorkflowStep(wfDef.etapes[0], decompte.reference, instance.id).catch(() => {});
@@ -185,10 +199,62 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
     });
     if (!rg9.autorise) throw new ApiError(403, rg9.motif!);
 
-    // Enregistrer l'action ET, pour les décisions engageantes, sa PROJECTION
-    // dans l'onglet Validations — dans la même transaction. C'est ce couplage
-    // qui manquait : l'onglet Workflow avançait sans que l'onglet Validations
-    // en sache rien, et réciproquement.
+    // ── Décider des effets AVANT d'écrire quoi que ce soit ────────────────────
+    // Constat A1 de la revue du 20/08/2026 : la transaction ne couvrait que
+    // l'action et sa projection ; le statut du décompte, l'avancement d'étape
+    // et l'audit étaient écrits APRÈS, hors transaction. Une panne entre les
+    // deux recréait exactement la divergence que ce moteur devait éliminer :
+    // l'onglet Validations disait « approuvé », le circuit restait sur place.
+    //
+    // Ici, tous les effets sont calculés d'abord (pur, sans écriture), puis
+    // écrits dans UNE SEULE $transaction : action, projection, instance,
+    // statut du décompte, audit. Seule la notification sort de l'atomicité —
+    // elle est rejouable, pas la cohérence.
+    const prochainIndex = instance.etapeActuelle + 1;
+    const dernierEtape = prochainIndex >= instance.definition.etapes.length;
+    const prochaineEtape = dernierEtape ? null : instance.definition.etapes[prochainIndex];
+
+    let majInstance: { statut?: "APPROUVE" | "REJETE"; etapeActuelle?: number } | null = null;
+    let majDecompte: Record<string, unknown> | null = null;
+    let reponse: Record<string, unknown>;
+
+    switch (decision) {
+      case "REJETE":
+        majInstance = { statut: "REJETE" };
+        majDecompte = { statut: "REJETE" };
+        reponse = { statut: "REJETE", message: `Décompte rejeté à l'étape "${etapeCourante.nom}"` };
+        break;
+      case "DEMANDE_CORRECTION":
+        majDecompte = { statut: "REJETE" };
+        reponse = { statut: "CORRECTION_REQUISE", message: `Correction demandée par ${etapeCourante.nom} : ${commentaire}` };
+        break;
+      case "DEMANDE_COMPLEMENT":
+        majDecompte = { statut: "EN_VALIDATION" };
+        reponse = { statut: "COMPLEMENT_REQUIS", message: `Complément demandé : ${commentaire}` };
+        break;
+      case "SUSPENDRE":
+        majDecompte = { traitementSuspendu: true };
+        reponse = { statut: "SUSPENDU", message: `Traitement suspendu par la DG : ${commentaire}` };
+        break;
+      case "AUDIT":
+        majDecompte = { auditRequis: true };
+        reponse = { statut: "AUDIT_REQUIS", message: `Audit complémentaire demandé : ${commentaire}` };
+        break;
+      default: // APPROUVE
+        if (dernierEtape) {
+          majInstance = { statut: "APPROUVE", etapeActuelle: prochainIndex };
+          majDecompte = { statut: "VALIDE_DG" };
+          reponse = { statut: "VALIDE_DG", message: "Décompte validé par la Direction Générale — circuit financier déclenché" };
+        } else {
+          // Table de correspondance UNIQUE (lib/moteur-validation.ts) — elle
+          // vivait en deux exemplaires divergents avant l'unification.
+          const prochainStatut = statutPourRoleEtape(prochaineEtape!.roleRequis);
+          majInstance = { etapeActuelle: prochainIndex };
+          majDecompte = { statut: prochainStatut };
+          reponse = { statut: prochainStatut, etapeActuelle: prochainIndex, prochaineEtape: prochaineEtape!.nom, roleRequis: prochaineEtape!.roleRequis };
+        }
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.workflowAction.create({
         data: { instanceId: instance.id, etapeId: etapeCourante.id, userId: req.user!.id, decision, commentaire },
@@ -206,46 +272,25 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
           },
         });
       }
+      if (majInstance) {
+        await tx.workflowInstance.update({ where: { id: instance.id }, data: majInstance });
+      }
+      if (majDecompte && instance.decompteId) {
+        await tx.decompte.update({ where: { id: instance.decompteId }, data: majDecompte });
+      }
+      await logAudit({
+        userId: req.user!.id, action: "UPDATE", entityType: "WorkflowInstance", entityId: instance.id,
+        after: { decision, etape: etapeCourante.nom, commentaire }, tx,
+      });
     });
-    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "WorkflowInstance", entityId: instance.id, after: { decision, etape: etapeCourante.nom, commentaire } });
 
-    // ── Traitement selon la décision ──────────────────────────────────────────
-
-    if (decision === "REJETE") {
-      await prisma.workflowInstance.update({ where: { id: instance.id }, data: { statut: "REJETE" } });
-      await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: "REJETE" } });
-      return res.json({ statut: "REJETE", message: `Décompte rejeté à l'étape "${etapeCourante.nom}"` });
-    }
-
-    if (decision === "DEMANDE_CORRECTION") {
-      await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: "REJETE" } });
-      return res.json({ statut: "CORRECTION_REQUISE", message: `Correction demandée par ${etapeCourante.nom} : ${commentaire}` });
-    }
-
-    if (decision === "DEMANDE_COMPLEMENT") {
-      await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: "EN_VALIDATION" } });
-      return res.json({ statut: "COMPLEMENT_REQUIS", message: `Complément demandé : ${commentaire}` });
-    }
-
-    if (decision === "SUSPENDRE") {
-      await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { traitementSuspendu: true } });
-      return res.json({ statut: "SUSPENDU", message: `Traitement suspendu par la DG : ${commentaire}` });
-    }
-
-    if (decision === "AUDIT") {
-      await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { auditRequis: true } });
-      return res.json({ statut: "AUDIT_REQUIS", message: `Audit complémentaire demandé : ${commentaire}` });
-    }
-
-    // APPROUVE → passer à l'étape suivante
-    const prochainIndex = instance.etapeActuelle + 1;
-    if (prochainIndex >= instance.definition.etapes.length) {
-      // Fin du circuit : VALIDE_DG puis circuit financier
-      await prisma.workflowInstance.update({ where: { id: instance.id }, data: { statut: "APPROUVE", etapeActuelle: prochainIndex } });
-      await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: "VALIDE_DG" } });
-      // Déclencher circuit financier automatiquement
+    // ── Effets NON transactionnels : rejouables, jamais garants de cohérence ──
+    if (decision === "APPROUVE" && dernierEtape && instance.decompteId) {
+      // Déclencher le circuit financier. Hors transaction à dessein : son échec
+      // laisse un décompte VALIDE_DG cohérent, relançable — alors que l'inclure
+      // ferait échouer la validation DG pour un problème du circuit aval.
       try {
-        const dec = await prisma.decompte.findUnique({ where: { id: instance.decompteId! }, include: { marche: true } });
+        const dec = await prisma.decompte.findUnique({ where: { id: instance.decompteId }, include: { marche: true } });
         if (dec && !await prisma.circuitFinancier.findUnique({ where: { decompteId: dec.id } })) {
           const fin = dec.marche.financement;
           const typeCircuit = fin === "FER" ? "FER" : fin === "BUDGET_NATIONAL" ? "BUDGET" : "BAILLEUR";
@@ -253,23 +298,13 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
           await prisma.circuitFinancier.create({ data: { decompteId: dec.id, type: typeCircuit, bailleurNom: dec.marche.bailleur ?? undefined, etapes: { create: etapesDefs } } });
           await prisma.decompte.update({ where: { id: dec.id }, data: { statut: "EN_CIRCUIT_FINANCIER" } });
         }
-      } catch (_) { /* non bloquant */ }
-      return res.json({ statut: "VALIDE_DG", message: "Décompte validé par la Direction Générale — circuit financier déclenché" });
+      } catch (_) { /* non bloquant — relançable */ }
+    }
+    if (decision === "APPROUVE" && prochaineEtape) {
+      await notifyWorkflowStep(prochaineEtape, instance.decompte?.reference ?? "", instance.id).catch(() => {});
     }
 
-    // Avancer à l'étape suivante
-    await prisma.workflowInstance.update({ where: { id: instance.id }, data: { etapeActuelle: prochainIndex } });
-    const prochaineEtape = instance.definition.etapes[prochainIndex];
-
-    // Table de correspondance UNIQUE (lib/moteur-validation.ts). Elle vivait
-    // auparavant en deux exemplaires divergents : ici, et dans la route
-    // validations-avancees — d'où deux statuts possibles pour la même étape.
-    const prochainStatut = statutPourRoleEtape(prochaineEtape.roleRequis);
-    await prisma.decompte.update({ where: { id: instance.decompteId! }, data: { statut: prochainStatut } });
-
-    await notifyWorkflowStep(prochaineEtape, instance.decompte?.reference ?? "", instance.id).catch(() => {});
-
-    res.json({ statut: prochainStatut, etapeActuelle: prochainIndex, prochaineEtape: prochaineEtape.nom, roleRequis: prochaineEtape.roleRequis });
+    res.json(reponse);
   } catch (err) { next(err); }
 });
 

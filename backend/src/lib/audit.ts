@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { serializeForJson } from "./bigint";
-import type { AuditAction } from "@prisma/client";
+import type { AuditAction, Prisma } from "@prisma/client";
 
 export async function logAudit(params: {
   userId?: string;
@@ -10,8 +10,16 @@ export async function logAudit(params: {
   before?: unknown;
   after?: unknown;
   ipAddress?: string;
+  /**
+   * Client transactionnel optionnel. Quand une décision métier et son audit
+   * doivent réussir ou échouer ENSEMBLE (constat de la revue du 20/08/2026 :
+   * « une action sensible sans audit » après panne intermédiaire), l'appelant
+   * passe le `tx` de sa `$transaction` — l'entrée d'audit rejoint alors
+   * l'atomicité de l'action. Sans `tx`, comportement inchangé.
+   */
+  tx?: Prisma.TransactionClient;
 }) {
-  await prisma.auditLog.create({
+  await (params.tx ?? prisma).auditLog.create({
     data: {
       userId: params.userId,
       action: params.action,

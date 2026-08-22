@@ -2,6 +2,7 @@ import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { assertEntrepriseConforme } from "../conformite/conformite.service";
+import { motifStatutMarche } from "../../lib/eligibilite-depot";
 
 // §4 CDC — champs marché complets pour affichage référentiel
 const marcheInclude = {
@@ -211,7 +212,13 @@ export const decomptesService = {
       include: { entreprise: true },
     });
     if (!marche) throw new ApiError(404, "Marché introuvable");
-    if (marche.statut !== "ACTIF") throw new ApiError(400, `Décompte impossible : marché "${marche.statut}"`);
+    // ⚠️ `ACTIF` est un alias historique : AUCUN marché ne le porte en base
+    // (trois EN_EXECUTION, un SIGNE au 20/08/2026). L'ancien test
+    // `statut !== "ACTIF"` rendait la création de décompte impossible sur
+    // 100 % des marchés réels — les décomptes existants venaient du script de
+    // peuplement, ce qui a masqué le défaut. lib/eligibilite-depot.ts fait foi.
+    const motifMarche = motifStatutMarche(marche.statut);
+    if (motifMarche) throw new ApiError(400, `Décompte impossible — ${motifMarche}`);
 
     const entreprise = await prisma.entreprise.findUnique({ where: { id: data.entrepriseId as string } });
     if (!entreprise) throw new ApiError(404, "Entreprise introuvable");
@@ -291,7 +298,9 @@ export const decomptesService = {
   },
 
   async update(id: string, data: Record<string, unknown>, userId: string) {
-    const before = await prisma.decompte.findUnique({ where: { id }, include: { marche: true } });
+    // findFirst + deletedAt: un décompte supprimé (suppression logique) restait
+    // modifiable par son identifiant — constat C3 de la revue du 20/08/2026.
+    const before = await prisma.decompte.findFirst({ where: { id, deletedAt: null }, include: { marche: true } });
     if (!before) throw new ApiError(404, "Décompte introuvable");
     if (before.statut === "PAYE") throw new ApiError(400, "Décompte payé, modification impossible");
     const { result: calculated, snapshot } = await calculerDecompte({
@@ -349,13 +358,9 @@ export const decomptesService = {
     return controles;
   },
 
-  async changeStatut(id: string, statut: string, userId: string) {
-    const before = await prisma.decompte.findUnique({ where: { id } });
-    if (!before) throw new ApiError(404, "Décompte introuvable");
-    const updated = await prisma.decompte.update({ where: { id }, data: { statut: statut as never } });
-    await logAudit({ userId, action: "APPROVE", entityType: "Decompte", entityId: id, before, after: updated });
-    return updated;
-  },
+  // changeStatut a été retiré le 20/08/2026 : le statut d'un décompte est une
+  // donnée dérivée du circuit de validation, jamais une entrée. Voir la route
+  // POST /:id/statut (410) pour le contexte complet.
 
   async remove(id: string, userId: string) {
     const before = await prisma.decompte.findUnique({ where: { id } });
