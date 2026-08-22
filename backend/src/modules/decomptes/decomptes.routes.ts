@@ -16,6 +16,39 @@ import { decompteDocumentsRouter } from "./decomptes.documents.routes";
 export const decomptesRouter = Router();
 decomptesRouter.use(requireAuth);
 
+/**
+ * Garde de périmètre sur TOUTE route désignant un décompte par :id.
+ *
+ * Constat C2 de la revue du 20/08/2026 : les listes filtraient par affectation,
+ * mais les 21 routes objet (GET /:id, PUT /:id, POST /:id/lignes…) ne
+ * vérifiaient que l'isolation ENTREPRISE — jamais l'affectation des rôles à
+ * périmètre. Un agent MISSION affecté au marché A pouvait lire et modifier un
+ * décompte du marché B par son identifiant (IDOR).
+ *
+ * `router.param` s'exécute pour chaque route portant :id — y compris celles
+ * qui seront ajoutées plus tard : impossible d'oublier la garde sur une
+ * nouvelle route. Les routes littérales (/, /stats) sont déclarées avant et ne
+ * passent pas ici. Refus en 404, jamais 403 : un 403 confirmerait l'existence
+ * du dossier à quelqu'un qui n'a pas à la connaître.
+ */
+decomptesRouter.param("id", async (req: Request, _res: Response, next: NextFunction, id: string) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Non authentifié");
+    const d = await (await import("../../lib/prisma")).prisma.decompte.findFirst({
+      where: { id, deletedAt: null },
+      select: { marcheId: true, entrepriseId: true },
+    });
+    if (!d) throw new ApiError(404, "Décompte introuvable");
+    if (req.user.role === "ENTREPRISE") {
+      if (d.entrepriseId !== (await entrepriseIdOf(req.user.id))) throw new ApiError(404, "Décompte introuvable");
+    } else {
+      const affectes = await getMarchesAffectes(req.user.id, req.user.role);
+      if (affectes !== null && !affectes.includes(d.marcheId)) throw new ApiError(404, "Décompte introuvable");
+    }
+    next();
+  } catch (err) { next(err); }
+});
+
 // Pièces justificatives réelles (fichiers) — voir decomptes.documents.routes.ts
 decomptesRouter.use("/:id/documents", decompteDocumentsRouter);
 
@@ -132,11 +165,34 @@ decomptesRouter.patch("/:id/visa-financier", requireRole("ADMIN","DAF"), async (
   } catch (err) { next(err); }
 });
 
+/**
+ * Mutation générique de statut — ROUTE RETIRÉE DU SERVICE le 20/08/2026.
+ *
+ * Elle permettait à six rôles de poser directement `VALIDE` ou `PAYE`, sans
+ * vérifier l'état source, le circuit ni les visas : ce seul endpoint annulait
+ * tout ce que le moteur de validation garantit (RG9, transaction, projection).
+ * Constat n°1 de la revue — un décompte pouvait passer de brouillon à payé.
+ *
+ * Le statut est désormais une DONNÉE DÉRIVÉE, jamais une entrée :
+ *   · le parcours passe par POST /api/workflow/:instanceId/action ;
+ *   · `PAYE` viendra du seul rapprochement des paiements confirmés.
+ * Aucun écran n'appelait cette route (vérifié) ; elle répond 410 plutôt que
+ * de disparaître en 404 muet, pour qu'un script resté dessus comprenne.
+ */
 decomptesRouter.post("/:id/statut", requireRole("ADMIN","DAF","DG","DMC","TECHNIQUE","UGP"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const { statut } = z.object({ statut: z.enum(["SOUMIS","EN_VALIDATION","VALIDE","REJETE","PAYE"]) }).parse(req.body);
-    res.json(await decomptesService.changeStatut(req.params.id, statut, req.user.id));
+    const instance = await (await import("../../lib/prisma")).prisma.workflowInstance.findFirst({
+      where: { decompteId: req.params.id, statut: "EN_COURS" },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    throw new ApiError(
+      410,
+      instance
+        ? `Route retirée du service : le statut d'un décompte n'est plus une entrée. Utilisez le circuit : POST /api/workflow/${instance.id}/action.`
+        : "Route retirée du service : le statut d'un décompte n'est plus une entrée. Soumettez d'abord le décompte au circuit : POST /api/workflow/soumettre/" + req.params.id + ".",
+    );
   } catch (err) { next(err); }
 });
 

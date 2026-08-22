@@ -335,13 +335,24 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
   });
   if (!definition) throw new ApiError(400, `Aucun circuit défini pour le financement ${decompte.marche.financement}.`);
 
-  const instance = await prisma.workflowInstance.create({
-    data: { definitionId: definition.id, decompteId: decompte.id, etapeActuelle: 0, statut: "EN_COURS" },
-  });
-  await prisma.decompte.update({ where: { id: decompte.id }, data: { statut: "DEPOSE" } });
-  await logAudit({
-    userId: req.user!.id, action: "UPDATE", entityType: "Decompte", entityId: decompte.id,
-    after: { statut: "DEPOSE", origine: "portail-entreprise", wfInstanceId: instance.id },
+  // Soumission ATOMIQUE et TRACÉE — même contrat que la porte interne
+  // (workflow.routes.ts) : l'action « SOUMISSION » rend le déposant visible
+  // pour RG9, et l'ensemble réussit ou échoue d'un bloc.
+  const instance = await prisma.$transaction(async (tx) => {
+    const inst = await tx.workflowInstance.create({
+      data: { definitionId: definition.id, decompteId: decompte.id, etapeActuelle: 0, statut: "EN_COURS" },
+    });
+    if (definition.etapes.length > 0) {
+      await tx.workflowAction.create({
+        data: { instanceId: inst.id, etapeId: definition.etapes[0].id, userId: req.user!.id, decision: "SOUMISSION", commentaire: "Dépôt du décompte par l'entreprise (portail)" },
+      });
+    }
+    await tx.decompte.update({ where: { id: decompte.id }, data: { statut: "DEPOSE" } });
+    await logAudit({
+      userId: req.user!.id, action: "UPDATE", entityType: "Decompte", entityId: decompte.id,
+      after: { statut: "DEPOSE", origine: "portail-entreprise", wfInstanceId: inst.id }, tx,
+    });
+    return inst;
   });
 
   // Notification du PREMIER intervenant — sans elle, le dossier attend que
