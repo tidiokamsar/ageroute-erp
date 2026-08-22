@@ -25,7 +25,12 @@ export const MODULES: ModuleDef[] = [
   { key: "delegations",  label: "Délégations d'intérim", roles: ["ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE"] },
   { key: "financier",    label: "Circuit paiement",      roles: ["ADMIN","DG","DAF","DSF","BUDGET","TRESOR","FER_AGT","BCRG"] },
   { key: "financements", label: "Financements",          roles: ["ADMIN","DG","DAF","DSF","BAILLEUR","BUDGET"] },
-  { key: "paiements",    label: "Paiements",             roles: ["ADMIN","DG","DAF","DSF","BUDGET","TRESOR"] },
+  // BCRG ajouté le 22/08/2026 : depuis le lot P0, la confirmation bancaire
+  // (POST /paiements/:id/confirmation-bcrg) est l'UNIQUE voie vers PAYE, et le
+  // contrôle par module est fail-closed. Sans cette ligne, la Banque Centrale
+  // était exclue du module qui porte sa seule action — et aucun décompte ne
+  // pouvait plus être payé hors ADMIN.
+  { key: "paiements",    label: "Paiements",             roles: ["ADMIN","DG","DAF","DSF","BUDGET","TRESOR","BCRG"] },
   { key: "routier",      label: "Référentiel routier",   roles: ["ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE","BAILLEUR"] },
   { key: "audit",        label: "Journal d'audit",       roles: ["ADMIN","DG","DAF","DMC","AUDITEUR"] },
   { key: "signatures",   label: "Signature électronique",roles: ["ADMIN","DG","DAF","DMC","UGP","MISSION"] },
