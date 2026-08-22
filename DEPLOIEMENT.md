@@ -116,7 +116,27 @@ comportement attendu est **observé**, pas quand `up -d` a rendu la main.
 Le code précédent est dans Git : refaire §2–§3 depuis le commit antérieur. Une migration SQL
 additive ne se retire pas ; c'est pourquoi §4 exige la répétition sur copie.
 
-## 7. Clore
+## 7. Preuves PostgreSQL — avant toute recette du circuit de paiement
+
+Les tests unitaires ne prouvent ni le verrou `FOR UPDATE` ni le rollback. Le fichier
+`backend/src/modules/paiements/paiements.service.pg.test.ts` le fait sur une **copie restaurée**
+(il est `skipped` sans `PG_TEST=1` et refuse toute URL ressemblant à la production).
+
+Le 22/08/2026, sa première exécution a révélé que `AuditAction.CONFIRM_BCRG` n'existait pas en
+base : la seule voie vers `PAYE` était cassée en production sans que rien ne l'indique.
+
+```bash
+# copie restaurée sur le réseau Compose (cf. §4b), puis image de test
+ssh gec 'cd $D/backend && docker build --target builder -t erp-backend-builder .'
+ssh gec 'docker run --rm --network erp-ageroute_erp-net -v $D/backend/src:/app/src:ro \
+  -e PG_TEST=1 -e DATABASE_URL="postgresql://rep:r@erp-repetition:5432/rep" \
+  -e JWT_SECRET="<32 caractères de test>" -e JWT_REFRESH_SECRET="<32 caractères de test>" -e NODE_ENV=test \
+  erp-backend-builder npx tsx --test src/modules/paiements/paiements.service.pg.test.ts'
+```
+
+Attendu : `# pass 3`. Le conteneur `erp-repetition` est supprimé ensuite.
+
+## 8. Clore
 
 Noter dans le message de commit ou le rapport : commit déployé, fichiers copiés, migrations
 appliquées, vérifications observées, et ce qui n'a **pas** pu être prouvé.
