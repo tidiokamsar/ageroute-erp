@@ -4,11 +4,8 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { prisma } from "../../lib/prisma";
-import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import PDFDocument from "pdfkit";
-import { v4 as uuidv4 } from "uuid";
-import crypto from "crypto";
 import { formaterMontantGnf } from "../../lib/montants";
 import { assertDecompteAutorise } from "../../lib/perimetre";
 
@@ -19,42 +16,20 @@ function fmtGnf(v: bigint | number): string {
   return formaterMontantGnf(v);
 }
 
-// Signer un décompte validé
-signatureRouter.post("/signer/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    // Un décompte hors périmètre est « introuvable » : servir son PDF
-    // contournerait le cloisonnement de la liste.
-    await assertDecompteAutorise(req, req.params.decompteId, async (id) => {
-      const d = await prisma.decompte.findUnique({ where: { id }, select: { marcheId: true } });
-      return d?.marcheId ?? null;
-    });
+// Compatibilité explicite : l'ancienne signature directe contournait le
+// workflow probant et ne doit plus effectuer aucune mutation.
+export function legacySignatureRetired(
+  _req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  next(new ApiError(
+    410,
+    "La signature directe a été retirée. Utilisez le workflow /api/signature-audit.",
+  ));
+}
 
-    if (!req.user) throw new ApiError(401, "Authentification requise");
-    const decompte = await prisma.decompte.findFirst({
-      where: { id: req.params.decompteId, deletedAt: null },
-      include: { marche: { include: { entreprise: true } }, entreprise: true },
-    });
-    if (!decompte) throw new ApiError(404, "Décompte introuvable");
-    if (decompte.statut !== "VALIDE") throw new ApiError(400, "Seul un décompte validé peut être signé");
-
-    const tokenSig = uuidv4();
-    const empreinte = crypto.createHash("sha256")
-      .update(`${decompte.id}|${decompte.reference}|${decompte.netAPayer}|${new Date().toISOString()}`)
-      .digest("hex");
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (prisma.decompte.update as any)({
-      where: { id: decompte.id },
-      data: { tokenSignature: tokenSig, empreinteNumerique: empreinte, dateSignature: new Date(), signataire: req.user.email },
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await logAudit({ userId: req.user.id, action: "SIGN" as any, entityType: "Decompte", entityId: decompte.id });
-
-    res.json({ tokenSignature: tokenSig, empreinteNumerique: empreinte, message: "Décompte signé électroniquement" });
-  } catch (err) { next(err); }
-});
-
+signatureRouter.post("/signer/:decompteId", legacySignatureRetired);
 // Générer le PDF officiel
 signatureRouter.get("/pdf/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
   try {

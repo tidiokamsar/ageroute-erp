@@ -576,12 +576,8 @@ decomptesRouter.post("/:id/payment-traces", requireRole("ADMIN","DAF","DG"), asy
         observations:     body.observations,
       },
     });
-    if (body.etape === "PAIEMENT_FINAL" && body.statut === "VALIDE") {
-      await prisma.decompte.update({
-        where: { id: req.params.id },
-        data: { statut: "PAYE" as never, datePaiement: new Date() },
-      });
-    }
+    // Une trace manuelle documente le circuit, mais ne prouve jamais le
+    // transfert bancaire et ne modifie donc pas le statut du décompte.
     res.status(201).json({ ...trace, montantGnf: trace.montantGnf?.toString() });
   } catch (err) { next(err); }
 });

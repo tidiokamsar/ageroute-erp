@@ -118,11 +118,15 @@ circuitFinancierRouter.post("/:circuitId/etape", async (req: Request, res: Respo
 
     const prochainIndex = circuit.etapeActuelle + 1;
     if (prochainIndex >= circuit.etapes.length) {
-      // Toutes les étapes validées → PAYE
-      await prisma.circuitFinancier.update({ where: { id: circuit.id }, data: { statut: "PAYE", etapeActuelle: prochainIndex } });
-      await prisma.decompte.update({ where: { id: circuit.decompteId }, data: { statut: "PAYE", datePaiement: new Date() } });
+      // Le circuit terminé prouve l'ordonnancement, pas le transfert bancaire.
+      await prisma.circuitFinancier.update({ where: { id: circuit.id }, data: { statut: "TERMINE", etapeActuelle: prochainIndex } });
+      await prisma.decompte.update({ where: { id: circuit.decompteId }, data: { statut: "ORDONNANCE" } });
       await logAudit({ userId: req.user.id, action: "APPROVE", entityType: "CircuitFinancier", entityId: circuit.id });
-      return res.json({ statut: "PAYE", message: "Paiement finalisé — toutes les étapes validées" });
+      return res.json({
+        statut: "TERMINE",
+        decompteStatut: "ORDONNANCE",
+        message: "Circuit financier terminé — décompte ordonnancé, en attente de confirmation bancaire",
+      });
     }
 
     // Enregistrer date de transmission pour la prochaine étape
@@ -151,12 +155,12 @@ circuitFinancierRouter.get("/decompte/:decompteId", async (req: Request, res: Re
   } catch (err) { next(err); }
 });
 
-// Tous les circuits en cours (tableau de bord DAF/DG)
+// Tous les circuits, avec filtre de statut optionnel (tableau de bord DAF/DG)
 circuitFinancierRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const statut = (req.query.statut as string) || "EN_COURS";
+    const { statut } = z.object({ statut: z.enum(["EN_COURS", "TERMINE", "REJETE"]).optional() }).parse(req.query);
     const circuits = await prisma.circuitFinancier.findMany({
-      where: { statut },
+      where: statut ? { statut } : undefined,
       include: {
         etapes: { orderBy: { ordre: "asc" } },
         decompte: { include: { marche: { select: { reference: true, intitule: true, financement: true } }, entreprise: { select: { raisonSociale: true } } } },

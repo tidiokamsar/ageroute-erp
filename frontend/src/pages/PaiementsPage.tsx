@@ -221,7 +221,7 @@ export function PaiementsPage() {
             }}>
               <option value="">— Sélectionner —</option>
               {(disponibles ?? []).map((d: {id:string;reference:string;entreprise?:string;netAPayer?:string}) => (
-                <option key={d.id} value={d.id}>{d.reference} — {d.entreprise} ({d.netAPayer ? Number(d.netAPayer).toLocaleString("fr-FR") : "?"} GNF)</option>
+                <option key={d.id} value={d.id}>{d.reference} — {d.entreprise} ({d.netAPayer ? fmtGnf(d.netAPayer) : "?"})</option>
               ))}
             </Select>
           </FormField>
@@ -260,7 +260,7 @@ export function PaiementsPage() {
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setModal(false)}>Annuler</Button>
             <Button className="bg-navy text-white" disabled={!form.decompteId || !form.montantGnf || createMut.isPending}
-              onClick={() => createMut.mutate({ ...form, montantGnf: Number(form.montantGnf) })}>
+              onClick={() => createMut.mutate({ ...form, montantGnf: form.montantGnf })}>
               Enregistrer
             </Button>
           </div>

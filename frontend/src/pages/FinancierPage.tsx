@@ -26,7 +26,7 @@ const TYPE_COLORS: Record<string,string> = {
   FER:"bg-blue-50 text-blue-700", BUDGET:"bg-purple-50 text-purple-700", BAILLEUR:"bg-green-50 text-green-700",
 };
 const STATUT_COLORS: Record<string,string> = {
-  EN_COURS:"bg-amber-50 text-amber-700", PAYE:"bg-green-50 text-green-700", REJETE:"bg-red-50 text-red-700",
+  EN_COURS:"bg-amber-50 text-amber-700", TERMINE:"bg-green-50 text-green-700", REJETE:"bg-red-50 text-red-700",
 };
 
 function EtapeStepper({ circuit }: { circuit: Circuit }) {
@@ -105,7 +105,7 @@ export function FinancierPage() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: "En cours",          value: dafStats?.enCoursCircuit ?? 0,         color: "text-amber-700",  bg: "bg-amber-50" },
-          { label: "Payés (circuit)",   value: dafStats?.payesCircuit ?? 0,           color: "text-green-700",  bg: "bg-green-50" },
+          { label: "Terminés / ordonnancés", value: dafStats?.terminesCircuit ?? dafStats?.payesCircuit ?? 0,           color: "text-green-700",  bg: "bg-green-50" },
           { label: "Paiements validés", value: dafStats?.paiementsValides ?? 0,       color: "text-blue-700",   bg: "bg-blue-50" },
           { label: "En attente pmt",    value: dafStats?.paiementsEnAttente ?? 0,     color: "text-purple-700", bg: "bg-purple-50" },
           { label: "Montant payé",      value: fmtGnf(dafStats?.montantPayeGnf ?? 0), color: "text-navy",      bg: "bg-navy/5" },
@@ -121,7 +121,7 @@ export function FinancierPage() {
       <div className="flex gap-3 flex-wrap">
         {[
           { v:"EN_COURS", l:"En cours" },
-          { v:"PAYE",     l:"Payés" },
+          { v:"TERMINE",  l:"Terminés" },
           { v:"REJETE",   l:"Rejetés" },
           { v:"",         l:"Tous" },
         ].map(({ v, l }) => (
@@ -197,8 +197,8 @@ export function FinancierPage() {
                     </span>
                     <span className={`text-xs font-bold px-2 py-0.5 rounded ${STATUT_COLORS[c.statut] ?? ""}`}>
                       {c.statut === "EN_COURS" && <Clock className="h-3 w-3 inline mr-1"/>}
-                      {c.statut === "PAYE" && <CheckCircle2 className="h-3 w-3 inline mr-1"/>}
-                      {c.statut}
+                      {c.statut === "TERMINE" && <CheckCircle2 className="h-3 w-3 inline mr-1"/>}
+                      {c.statut === "TERMINE" ? "ORDONNANCÉ" : c.statut}
                     </span>
                     <span className="text-xs text-gray-500">{c.decompte?.numeroDossier ?? c.decompte?.reference}</span>
                   </div>
