@@ -3,6 +3,10 @@ import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { assertEntrepriseConforme } from "../conformite/conformite.service";
 import { motifStatutMarche } from "../../lib/eligibilite-depot";
+import { formaterMontant } from "../../lib/montants";
+
+/** |a - b| en entier — Math.abs ne prend pas de BigInt. */
+function ecartAbsolu(a: bigint, b: bigint): bigint { return a > b ? a - b : b - a; }
 
 // §4 CDC — champs marché complets pour affichage référentiel
 const marcheInclude = {
@@ -54,7 +58,11 @@ async function runControlesAuto(decompte: {
   const totalDejaPaye  = dejaPaye._sum.netAPayer ?? 0n;
   const cumulAvecCourant = totalDejaPaye + decompte.netAPayer;
   const resteContrat   = montantContrat - totalDejaPaye;
-  const tauxConsomme   = montantContrat > 0n ? Math.round(Number(cumulAvecCourant) * 100 / Number(montantContrat)) : 0;
+  // Arithmétique ENTIÈRE — constat « exactitude BigInt incomplète » de la revue
+  // du 22/08/2026 : ces contrôles reconvertissaient les montants en Number et
+  // pouvaient diverger du moteur de calcul (entier) au-delà de 2^53. Les
+  // assiettes et taux sont INCHANGÉS — seule la représentation change.
+  const tauxConsomme   = montantContrat > 0n ? Number((cumulAvecCourant * 100n) / montantContrat) : 0;
 
   const alertes: { niveau: string; code: string; message: string }[] = [];
 
@@ -63,37 +71,40 @@ async function runControlesAuto(decompte: {
     alertes.push({
       niveau: "CRITIQUE",
       code: "DEPASSEMENT_MONTANT",
-      message: `Dépassement du contrat : cumul ${Number(cumulAvecCourant).toLocaleString("fr-GN")} GNF > contrat ${Number(montantContrat).toLocaleString("fr-GN")} GNF`,
+      message: `Dépassement du contrat : cumul ${formaterMontant(cumulAvecCourant)} GNF > contrat ${formaterMontant(montantContrat)} GNF`,
     });
   } else if (tauxConsomme >= 95) {
     alertes.push({
       niveau: "AVERTISSEMENT",
       code: "CONSOMMATION_ELEVEE",
-      message: `Consommation à ${tauxConsomme}% du contrat — reste ${Number(resteContrat).toLocaleString("fr-GN")} GNF`,
+      message: `Consommation à ${tauxConsomme}% du contrat — reste ${formaterMontant(resteContrat)} GNF`,
     });
   }
 
   // TVA
-  const tvaTh = BigInt(Math.round(Number(decompte.montantPeriodeHtGnf) * decompte.marche.tauxTva / 100));
-  if (Math.abs(Number(decompte.tva) - Number(tvaTh)) > 1000) {
+  // Taux exprimé en centièmes de pour-cent (18 % -> 1800) pour rester entier.
+  const tauxTvaCpc = BigInt(Math.round(decompte.marche.tauxTva * 100));
+  const tvaTh = (decompte.montantPeriodeHtGnf * tauxTvaCpc) / 10000n;
+  if (ecartAbsolu(decompte.tva, tvaTh) > 1000n) {
     alertes.push({
       niveau: "ERREUR",
       code: "TVA_INCORRECTE",
-      message: `TVA incorrecte : calculée ${Number(decompte.tva).toLocaleString("fr-GN")} GNF, attendu ${Number(tvaTh).toLocaleString("fr-GN")} GNF (taux ${decompte.marche.tauxTva}%)`,
+      message: `TVA incorrecte : calculée ${formaterMontant(decompte.tva)} GNF, attendu ${formaterMontant(tvaTh)} GNF (taux ${decompte.marche.tauxTva}%)`,
     });
   }
 
   // Retenue de garantie — modèle AGEROUTE : appliquée sur TTC (HT + TVA + ARMP)
-  const ht   = Number(decompte.montantPeriodeHtGnf);
-  const tvaN = Math.round(ht * decompte.marche.tauxTva / 100);
-  const armpN= Math.round(ht * 0.006);
+  const ht   = decompte.montantPeriodeHtGnf;
+  const tvaN = (ht * tauxTvaCpc) / 10000n;
+  const armpN= (ht * 6n) / 1000n;                       // 0,6 % — assiette inchangée
   const ttcN = ht + tvaN + armpN;
-  const rgTh = BigInt(Math.round(ttcN * decompte.marche.tauxRetenueGarantie / 100));
-  if (Math.abs(Number(decompte.retenueGarantie) - Number(rgTh)) > 1000) {
+  const tauxRgCpc = BigInt(Math.round(decompte.marche.tauxRetenueGarantie * 100));
+  const rgTh = (ttcN * tauxRgCpc) / 10000n;
+  if (ecartAbsolu(decompte.retenueGarantie, rgTh) > 1000n) {
     alertes.push({
       niveau: "ERREUR",
       code: "RG_INCORRECTE",
-      message: `RG incorrecte : calculée ${Number(decompte.retenueGarantie).toLocaleString("fr-GN")} GNF, attendu ${Number(rgTh).toLocaleString("fr-GN")} GNF (5% du TTC)`,
+      message: `RG incorrecte : calculée ${formaterMontant(decompte.retenueGarantie)} GNF, attendu ${formaterMontant(rgTh)} GNF (5% du TTC)`,
     });
   }
 

@@ -20,5 +20,11 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
 COPY assets ./assets
 EXPOSE 4001
-COPY .env* ./
-CMD ["sh", "-c", "[ -f /app/.env ] && set -a && . /app/.env && set +a; node dist/server.js"]
+# Plus aucun .env dans l'image — revue du 22/08/2026. `COPY .env* ./` embarquait
+# tout fichier de secrets présent dans le contexte de build, et la commande de
+# démarrage le sourçait. En production rien n'était copié (le .env vit à la
+# racine du projet, hors contexte), mais un .env local oublié dans backend/
+# aurait fini dans une image poussée ou archivée. La configuration vient
+# EXCLUSIVEMENT de l'environnement injecté par docker-compose (cf. le bloc
+# `environment` du service erp-backend). Le .dockerignore verrouille en plus.
+CMD ["node", "dist/server.js"]

@@ -1,0 +1,16 @@
+# Jamais de secret dans une image — revue du 22/08/2026.
+.env
+.env.*
+!.env.example
+
+# Inutile au build (le Dockerfile fait npm ci et npm run build lui-même) ;
+# node_modules local contient des binaires Prisma pour Windows, pas pour Debian.
+node_modules
+dist
+uploads
+
+# Tests et outillage : pas dans l'artefact de production.
+**/*.test.ts
+scripts/run-tests.mjs
+coverage
+.git

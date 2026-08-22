@@ -22,11 +22,27 @@ export function normaliserEspaces(texte: string): string {
   return texte.replace(ESPACES_EXOTIQUES, " ");
 }
 
-/** Montant en francs guinéens, sans symbole : « 3 985 163 390 ». */
+const FORMAT = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
+
+/**
+ * Montant en francs guinéens, sans symbole : « 3 985 163 390 ».
+ *
+ * Un BigInt est formaté TEL QUEL — `Intl.NumberFormat` l'accepte nativement.
+ * L'ancienne version passait par `Number(valeur)` : au-delà de 2^53 (environ
+ * 9 007 199 254 740 992 GNF) les derniers chiffres étaient silencieusement
+ * arrondis sur le document imprimé, alors que la base et les calculs, eux,
+ * étaient exacts. Constat « exactitude BigInt incomplète » de la revue du
+ * 22/08/2026. Un nombre hors de la plage sûre est refusé plutôt qu'arrondi :
+ * un montant faux sur une pièce comptable est pire qu'une erreur franche.
+ */
 export function formaterMontant(valeur: bigint | number | null | undefined): string {
-  return normaliserEspaces(
-    new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(Number(valeur ?? 0)),
-  );
+  if (valeur === null || valeur === undefined) return normaliserEspaces(FORMAT.format(0));
+  if (typeof valeur === "bigint") return normaliserEspaces(FORMAT.format(valeur));
+  if (!Number.isFinite(valeur)) return normaliserEspaces(FORMAT.format(0));
+  if (!Number.isSafeInteger(Math.trunc(valeur))) {
+    throw new RangeError(`Montant ${valeur} hors de la plage entière sûre : transmettre un BigInt`);
+  }
+  return normaliserEspaces(FORMAT.format(valeur));
 }
 
 /** Montant suivi de la devise : « 3 985 163 390 GNF ». */

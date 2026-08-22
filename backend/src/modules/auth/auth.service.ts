@@ -26,18 +26,34 @@ export async function login(email: string, password: string, ip?: string) {
 }
 
 export async function refresh(token: string) {
-  const stored = await prisma.refreshToken.findUnique({ where: { token } });
-  if (!stored || stored.revoked || stored.expiresAt < new Date()) throw new ApiError(401, "Refresh token invalide");
   const payload = verifyRefresh(token);
   const user = await prisma.user.findUnique({ where: { id: payload.userId } });
   if (!user || !user.actif) throw new ApiError(401, "Utilisateur inactif");
-  await prisma.refreshToken.update({ where: { token }, data: { revoked: true } });
-  const newAccess = signAccess({ userId: user.id, email: user.email, role: user.role });
-  const newRefresh = signRefresh({ userId: user.id, email: user.email, role: user.role });
-  await prisma.refreshToken.create({
-    data: { token: newRefresh, userId: user.id, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
+
+  // Rotation ATOMIQUE — constat « rejeu du refresh token » de la revue du
+  // 22/08/2026. L'ancienne version lisait le jeton (findUnique), vérifiait
+  // `revoked`, puis le révoquait dans une requête séparée : deux appels
+  // simultanés avec le même jeton passaient tous deux la lecture et recevaient
+  // chacun une session neuve — un jeton volé restait exploitable en parallèle
+  // de son propriétaire. Ici, la révocation conditionnelle est la vérification :
+  // `updateMany` ne touche une ligne que si elle est encore valide, et seul
+  // l'appel qui a réellement révoqué (count = 1) obtient la nouvelle session.
+  // PostgreSQL sérialise les deux UPDATE sur la même ligne ; le second voit
+  // revoked = true et n'affecte rien.
+  return prisma.$transaction(async (tx) => {
+    const revoque = await tx.refreshToken.updateMany({
+      where: { token, revoked: false, expiresAt: { gt: new Date() } },
+      data: { revoked: true },
+    });
+    if (revoque.count !== 1) throw new ApiError(401, "Refresh token invalide");
+
+    const newAccess = signAccess({ userId: user.id, email: user.email, role: user.role });
+    const newRefresh = signRefresh({ userId: user.id, email: user.email, role: user.role });
+    await tx.refreshToken.create({
+      data: { token: newRefresh, userId: user.id, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
+    });
+    return { accessToken: newAccess, refreshToken: newRefresh };
   });
-  return { accessToken: newAccess, refreshToken: newRefresh };
 }
 
 export async function logout(token: string) {
