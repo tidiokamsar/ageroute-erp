@@ -2,17 +2,25 @@
  * Tests — simulateur de règles financières (lot L0.3).
  * DoD du plan de travail :
  *  1. simulation avec les défauts = valeurs actuelles du moteur
- *     (comparaison directe avec calcDecompte, formule officielle protégée) ;
+ *     (comparaison directe avec calcDecompteRegles, le moteur de production —
+ *     l'ancien decomptes.calc.ts, en arithmétique Number, a été retiré le 23/08/2026) ;
  *  2. A1 = HT ne change QUE la retenue de garantie (et le net en conséquence) ;
  *  3. bornes et modes : plancher A4, ARMP hors TTC, arrondis A7, avance A6.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { calcDecompte } from "../decomptes/decomptes.calc";
+import { calcDecompteRegles, type CalcReglesInput } from "../decomptes/decomptes.calc.regles";
 import { simulerDecompte, simulerAvecSurcharges } from "./simulateur";
 import { resoudreRegles } from "../../lib/regles";
 
 const DEFAUTS = resoudreRegles([]);
+
+/** Référence = le moteur de production lui-même, aux règles par défaut. */
+function calcDecompte(e: CalcReglesInput) {
+  const r = calcDecompteRegles(e, DEFAUTS);
+  return { tva: r.tva, armp: r.montantArmpGnf, ttc: r.montantTtcGnf, precompteTva: r.precompteTvaGnf,
+           retenueGarantie: r.retenueGarantie, avanceRecuperee: r.avanceRecuperee, netAPayer: r.netAPayer };
+}
 
 function montant(lignes: ReturnType<typeof simulerDecompte>["lignes"], cle: string): bigint {
   return BigInt(lignes.find((l) => l.cle === cle)!.montantGnf);

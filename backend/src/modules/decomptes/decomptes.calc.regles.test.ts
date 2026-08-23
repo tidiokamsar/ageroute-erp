@@ -1,13 +1,13 @@
 /**
  * Tests — moteur de calcul paramétré (lot L1.1).
  * PREUVE CENTRALE : aux valeurs par défaut, calcDecompteRegles reproduit
- * BIT À BIT la référence officielle calcDecompte (decomptes.calc.ts, protégée
+ * BIT À BIT la référence historique calcDecompte (decomptes.calc.oracle.ts — oracle de test,
  * §3.3) — cas fixes + propriété aléatoire reproductible. Puis couverture des
  * arbitrages A1-A7 quand ils s'écartent des défauts.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { calcDecompte } from "./decomptes.calc";
+import { calcDecompte } from "./decomptes.calc.oracle";
 import { calcDecompteRegles, type CalcReglesInput } from "./decomptes.calc.regles";
 import { resoudreRegles, type ReglesEffectives } from "../../lib/regles";
 

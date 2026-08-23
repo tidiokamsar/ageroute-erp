@@ -1,4 +1,18 @@
 /**
+ * ⚠️ ORACLE DE TEST — NE JAMAIS IMPORTER DEPUIS LE CODE DE PRODUCTION.
+ *
+ * Ancien moteur de calcul (decomptes.calc.ts), retiré du service le 23/08/2026 :
+ * il passait par l'arithmétique Number et n'était plus appelé par aucune route —
+ * la production calcule avec decomptes.calc.regles.ts (entier, piloté par les
+ * règles A1–A10 modifiables dans Paramétrage).
+ *
+ * Il est conservé ici, renommé, pour une seule raison : la preuve
+ * decomptes.calc.regles.test.ts vérifie que le moteur de production reproduit
+ * BIT À BIT les formules historiques aux valeurs par défaut, sur 12
+ * combinaisons et 4 échelles. Supprimer l'oracle supprimerait la preuve.
+ * Le garde ci-dessous échoue à la compilation si un module hors test l'importe.
+ */
+/**
  * Calcul financier d'un décompte — formule officielle AGEROUTE (fiche d'analyse).
  * Fonction PURE (aucune dépendance externe) → testable unitairement.
  *

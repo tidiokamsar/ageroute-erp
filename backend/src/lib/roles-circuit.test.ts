@@ -17,7 +17,16 @@ function avecRegles(surcharges: Record<string, string>) {
 test("défauts — matrices = rôles actuels (aucun changement comportemental)", () => {
   assert.deepEqual(rolesPourFonction(DEFAUTS, "LIQUIDATION"), ["ADMIN", "DG", "DAF", "DMC", "UGP", "MISSION", "TECHNIQUE", "ENTREPRISE"]);
   assert.deepEqual(rolesPourFonction(DEFAUTS, "ORDONNANCEMENT"), ["ADMIN", "DAF"]);
-  assert.deepEqual(rolesPourFonction(DEFAUTS, "PAIEMENT"), ["ADMIN", "DAF"]);
+  // A8, décision du 23/08/2026 : la DAF ordonnance, la BCRG confirme. L'ancien
+  // défaut « ADMIN,DAF » contredisait la route de confirmation (BCRG) : seul
+  // ADMIN pouvait payer.
+  assert.deepEqual(rolesPourFonction(DEFAUTS, "PAIEMENT"), ["ADMIN", "BCRG"]);
+});
+
+test("A8 — la DAF ne peut PAS confirmer un virement : séparation ordonnateur/comptable", () => {
+  assert.equal(roleAutorise("DAF", "PAIEMENT", DEFAUTS), false);
+  assert.equal(roleAutorise("BCRG", "PAIEMENT", DEFAUTS), true);
+  assert.equal(roleAutorise("BCRG", "ORDONNANCEMENT", DEFAUTS), false, "la BCRG n'ordonnance pas");
 });
 
 test("défauts — séparation ordonnateur/comptable non activée (comportement actuel)", () => {

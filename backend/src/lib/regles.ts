@@ -42,7 +42,12 @@ export const REGLES_DEFAUT = {
   // A8 — Séparation ordonnateur / comptable (consommé au lot L2.1)
   WF_ROLES_LIQUIDATION: "ADMIN,DG,DAF,DMC,UGP,MISSION,TECHNIQUE,ENTREPRISE",
   WF_ROLES_ORDONNANCEMENT: "ADMIN,DAF",
-  WF_ROLES_PAIEMENT: "ADMIN,DAF",
+  // A8 — décision du 23/08/2026 : la DAF ORDONNANCE, la BCRG CONFIRME le
+  // virement. La matrice portait « ADMIN,DAF » alors que la route de
+  // confirmation exige BCRG : l'intersection était ADMIN seul, et la
+  // séparation ordonnateur/comptable restait théorique. Le compte BCRG est un
+  // compte de fonction (« Directeur Général BCRG »), par décision explicite.
+  WF_ROLES_PAIEMENT: "ADMIN,BCRG",
   WF_SEPARATION_ORD_COMPTABLE: "false",
   // RG9 — séparation des tâches : une personne n'engage qu'une étape du circuit.
   // Active par défaut. Elle était présente dans le code sous forme d'un bloc

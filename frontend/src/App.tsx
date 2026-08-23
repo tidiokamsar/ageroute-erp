@@ -1,31 +1,48 @@
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense, type ComponentType } from "react";
 import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider, Navigate, Outlet } from "react-router-dom";
 import { authStore, useAuth } from "./lib/auth";
 import { AppLayout } from "./components/layout/AppLayout";
 import { LoginPage } from "./pages/LoginPage";
-import { DashboardPage } from "./pages/DashboardPage";
-import { EntreprisesPage } from "./pages/EntreprisesPage";
-import { MarchesPage } from "./pages/MarchesPage";
-import { DecomptesPage } from "./pages/DecomptesPage";
-import { AttachementsPage } from "./pages/AttachementsPage";
-import { AuditPage } from "./pages/AuditPage";
-import WorkflowPage from "./pages/WorkflowPage";
-import RoutierPage from "./pages/RoutierPage";
-import UsersPage from "./pages/UsersPage";
-import { ProjetsPage } from "./pages/ProjetsPage";
-import { ParametragePage } from "./pages/ParametragePage";
-import { GarantiesPage } from "./pages/GarantiesPage";
-import { ReceptionsPage } from "./pages/ReceptionsPage";
-import { AvenantsPage } from "./pages/AvenantsPage";
-import { FinancierPage } from "./pages/FinancierPage";
-import { FinancementsPage } from "./pages/FinancementsPage";
-import { PaiementsPage } from "./pages/PaiementsPage";
-import { BiPage } from "./pages/BiPage";
-import PortailEntreprisePage from "./pages/PortailEntreprisePage";
-import SignaturePage from "./pages/SignaturePage";
-import { DelegationsPage } from "./pages/DelegationsPage";
-import { RevisionPage } from "./pages/RevisionPage";
 import { Toaster } from "./components/ui/Toast";
+
+/**
+ * Chargement différé des pages — constat « bundle de 1,38 Mo, 23 pages chargées
+ * de façon synchrone » de la revue du 22/08/2026. Chaque page devient un
+ * morceau servi à la première visite ; l'écran de connexion ne charge plus les
+ * décomptes, les marchés et le référentiel routier (Leaflet) pour rien.
+ *
+ * Les pages exportent tantôt un `default`, tantôt un nommé : `page()` uniformise.
+ * Le découpage interne des grandes pages (1 300 à 1 600 lignes) est un chantier
+ * distinct ; celui-ci ne touche qu'au moment où elles sont chargées.
+ */
+function page<T extends Record<string, ComponentType>>(charger: () => Promise<T>, nom: keyof T) {
+  return lazy(() => charger().then((m) => ({ default: m[nom] })));
+}
+
+const DashboardPage        = page(() => import("./pages/DashboardPage"), "DashboardPage");
+const EntreprisesPage      = page(() => import("./pages/EntreprisesPage"), "EntreprisesPage");
+const MarchesPage          = page(() => import("./pages/MarchesPage"), "MarchesPage");
+const DecomptesPage        = page(() => import("./pages/DecomptesPage"), "DecomptesPage");
+const AttachementsPage     = page(() => import("./pages/AttachementsPage"), "AttachementsPage");
+const AuditPage            = page(() => import("./pages/AuditPage"), "AuditPage");
+const WorkflowPage         = lazy(() => import("./pages/WorkflowPage"));
+const RoutierPage          = lazy(() => import("./pages/RoutierPage"));
+const UsersPage            = lazy(() => import("./pages/UsersPage"));
+const ProjetsPage          = page(() => import("./pages/ProjetsPage"), "ProjetsPage");
+const ParametragePage      = page(() => import("./pages/ParametragePage"), "ParametragePage");
+const GarantiesPage        = page(() => import("./pages/GarantiesPage"), "GarantiesPage");
+const ReceptionsPage       = page(() => import("./pages/ReceptionsPage"), "ReceptionsPage");
+const AvenantsPage         = page(() => import("./pages/AvenantsPage"), "AvenantsPage");
+const FinancierPage        = page(() => import("./pages/FinancierPage"), "FinancierPage");
+const FinancementsPage     = page(() => import("./pages/FinancementsPage"), "FinancementsPage");
+const PaiementsPage        = page(() => import("./pages/PaiementsPage"), "PaiementsPage");
+const BiPage               = page(() => import("./pages/BiPage"), "BiPage");
+const PortailEntreprisePage = lazy(() => import("./pages/PortailEntreprisePage"));
+const SignaturePage        = lazy(() => import("./pages/SignaturePage"));
+const DelegationsPage      = page(() => import("./pages/DelegationsPage"), "DelegationsPage");
+const RevisionPage         = page(() => import("./pages/RevisionPage"), "RevisionPage");
+
+const Chargement = () => <div className="min-h-[40vh] flex items-center justify-center text-gray-400">Chargement...</div>;
 
 // Guard standard — redirige ENTREPRISE vers /portail
 function ProtectedRoute() {
@@ -33,7 +50,7 @@ function ProtectedRoute() {
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Chargement...</div>;
   if (!user) return <Navigate to="/login" replace />;
   if (user.role === "ENTREPRISE") return <Navigate to="/portail" replace />;
-  return <Outlet />;
+  return <Suspense fallback={<Chargement />}><Outlet /></Suspense>;
 }
 
 // Guard portail — seuls ENTREPRISE + ADMIN
@@ -42,7 +59,7 @@ function PortailRoute() {
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Chargement...</div>;
   if (!user) return <Navigate to="/login" replace />;
   if (!["ENTREPRISE", "ADMIN"].includes(user.role)) return <Navigate to="/" replace />;
-  return <Outlet />;
+  return <Suspense fallback={<Chargement />}><Outlet /></Suspense>;
 }
 
 const router = createBrowserRouter(
@@ -61,7 +78,7 @@ const router = createBrowserRouter(
           <Route index element={<DashboardPage />} handle={{ title: "Tableau de bord" }} />
           <Route path="entreprises" element={<EntreprisesPage />} handle={{ title: "Référentiel Entreprises" }} />
           <Route path="financements" element={<FinancementsPage />} handle={{ title: "Gestion des Financements" }} />
-              <Route path="paiements" element={<PaiementsPage />} handle={{ title: "Paiements" }} />
+          <Route path="paiements" element={<PaiementsPage />} handle={{ title: "Paiements" }} />
           <Route path="projets" element={<ProjetsPage />} handle={{ title: "Projets §6" }} />
           <Route path="marches" element={<MarchesPage />} handle={{ title: "Marchés" }} />
           <Route path="decomptes" element={<DecomptesPage />} handle={{ title: "e-Décomptes §7-16" }} />

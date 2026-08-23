@@ -207,7 +207,21 @@ uploadsRouter.get("/sign/:filename", requireAuth, async (req: Request, res: Resp
 });
 
 // ─── GET /api/uploads/files/:filename — téléchargement par URL signée ────────
-uploadsRouter.get("/files/:filename", (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Téléchargement : SESSION EXIGÉE + périmètre revérifié + lien signé.
+ *
+ * Décision du 23/08/2026 (revue du 22/08, constat « pièces insuffisamment
+ * protégées ») : le lien signé suffisait seul. Partagé, copié depuis un journal
+ * ou un historique de navigateur, il donnait le fichier à quiconque jusqu'à son
+ * expiration. Désormais :
+ *   1. l'appelant est authentifié (requireAuth) ;
+ *   2. le périmètre est revérifié AU MOMENT DU TÉLÉCHARGEMENT — pas seulement à
+ *      la signature : une affectation retirée entre les deux ferme l'accès ;
+ *   3. le lien signé reste exigé, comme second facteur à durée courte.
+ * Le client envoie donc le jeton de session (fetch + Authorization) et ouvre le
+ * blob reçu — un simple window.open(url) ne porte pas d'en-tête.
+ */
+uploadsRouter.get("/files/:filename", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const filename = req.params.filename;
     if (!isSafeStoredFilename(filename)) throw new ApiError(404, "Fichier introuvable");
@@ -220,6 +234,11 @@ uploadsRouter.get("/files/:filename", (req: Request, res: Response, next: NextFu
     if (!token || !verifyToken(filename, expires, token)) {
       throw new ApiError(403, "Lien de téléchargement invalide");
     }
+
+    const url = "/api/uploads/files/" + filename;
+    const [references, modules] = await Promise.all([findReferences(url), getEffectiveModules(req.user!.id, req.user!.role)]);
+    const decisions = await Promise.all(references.map((reference) => canReadReference(req, reference, modules)));
+    if (references.length === 0 || !decisions.some(Boolean)) throw new ApiError(404, "Fichier introuvable");
 
     const filePath = path.resolve(env.UPLOAD_DIR, filename);
     if (!filePath.startsWith(path.resolve(env.UPLOAD_DIR) + path.sep) || !fs.existsSync(filePath)) {

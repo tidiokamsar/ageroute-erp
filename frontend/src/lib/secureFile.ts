@@ -1,8 +1,14 @@
 /**
  * Accès aux fichiers protégés (/api/uploads/files/...).
- * Le téléchargement exige une URL signée éphémère délivrée par
- * GET /api/uploads/sign/:filename (authentifié). Les URL externes
- * ou d'un autre chemin sont ouvertes telles quelles.
+ *
+ * Depuis le 23/08/2026 le téléchargement exige la SESSION en plus du lien
+ * signé : le serveur revérifie le périmètre au moment de servir le fichier.
+ * Un `window.open(url)` ne porte pas d'en-tête Authorization — on récupère
+ * donc le fichier par `fetch` authentifié, puis on ouvre le blob. Le lien
+ * signé (GET /api/uploads/sign/:filename) reste demandé comme second facteur
+ * à durée courte.
+ *
+ * Les URL externes ou d'un autre chemin sont ouvertes telles quelles.
  */
 import { api } from "./api";
 
@@ -17,6 +23,24 @@ export async function signFileUrl(url: string): Promise<string> {
   return res.data.url as string;
 }
 
+/**
+ * Télécharge un fichier protégé avec la session et renvoie une URL de blob
+ * locale (à révoquer par l'appelant quand elle n'est plus affichée).
+ */
+export async function fetchSecureBlobUrl(url: string): Promise<string> {
+  if (!isProtectedFile(url)) return url;
+  const signed = await signFileUrl(url);
+  // `api` a pour base "/api" : on lui passe le chemin sans ce préfixe.
+  const chemin = signed.replace(/^\/api/, "");
+  const res = await api.get(chemin, { responseType: "blob" });
+  return URL.createObjectURL(res.data as Blob);
+}
+
 export async function openSecureFile(url: string): Promise<void> {
-  window.open(await signFileUrl(url), "_blank");
+  if (!isProtectedFile(url)) { window.open(url, "_blank"); return; }
+  const blobUrl = await fetchSecureBlobUrl(url);
+  const win = window.open(blobUrl, "_blank");
+  if (win) win.opener = null;
+  // Laisser le temps à l'onglet de charger avant de libérer l'URL.
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 }

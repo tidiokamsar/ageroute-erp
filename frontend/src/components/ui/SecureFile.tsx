@@ -1,11 +1,15 @@
 /**
  * Composants d'accès aux fichiers protégés (pièces jointes).
- * - SecureFileLink : lien qui obtient une URL signée avant ouverture ;
- * - SecureImg      : image dont la source est signée au chargement.
+ * - SecureFileLink : télécharge avec la session puis ouvre le blob ;
+ * - SecureImg      : image chargée avec la session (blob), jamais par URL nue.
  * href absent → rendu non cliquable ; URL externe → comportement <a> normal.
+ *
+ * Depuis le 23/08/2026 le serveur exige la session au téléchargement : un
+ * <img src=url-signée> ou un window.open(url-signée) ne porte pas le jeton et
+ * recevrait 401. Voir lib/secureFile.ts.
  */
 import { useEffect, useState, type ReactNode } from "react";
-import { isProtectedFile, signFileUrl } from "../../lib/secureFile";
+import { isProtectedFile, openSecureFile, fetchSecureBlobUrl } from "../../lib/secureFile";
 
 interface SecureFileLinkProps {
   href?: string | null;
@@ -28,9 +32,7 @@ export function SecureFileLink({ href, children, className = "", title }: Secure
       className={`${className} cursor-pointer`}
       onClick={(e) => {
         e.preventDefault();
-        signFileUrl(href)
-          .then((signed) => window.open(signed, "_blank"))
-          .catch(() => { /* l'intercepteur api gère l'authentification */ });
+        openSecureFile(href).catch(() => { /* l'intercepteur api gère l'authentification */ });
       }}
     >
       {children}
@@ -45,26 +47,27 @@ interface SecureImgProps {
 }
 
 export function SecureImg({ src, alt, className = "" }: SecureImgProps) {
-  const [signed, setSigned] = useState<string | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    setSigned(null);
+    let courant: string | null = null;
+    setBlobUrl(null);
     if (!src) return;
-    if (!isProtectedFile(src)) {
-      setSigned(src);
-      return;
-    }
-    signFileUrl(src)
-      .then((url) => { if (alive) setSigned(url); })
+    if (!isProtectedFile(src)) { setBlobUrl(src); return; }
+    fetchSecureBlobUrl(src)
+      .then((url) => { if (alive) { courant = url; setBlobUrl(url); } else URL.revokeObjectURL(url); })
       .catch(() => { /* laisse l'emplacement vide */ });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      if (courant) URL.revokeObjectURL(courant);
+    };
   }, [src]);
 
-  if (!signed) return <div className={className} aria-label={alt} />;
+  if (!blobUrl) return <div className={className} aria-label={alt} />;
   return (
     <img
-      src={signed}
+      src={blobUrl}
       alt={alt}
       className={className}
       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
