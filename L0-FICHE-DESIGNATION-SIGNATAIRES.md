@@ -104,7 +104,7 @@ Un membre non signataire peut consulter et préparer, mais pas valider.
 | **DGA** | *(rôle à créer)* | Moussa CAMARA | Moussa CAMARA | Directeur Général Adjoint |
 | **DG** | `dg@ageroute.gov.gn` | **Moïse SIDIBÉ** | Moïse SIDIBÉ | Directeur Général |
 | **DSF** | *(rôle créé)* | Abdoulaye DABO | *(consultation seule — ne signe pas)* | Directeur de la Structuration Financière |
-| **AUDITEUR** | `auditeur@ageroute.gov.gn` | | *(consultation seule)* | |
+| **AUDITEUR** | `auditeur@ageroute.gov.gn` | **Abdoul Karim BAH** — `abdoul.bah@ageroute.gov.gn`, créé le 23/08/2026, dormant | *(consultation seule — lecture des décomptes, marchés, paiements)* | Auditeur interne |
 
 **TECHNIQUE et UGP sont des coordinateurs de projet internes**, recrutés par l'AGEROUTE. Ils sont
 créés par l'administrateur, qui leur assigne le rôle correspondant. Leur certificat est délivré
@@ -122,7 +122,21 @@ organisme ou sous sa responsabilité. La Direction Générale saisit chaque orga
 | **TRESOR** | Direction Générale du Trésor | le Trésor | | |
 | **FER_AGT** | Fonds d'Entretien Routier | le FER | | |
 | **BAILLEUR** | un représentant par bailleur | chaque bailleur | | |
-| **BCRG** | Banque Centrale | la BCRG | | |
+| **BCRG** | Banque Centrale | **décision du 23/08/2026 : compte de fonction « Directeur Général BCRG »**, pas de personne physique | `bcrg@ageroute.gov.gn`, créé le 23/08/2026, dormant | 23/08/2026 |
+
+### ⚠️ BCRG — une exception assumée au principe de nominativité
+
+La Direction a décidé le 23/08/2026 que la Banque Centrale intervient par un **compte de
+fonction** (« Directeur Général BCRG »), sans personne physique désignée. C'est le seul rôle
+dans ce cas. Conséquences à garder en vue :
+
+- la confirmation bancaire — seule voie vers `PAYE` — sera **tracée au nom de la fonction**, pas
+  d'une personne ; l'audit enregistre `confirmePar = bcrg@ageroute.gov.gn` ;
+- **aucun certificat nominatif ne pourra être délivré** à ce compte le jour où la signature
+  électronique sera mise en place : la confirmation BCRG restera hors du périmètre PAdES, ou
+  devra être rattachée à une personne à ce moment-là ;
+- le mot de passe de ce compte engage l'AGEROUTE et la BCRG à la fois : sa remise doit être
+  formalisée avec la Banque Centrale, pas transmise par messagerie.
 
 ### ⚠️ MISSION est externe — trois conséquences
 
