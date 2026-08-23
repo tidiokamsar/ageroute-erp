@@ -619,3 +619,113 @@ Et une question de conception, préalable à toute écriture :
 10. **Comment traiter les instances de workflow en cours** lors de l'insertion du DGA ?
     Versionnement des définitions, ou fenêtre sans dossier en cours ? Le versionnement est
     recommandé ; il est plus sûr et il servira à toutes les évolutions futures de circuit.
+
+---
+
+## 11. Réévaluation de la porte — 23/08/2026
+
+Mandat du 20/08/2026 (« RÉÉVALUATION DE LA PORTE SIGNATURE-NUMÉRIQUE-01 »), appliqué le
+23/08/2026. Veille réglementaire : `ANNEXE-VEILLE-REGLEMENTAIRE-2026-08-20.md`. Saisine :
+`L0-SAISINE-ANDE.md`.
+
+### 11.1 Trois portes indépendantes
+
+```text
+GO_CADRAGE_ARCHITECTURE          = OUVERT
+GO_LABORATOIRE_HORS_PRODUCTION   = PRÊT — activation par SIG_MODE=laboratory + SIGNATURE_LAB_AUTORISE=oui
+NO_GO_SIGNATURE_PRODUCTION       = MAINTENU — SIGNATURE_PRODUCTION_AUTORISEE ne doit pas être posé
+```
+
+La porte C ne peut être levée qu'avec, réunies : décret publié (copie numérotée, JO), arrêté
+conjoint, liste officielle des prestataires agréés ANDE, point de publication de la liste de
+confiance, prestataire retenu, TSA reconnue, confirmations écrites (signature distante, HSM
+mutualisé), CP/CPS du prestataire, mécanismes officiels de révocation, désignation nominative de
+tous les signataires, comptes actifs, qualités renseignées, délégations formalisées, certificats
+acquis, validation juridique, validation des onze circuits, homologation et recette, plan de
+conservation approuvé. **Aucun certificat EJBCA de laboratoire, aucune TSA SignServer de test,
+aucune clé SoftHSM2 ne peut lever cette porte.**
+
+### 11.2 Architecture de laboratoire retenue — implémentée
+
+```text
+ERP Node/Express  (lib/signature/)
+    |
+    +-- AdaptateurPrestataire        interfaces.ts
+    |       +-- AdaptateurSimule     adaptateur-simule.ts      (dev, jamais probant)
+    |       +-- AdaptateurSignServer adaptateur-signserver.ts  -> SignServer CE 7.3.2
+    |                                                              +-- SoftHSM2 (PKCS#11 émulé)
+    |                                                              +-- certificat EJBCA CE 9.3.7 de TEST
+    +-- TSA                          SIG_TSA_URL, transmise au worker (RFC 3161 SignServer)
+    +-- ServiceValidation            validation-dss.ts         -> DSS 6.1, construit depuis les sources
+    |
+    +-- configuration.ts   : lue dans l'ADMINISTRATION (parametres_metier, catégorie SIGNATURE)
+    +-- orchestrateur.ts   : génération canonique -> filigrane -> empreinte -> signature -> validation -> conservation -> audit (transaction)
+```
+
+Remplacement par un prestataire agréé : `SIG_PRESTATAIRE_TYPE`, `SIG_PRESTATAIRE_URL`,
+`SIG_TSA_URL`, `SIG_ANCRES_CONFIANCE` dans l'administration — **aucune ligne de code**. Les
+workflows, la génération PDF, l'audit et le moteur de validation métier ne connaissent pas le
+prestataire.
+
+### 11.3 Responsabilités exactes
+
+| Composant | Fait | Ne fait pas |
+|---|---|---|
+| EJBCA CE | racine de test (hors ligne après création de l'intermédiaire), intermédiaire, certificats nominatifs fictifs, CRL, OCSP | prestataire agréé |
+| SignServer CE | signature PAdES côté serveur, API REST, TSA RFC 3161 de test, journal des opérations, clés dans SoftHSM2 | HSM certifié |
+| SoftHSM2 | émulation PKCS#11, clés inexportables par le flux applicatif | HSM, et **interdit en production** |
+| DSS | création/validation PAdES, chaînes, OCSP/CRL, jetons, rapport `TOTAL_PASSED / FAILED / INDETERMINATE` | dépendre du prestataire |
+| ERP | orchestration, garde-fous, filigrane, conservation, audit | toucher une clé privée |
+
+### 11.4 Garde-fous — implémentés et testés (`configuration.test.ts`)
+
+| | Garde-fou | Où |
+|---|---|---|
+| G1 | `SIG_MODE = disabled` par défaut ; valeur inconnue → disabled | configuration.ts |
+| G2 | `laboratory` exige `SIGNATURE_LAB_AUTORISE=oui` dans l'environnement | configuration.ts |
+| G3 | `provider` exige `SIGNATURE_PRODUCTION_AUTORISEE=oui` — porte NO-GO | configuration.ts |
+| G4 | `provider` refuse prestataire simulé, ancres vides, URL non HTTPS | configuration.ts |
+| G5 | filigrane **imposé** hors `provider`, texte configurable, présence non | configuration.ts + pdf-dossier.ts (dans le flux de page, sous la signature) |
+| G6 | CI : échec si SoftHSM2 / EJBCA CE / SignServer CE / URL `labo-` / `SIGNATURE_PRODUCTION_AUTORISEE` dans le manifeste de production | ci.yml |
+| G7 | un compte non nominatif (sans prénom) ne peut pas signer | orchestrateur.ts |
+| G8 | validation absente = `NON_VERIFIE` affiché, jamais un succès inventé | validation-dss.ts |
+
+### 11.5 Niveau documentaire cible
+
+Catégorie A : génération PDF côté serveur (faite : `genererDossierDecompte`), validation PDF/A
+avant signature (**à faire**), PAdES-B pour les premiers tests → B-T avec TSA → B-LT → **B-LTA
+seulement après validation réglementaire, TSA reconnue et politique de renouvellement**. La
+conformité PDF/A d'un document signé n'est jamais déclarée : elle se vérifie après chaque
+signature (**à faire**).
+
+### 11.6 Matrice des signataires et calcul des certificats — état au 23/08/2026
+
+Dédupliqué par **personne physique**, jamais par rôle. Exclus : groupes, comptes de fonction,
+entreprises, comptes techniques, simulateurs, certificats serveur/TLS, certificats de
+laboratoire.
+
+| Rôle d'étape | Personne principale | Compte | Qualité | Certificat |
+|---|---|---|---|---|
+| DG | Moïse SIDIBÉ | `moise.sidibe@` (dormant) | Directeur Général | **confirmé à commander** |
+| DAF | Famo MANSARÉ | `famo.mansare@` (dormant) | Directeur Administratif et Financier | **confirmé à commander** |
+| DGA | Moussa CAMARA | à créer (rôle `DGA` absent) | Directeur Général Adjoint | **confirmé à commander** |
+| DMC | Mohamed lamine Keita | `mohamed.keita@` | à renseigner | **confirmé à commander** |
+| MISSION | *à désigner par chaque mission de contrôle* | — | — | à désigner |
+| TECHNIQUE | *à désigner* | — | — | à désigner |
+| UGP | *à désigner* (BM, UE) | — | — | à désigner |
+| BAILLEUR / BUDGET / TRESOR / FER_AGT | *externes, à désigner* | — | — | délivrés côté organisme |
+| BCRG | compte de fonction (décision 23/08) | `bcrg@` | — | **hors périmètre** |
+| ENTREPRISE | mandataires à désigner (COLAS, SOGEA-SATOM, SORED) | — | — | à désigner + preuve de pouvoir |
+
+```text
+Nombre minimal   = 4   (personnes confirmées et distinctes : SIDIBÉ, MANSARÉ, CAMARA, Keita)
+Nombre cible     = 4 + MISSION(≥1 par contrat de supervision) + TECHNIQUE(≥1) + UGP(≥1)
+                     + externes (BAILLEUR, BUDGET, TRESOR, FER_AGT : ≥1 chacun) + mandataires (3 sociétés)
+                 = 4 confirmés + au moins 10 à désigner  → ≥ 14
+Nombre maximal   = cible + suppléants officiellement désignés (aucun à ce jour)
+Certificats fictifs de laboratoire = 1 par compte nominatif existant ou créé pour les tests (4 aujourd'hui)
+```
+
+Hypothèse : un certificat par personne physique, sous réserve de la CP/CPS du prestataire et des
+règles d'inscription de la qualité professionnelle. Aucune personne n'est inventée pour un rôle
+vacant.

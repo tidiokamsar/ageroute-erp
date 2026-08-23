@@ -1638,6 +1638,34 @@ model MarcheAffectation {
   @@index([userId])
 }
 
+/// Document finalisé et signé par le module signature-numerique.
+/// Le PDF porte lui-même les preuves (PAdES) ; cette ligne est une copie
+/// d'exploitation : empreintes, prestataire, niveau obtenu, rapport DSS.
+/// Déclaré ici, évolué UNIQUEMENT par SQL (2026-08-23-signature-numerique.sql).
+model SigDocumentFinalise {
+  id                   String   @id @default(uuid())
+  decompteId           String
+  reference            String
+  cheminFichier        String
+  sha256Source         String
+  sha256Signe          String
+  mode                 String   // disabled | laboratory | provider
+  prestataire          String   // simule | signserver-laboratoire | signserver
+  niveauPades          String   // B | T | LT | LTA
+  filigrane            Boolean  @default(true)
+  tsaUrl               String?
+  validationIndication String   @default("NON_VERIFIE") // TOTAL_PASSED | PASSED | FAILED | INDETERMINATE | NON_VERIFIE
+  rapportValidation    Json?
+  signeParId           String
+  signeParEmail        String
+  signeParRole         String
+  signeParQualite      String?
+  createdAt            DateTime @default(now())
+
+  @@map("sig_documents_finalises")
+  @@index([decompteId])
+}
+
 /// Affectation d'un agent à un PROJET.
 /// Le périmètre effectif d'un rôle scopé = marchés affectés directement
 /// ∪ marchés des projets affectés. Un marché ajouté plus tard à un projet

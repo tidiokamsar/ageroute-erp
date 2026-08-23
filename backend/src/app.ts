@@ -39,6 +39,7 @@ import { portailRouter } from "./modules/portail/portail.routes";
 import { revisionRouter } from "./modules/revision/revision.routes";
 import { searchRouter } from "./modules/search/search.routes";
 import { signatureAuditRouter } from "./modules/signature-audit/signature-audit.routes";
+import { signatureNumeriqueRouter } from "./modules/signature-numerique/signature-numerique.routes";
 import { uploadsRouter } from "./modules/uploads/uploads.routes";
 import { requireAuth } from "./middleware/auth.middleware";
 import { checkModuleAccess } from "./middleware/moduleAccess.middleware";
@@ -119,6 +120,9 @@ export function createApp() {
   app.use("/api/paiements", requireAuth, checkModuleAccess("paiements"), paiementsRouter);
   app.use("/api/signature", requireAuth, checkModuleAccess("signatures"), signatureRouter);
   app.use("/api/signature-audit", requireAuth, checkModuleAccess("signatures"), signatureAuditRouter);
+  // Module signature-numerique (PAdES par prestataire configurable) — même
+  // espace fonctionnel « signatures ». Désactivé par défaut (SIG_MODE).
+  app.use("/api/signature-numerique", requireAuth, checkModuleAccess("signatures"), signatureNumeriqueRouter);
   // §6 CDC — référentiels projets + avenants
   app.use("/api/projets", requireAuth, checkModuleAccess("projets"), projetsRouter);
   app.use("/api/avenants", requireAuth, checkModuleAccess("avenants"), avenantsRouter);

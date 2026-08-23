@@ -258,12 +258,27 @@ export class Dossier {
  * Pied de page paginé, posé sur toutes les pages à la fin de la génération.
  * Doit être appelé APRÈS tout le contenu : la pagination n'est connue qu'alors.
  */
-export function paginer(doc: PDFKit.PDFDocument, mention: string): void {
+/**
+ * Pied de page paginé, posé sur toutes les pages à la fin de la génération.
+ * `filigrane` : texte apposé EN DIAGONALE, en grand et en transparence, sur
+ * chaque page — garde-fou G5 du module signature : hors mode provider, tout
+ * document signé le porte. Indélébile par construction : il est dans le flux
+ * de la page, sous la signature, pas dans une annotation supprimable.
+ */
+export function paginer(doc: PDFKit.PDFDocument, mention: string, filigrane?: string): void {
   const total = doc.bufferedPageRange().count;
   for (let i = 0; i < total; i++) {
     doc.switchToPage(i);
     const h = doc.page.height;
     const l = doc.page.width;
+    if (filigrane) {
+      doc.save();
+      doc.rotate(-35, { origin: [l / 2, h / 2] });
+      doc.fontSize(42).font("Helvetica-Bold").fillColor("#c0392b").opacity(0.18)
+        .text(assainirTexte(filigrane), 0, h / 2 - 24, { width: l, align: "center", lineBreak: false });
+      doc.restore();
+      doc.opacity(1);
+    }
 
     // ⚠️ Le pied de page s'écrit SOUS la marge basse. Sans neutraliser cette
     // marge, PDFKit juge que le texte ne tient pas sur la page et en ajoute une

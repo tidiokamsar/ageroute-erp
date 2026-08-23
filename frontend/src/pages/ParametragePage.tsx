@@ -10,6 +10,7 @@ import { Input, FormField } from "../components/ui/Input";
 import { toast } from "../components/ui/Toast";
 import { Settings, Save, RefreshCw, ChevronDown, ChevronRight, Plus } from "lucide-react";
 import { ReglesFinancieres } from "../components/parametrage/ReglesFinancieres";
+import { SignatureNumerique } from "../components/parametrage/SignatureNumerique";
 import { Settings2 } from "lucide-react";
 
 interface Param { cle: string; valeur: string; type: string; categorie: string; libelle: string; }
@@ -53,7 +54,7 @@ export function ParametragePage() {
   });
 
   const [showAdd, setShowAdd] = useState(false);
-  const [onglet, setOnglet] = useState<"parametres" | "regles">("parametres");
+  const [onglet, setOnglet] = useState<"parametres" | "regles" | "signature">("parametres");
   const [np, setNp] = useState<Record<string,string>>({ type:"STRING", categorie:"GENERAL" });
   const upsertMut = useMutation({
     mutationFn: (b: object) => api.post("/parametrage/upsert", b),
@@ -97,9 +98,15 @@ export function ParametragePage() {
           className={`px-4 py-2 text-sm font-semibold rounded-t-lg transition-colors ${onglet === "regles" ? "bg-navy text-white" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"}`}>
           <Settings2 size={14} className="inline mr-1.5" /> Règles financières (A1-A10)
         </button>
+        <button
+          onClick={() => setOnglet("signature")}
+          className={`px-4 py-2 text-sm font-semibold rounded-t-lg transition-colors ${onglet === "signature" ? "bg-navy text-white" : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"}`}>
+          <Settings2 size={14} className="inline mr-1.5" /> Signature électronique
+        </button>
       </div>
 
       {onglet === "regles" && <ReglesFinancieres />}
+      {onglet === "signature" && <SignatureNumerique />}
 
       {onglet === "parametres" && (
       <div>

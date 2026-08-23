@@ -368,6 +368,21 @@ export function DecomptesPage() {
     onError: (e) => toast.error(parseApiError(e)),
   });
 
+  // État du module de signature — pilote l'affichage du bouton « Signer ».
+  const { data: sigEtat } = useQuery<any>({
+    queryKey: ["signature-etat"],
+    queryFn: () => api.get("/signature-numerique/etat").then((r) => r.data).catch(() => null),
+    staleTime: 60_000,
+  });
+  const signerMut = useMutation({
+    mutationFn: (b: { id: string; motif: string }) => api.post(`/signature-numerique/decomptes/${b.id}/signer`, { motif: b.motif }).then((r) => r.data),
+    onSuccess: (r: any) => {
+      qc.invalidateQueries();
+      toast.success(`Document signé — ${r.prestataire}, niveau ${r.niveauPades}, validation ${r.validationIndication}. Valeur juridique : ${r.valeurJuridique}`);
+    },
+    onError: (e) => toast.error(parseApiError(e)),
+  });
+
   /**
    * Téléchargement d'un PDF.
    *
@@ -572,6 +587,20 @@ export function DecomptesPage() {
                   onClick={() => downloadPdf(det.id, det.reference, "resume")}>
                   <FileDown className="h-3.5 w-3.5" /> Résumé
                 </button>
+                {/* Signature électronique du dossier complet — n'apparaît que si
+                    le module est actif (Paramétrage → Signature). Hors mode
+                    provider, le document porte un filigrane et n'a aucune valeur. */}
+                {sigEtat?.configuration?.actif && !["ENTREPRISE", "AUDITEUR", "DSF"].includes(role ?? "") && (
+                  <button className="px-2.5 py-1.5 text-xs bg-amber-600 text-white rounded-lg flex items-center gap-1.5 hover:bg-amber-700"
+                    title={`Signer le dossier complet — mode ${sigEtat.configuration.mode}`}
+                    onClick={() => {
+                      const motif = window.prompt("Motif de la signature (obligatoire, min 5 caractères)", `Validation du décompte ${det.reference}`);
+                      if (motif && motif.trim().length >= 5) signerMut.mutate({ id: det.id, motif: motif.trim() });
+                    }}
+                    disabled={signerMut.isPending}>
+                    <Check className="h-3.5 w-3.5" /> {signerMut.isPending ? "Signature…" : `Signer (${sigEtat.configuration.mode})`}
+                  </button>
+                )}
                 {canWrite(role) && det.statut === "BROUILLON" && (
                   <button className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded-lg flex items-center gap-1.5"
                     onClick={() => soumettreWf.mutate(det.id)}>

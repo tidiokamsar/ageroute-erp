@@ -44,12 +44,21 @@ const LIBELLE_ROLE: Record<string, string> = {
   BCRG: "Banque Centrale",
 };
 
-dossierDecompteRouter.get("/decompte/:id/dossier/pdf", async (req: Request, res: Response, next: NextFunction) => {
-  try {
+/**
+ * Génère le dossier complet en mémoire. Réutilisé par la route de téléchargement
+ * ET par le module signature-numerique : le document signé est EXACTEMENT ce
+ * dossier, gelé, avec — hors mode provider — le filigrane imposé (garde-fou G5).
+ * Le périmètre est contrôlé ici, une seule fois, pour les deux usages.
+ */
+export async function genererDossierDecompte(
+  req: Request,
+  decompteId: string,
+  options: { filigrane?: string } = {},
+): Promise<{ pdf: Buffer; reference: string; decompteId: string; marcheId: string; entrepriseId: string }> {
     if (!req.user) throw new ApiError(401, "Authentification requise");
 
     const d = await prisma.decompte.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id: decompteId, deletedAt: null },
       include: {
         marche: { include: { entreprise: true, projet: true } },
         lignesDecompte: { orderBy: { createdAt: "asc" as const } },
@@ -406,15 +415,28 @@ dossierDecompteRouter.get("/decompte/:id/dossier/pdf", async (req: Request, res:
       "#eef2f7", "#1e3a5f", "#1e3a5f",
     );
 
-    paginer(doc, `Dossier ${d.reference} — ${d.marche.reference} — édité le ${new Date().toLocaleString("fr-FR")} par ${req.user.email}`);
+    paginer(doc, `Dossier ${d.reference} — ${d.marche.reference} — édité le ${new Date().toLocaleString("fr-FR")} par ${req.user.email}`, options.filigrane);
 
+    const morceaux: Buffer[] = [];
+    const pdf = await new Promise<Buffer>((resoudre, rejeter) => {
+      doc.on("data", (m: Buffer) => morceaux.push(m));
+      doc.on("end", () => resoudre(Buffer.concat(morceaux)));
+      doc.on("error", rejeter);
+      doc.end();
+    });
+    return { pdf, reference: d.reference, decompteId: d.id, marcheId: d.marcheId, entrepriseId: d.entrepriseId };
+}
+
+dossierDecompteRouter.get("/decompte/:id/dossier/pdf", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentification requise");
+    const r = await genererDossierDecompte(req, req.params.id);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="dossier-${d.reference}.pdf"`);
-    doc.pipe(res);
-    doc.end();
+    res.setHeader("Content-Disposition", `attachment; filename="dossier-${r.reference}.pdf"`);
+    res.send(r.pdf);
 
     await logAudit({
-      userId: req.user.id, action: "UPDATE", entityType: "Decompte", entityId: d.id,
+      userId: req.user.id, action: "UPDATE", entityType: "Decompte", entityId: r.decompteId,
       after: { document: "dossier-complet-pdf", sections: 11 },
     });
   } catch (err) { next(err); }

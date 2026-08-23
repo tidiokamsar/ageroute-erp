@@ -1,0 +1,92 @@
+# LABORATOIRE DE SIGNATURE — AGEROUTE — SANS VALEUR JURIDIQUE
+#
+# Pile open source retenue par le mandat du 20/08/2026 :
+#   · EJBCA Community  — PKI de TEST : autorité racine (à mettre hors ligne après
+#                        création de l'intermédiaire), certificats nominatifs FICTIFS,
+#                        CRL et OCSP de test ;
+#   · SignServer Community — prestataire et TSA SIMULÉS : signature PAdES côté
+#                        serveur, horodatage RFC 3161 de laboratoire, API REST ;
+#                        les clés vivent dans SoftHSM2 (PKCS#11 émulé), jamais dans l'ERP ;
+#   · DSS (Commission européenne) — validation PAdES, construite depuis les sources
+#                        officielles (aucune image publiée par l'éditeur).
+#
+# Règles absolues :
+#   · versions ÉPINGLÉES, jamais `latest` ;
+#   · réseau ISOLÉ, aucun port publié vers l'extérieur ; l'ERP y accède par le
+#     réseau interne « laboratoire-signature » ;
+#   · aucun secret ici : les mots de passe d'administration sont dans
+#     laboratoire.env (hors Git, cf. laboratoire.env.example) ;
+#   · INTERDIT en production : SoftHSM2 n'est pas un HSM, EJBCA de test n'est
+#     pas un prestataire agréé. La CI échoue si ces images apparaissent dans un
+#     manifeste de production.
+#
+# Démarrage :  docker compose -p labo-signature --env-file laboratoire.env up -d
+# Initialisation (CA, profils, worker, clé de test) : ./initialiser.sh
+
+name: labo-signature
+
+services:
+  ejbca-db:
+    image: postgres:16.10-alpine
+    container_name: labo-ejbca-db
+    environment:
+      POSTGRES_DB: ejbca
+      POSTGRES_USER: ejbca
+      POSTGRES_PASSWORD: ${EJBCA_DB_MOT_DE_PASSE}
+    volumes:
+      - labo_ejbca_db:/var/lib/postgresql/data
+    networks: [laboratoire-signature]
+    restart: unless-stopped
+
+  ejbca:
+    image: keyfactor/ejbca-ce:9.3.7
+    container_name: labo-ejbca
+    depends_on: [ejbca-db]
+    environment:
+      DATABASE_JDBC_URL: jdbc:postgresql://ejbca-db:5432/ejbca
+      DATABASE_USER: ejbca
+      DATABASE_PASSWORD: ${EJBCA_DB_MOT_DE_PASSE}
+      TLS_SETUP_ENABLED: "simple"
+      # Le nom de la CA de gestion porte la mention de laboratoire dans son sujet.
+      INITIAL_ADMIN: ";PublicAccessAuthenticationToken:TRANSPORT_ANY;"
+    volumes:
+      - labo_ejbca_data:/mnt/persistent
+    networks: [laboratoire-signature]
+    mem_limit: 2g
+    restart: unless-stopped
+
+  signserver:
+    image: keyfactor/signserver-ce:7.3.2
+    container_name: labo-signserver
+    environment:
+      # SoftHSM2 est fourni dans l'image CE pour les tests. JAMAIS en production.
+      TLS_SETUP_ENABLED: "simple"
+      LOG_LEVEL_APP: INFO
+    volumes:
+      - labo_signserver_data:/mnt/persistent
+      - labo_softhsm:/var/lib/softhsm
+    networks: [laboratoire-signature]
+    mem_limit: 1500m
+    restart: unless-stopped
+
+  dss:
+    build:
+      context: ./dss
+      dockerfile: Dockerfile
+    image: ageroute/dss-laboratoire:6.1
+    container_name: labo-dss
+    networks: [laboratoire-signature]
+    mem_limit: 1500m
+    restart: unless-stopped
+
+networks:
+  laboratoire-signature:
+    name: laboratoire-signature
+    driver: bridge
+    internal: false   # sortie nécessaire pour le build/pull ; aucun port n'est PUBLIÉ
+
+volumes:
+  labo_ejbca_db:
+  labo_ejbca_data:
+  labo_signserver_data:
+  labo_softhsm:

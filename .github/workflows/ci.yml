@@ -51,6 +51,19 @@ jobs:
             echo "Une cle ou un certificat est versionne" >&2
             exit 1
           fi
+      - name: Garde - rien du laboratoire de signature en production
+        working-directory: .
+        run: |
+          # Mandat signature §6 : SoftHSM2, EJBCA CE, SignServer CE ou une URL
+          # de laboratoire dans un manifeste de production = echec.
+          if grep -Eiq 'softhsm|ejbca-ce|signserver-ce|labo-signserver|labo-dss|laboratoire-signature' docker-compose.yml; then
+            echo "Le manifeste de production reference le laboratoire de signature" >&2
+            exit 1
+          fi
+          if grep -Eiq 'SIGNATURE_PRODUCTION_AUTORISEE' docker-compose.yml; then
+            echo "SIGNATURE_PRODUCTION_AUTORISEE ne doit pas figurer dans le manifeste (porte NO-GO)" >&2
+            exit 1
+          fi
 
   frontend:
     name: Frontend
