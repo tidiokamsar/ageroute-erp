@@ -12,58 +12,66 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
   pull_request:
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   backend:
-    name: Backend — types, tests, build
+    name: Backend
     runs-on: ubuntu-latest
     defaults:
-      run: { working-directory: backend }
+      run:
+        working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Sources
+        uses: actions/checkout@v4
+      - name: Node 20
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
           cache: npm
           cache-dependency-path: backend/package-lock.json
-      - run: npm ci
-      - name: Client Prisma (génération seule — jamais db push)
+      - name: Dependances
+        run: npm ci
+      - name: Client Prisma (generation seule, jamais db push)
         run: npx prisma generate
       - name: Types
         run: npx tsc --noEmit
-      - name: Tests unitaires (les preuves PostgreSQL sont ignorées sans PG_TEST)
+      - name: Tests unitaires (les preuves PostgreSQL sont ignorees sans PG_TEST)
         run: node scripts/run-tests.mjs
       - name: Build
         run: npm run build
-      - name: Garde — aucun secret versionné
+      - name: Garde - aucun secret versionne
+        working-directory: .
         run: |
           if git ls-files | grep -E '(^|/)\.env(\.|$)' | grep -v '\.env\.example$'; then
-            echo "Un fichier .env est versionné" >&2; exit 1; fi
+            echo "Un fichier .env est versionne" >&2
+            exit 1
+          fi
           if git ls-files | grep -Ei '\.(p12|pfx|jks|pem|key)$'; then
-            echo "Une clé ou un certificat est versionné" >&2; exit 1; fi
+            echo "Une cle ou un certificat est versionne" >&2
+            exit 1
+          fi
 
   frontend:
-    name: Frontend — types, tests, build
+    name: Frontend
     runs-on: ubuntu-latest
     defaults:
-      run: { working-directory: frontend }
+      run:
+        working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Sources
+        uses: actions/checkout@v4
+      - name: Node 20
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
+      - name: Dependances
+        run: npm ci
       - name: Types
         run: npx tsc --noEmit
       - name: Tests
-        run: npm test -- --run
+        run: npm test
       - name: Build
         run: npm run build
