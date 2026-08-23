@@ -2,6 +2,7 @@
  * Référentiel Marchés — Module complet CDC §3-17
  * Onglets : Identification · Lots · OS · Avenants · Garanties · Réceptions · Décomptes · Situation · Historique
  */
+import { h, ouvrirImpression } from "../lib/html-sur";
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, parseApiError, fmtGnf } from "../lib/api";
@@ -396,7 +397,7 @@ export function MarchesPage() {
     const fmt = (v: number) => new Intl.NumberFormat("fr-GN", { style:"currency", currency:"GNF", maximumFractionDigits:0 }).format(v);
     const fdate = (d?: string | null) => d ? new Date(d).toLocaleDateString("fr-FR") : "—";
     const risqueCls = tc >= 85 ? "color:red;font-weight:bold" : tc >= 70 ? "color:#d97706;font-weight:bold" : "color:green;font-weight:bold";
-    const lignes = (sit.decomptesList ?? []).map((d: any) => `
+    const lignes = (sit.decomptesList ?? []).map((d: any) => h`
       <tr>
         <td style="padding:4px 8px;font-family:monospace">${d.reference}</td>
         <td style="padding:4px 8px">${d.type}</td>
@@ -404,8 +405,8 @@ export function MarchesPage() {
         <td style="padding:4px 8px;text-align:right">${fmt(d.montantPeriodeHtGnf)}</td>
         <td style="padding:4px 8px;text-align:right">${fmt(d.netAPayer)}</td>
         <td style="padding:4px 8px;text-align:right">${fdate(d.dateDepot)}</td>
-      </tr>`).join("");
-    const avance = sit.avanceDemarrage?.montantVerse > 0 ? `
+      </tr>`);
+    const avance = sit.avanceDemarrage?.montantVerse > 0 ? h`
       <h3 style="margin:16px 0 8px;font-size:13px;color:#1e3a8a">AVANCE DE DÉMARRAGE</h3>
       <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">
         <tr>
@@ -417,7 +418,7 @@ export function MarchesPage() {
           <td style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:bold;color:#d97706">${fmt(sit.avanceDemarrage.soldeRestant)}</td>
         </tr>
       </table>` : "";
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+    const html = h`<!DOCTYPE html><html><head><meta charset="utf-8">
       <title>Situation Financière — ${m.reference}</title>
       <style>body{font-family:Arial,sans-serif;font-size:12px;margin:20px}
         table{width:100%;border-collapse:collapse}
@@ -513,11 +514,7 @@ export function MarchesPage() {
         Imprimer
       </button>
     </body></html>`;
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => w.print(), 500);
+    ouvrirImpression(html);
   }
 
   const items: Marche[] = data?.data ?? [];

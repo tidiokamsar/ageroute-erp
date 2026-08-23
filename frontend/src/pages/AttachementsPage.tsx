@@ -7,6 +7,7 @@
  *   - Impression officielle de la fiche (window.print)
  *   - Traçabilité complète des validations précédentes
  */
+import { h, ouvrirImpression } from "../lib/html-sur";
 import { useState, useEffect } from "react";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -178,7 +179,7 @@ function imprimerFiche(att: Attachement) {
   const decompte = att.decompte;
   const marche = decompte?.marche;
 
-  const lignesHTML = (att.lignes ?? []).map(l => `
+  const lignesHTML = (att.lignes ?? []).map(l => h`
     <tr style="border-bottom:1px solid #e5e7eb">
       <td style="padding:6px 8px;font-family:monospace;font-size:11px">${l.codeArticle}</td>
       <td style="padding:6px 8px;font-size:11px">${l.designation}</td>
@@ -190,9 +191,9 @@ function imprimerFiche(att: Attachement) {
       <td style="padding:6px 8px;text-align:right;font-size:11px">${Number(l.prixUnitaire).toLocaleString("fr-GN")}</td>
       <td style="padding:6px 8px;text-align:right;font-size:11px;font-weight:600${l.depassement ? ";color:#dc2626" : ""}">${fmt(l.montant)}</td>
     </tr>
-  `).join("");
+  `);
 
-  const valHTML = (att.validations ?? []).map(v => `
+  const valHTML = (att.validations ?? []).map(v => h`
     <tr>
       <td style="padding:6px 8px;font-size:11px;font-weight:600">${v.etape}</td>
       <td style="padding:6px 8px;font-size:11px">${v.valideNom ?? v.validePar}</td>
@@ -200,15 +201,13 @@ function imprimerFiche(att: Attachement) {
       <td style="padding:6px 8px;font-size:11px;color:${v.statut === "APPROUVE" ? "#16a34a" : "#dc2626"}">${v.statut}</td>
       <td style="padding:6px 8px;font-size:11px">${v.commentaire ?? "—"}</td>
     </tr>
-  `).join("");
+  `);
 
   const gpsHTML = (att.pointsGPS ?? []).slice(0, 6).map(g =>
-    `<li style="font-size:11px;margin-bottom:3px">Lat ${g.latitude.toFixed(6)}, Lon ${g.longitude.toFixed(6)}${g.description ? ` — ${g.description}` : ""}</li>`
-  ).join("");
+    h`<li style="font-size:11px;margin-bottom:3px">Lat ${g.latitude.toFixed(6)}, Lon ${g.longitude.toFixed(6)}${g.description ? ` — ${g.description}` : ""}</li>`
+  );
 
-  const w = window.open("", "_blank");
-  if (!w) return;
-  w.document.write(`<!DOCTYPE html><html lang="fr"><head>
+  const html = h`<!DOCTYPE html><html lang="fr"><head>
     <meta charset="UTF-8"/>
     <title>Fiche Attachement ${att.code ?? att.id}</title>
     <style>
@@ -264,7 +263,7 @@ function imprimerFiche(att: Attachement) {
       </div>
     </div>
 
-    ${att.lignes?.length ? `
+    ${att.lignes?.length ? h`
     <div class="section">
       <div class="section-title">Détail des quantités exécutées (BPU)</div>
       <table>
@@ -282,28 +281,28 @@ function imprimerFiche(att: Attachement) {
           <td colspan="8" style="padding:8px;text-align:right;font-weight:700;font-size:12px">TOTAL HT</td>
           <td style="padding:8px;text-align:right;font-weight:700;font-size:12px">${fmt(att.montantHtGnf)}</td>
         </tr>
-        ${att.montantTvaGnf ? `<tr><td colspan="8" style="padding:4px 8px;text-align:right;font-size:11px">TVA 18%</td><td style="padding:4px 8px;text-align:right;font-size:11px">${fmt(att.montantTvaGnf)}</td></tr>` : ""}
-        ${att.montantArmpGnf ? `<tr><td colspan="8" style="padding:4px 8px;text-align:right;font-size:11px">ARMP 0,6%</td><td style="padding:4px 8px;text-align:right;font-size:11px">${fmt(att.montantArmpGnf)}</td></tr>` : ""}
-        ${att.montantTtcGnf ? `<tr class="montant-row"><td colspan="8" style="padding:8px;text-align:right;font-weight:800;font-size:13px">TOTAL TTC</td><td style="padding:8px;text-align:right;font-weight:800;font-size:13px">${fmt(att.montantTtcGnf)}</td></tr>` : ""}
+        ${att.montantTvaGnf ? h`<tr><td colspan="8" style="padding:4px 8px;text-align:right;font-size:11px">TVA 18%</td><td style="padding:4px 8px;text-align:right;font-size:11px">${fmt(att.montantTvaGnf)}</td></tr>` : ""}
+        ${att.montantArmpGnf ? h`<tr><td colspan="8" style="padding:4px 8px;text-align:right;font-size:11px">ARMP 0,6%</td><td style="padding:4px 8px;text-align:right;font-size:11px">${fmt(att.montantArmpGnf)}</td></tr>` : ""}
+        ${att.montantTtcGnf ? h`<tr class="montant-row"><td colspan="8" style="padding:8px;text-align:right;font-weight:800;font-size:13px">TOTAL TTC</td><td style="padding:8px;text-align:right;font-weight:800;font-size:13px">${fmt(att.montantTtcGnf)}</td></tr>` : ""}
       </table>
     </div>
     ` : ""}
 
-    ${att.pointsGPS?.length ? `
+    ${att.pointsGPS?.length ? h`
     <div class="section">
       <div class="section-title">Points GPS de contrôle (${att.pointsGPS.length} point(s))</div>
       <ul style="margin:0;padding-left:16px">${gpsHTML}</ul>
     </div>
     ` : ""}
 
-    ${att.observations ? `
+    ${att.observations ? h`
     <div class="section">
       <div class="section-title">Observations</div>
       <p style="font-size:11px;margin:0;padding:8px;background:#f9fafb;border-radius:4px">${att.observations}</p>
     </div>
     ` : ""}
 
-    ${att.validations?.length ? `
+    ${att.validations?.length ? h`
     <div class="section">
       <div class="section-title">Historique des validations</div>
       <table>
@@ -336,9 +335,8 @@ function imprimerFiche(att: Attachement) {
       AGEROUTE GUINÉE — Système ERP — Document généré le ${new Date().toLocaleString("fr-GN")} — NE PAS MODIFIER
     </div>
 
-    <script>window.onload = function(){ window.print(); }</script>
-  </body></html>`);
-  w.document.close();
+  </body></html>`;
+  ouvrirImpression(html);
 }
 
 // ===== BANDEAU MES TÂCHES =====

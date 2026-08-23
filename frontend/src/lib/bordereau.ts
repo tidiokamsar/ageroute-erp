@@ -1,4 +1,7 @@
 import { fmtGnf } from "./api";
+// Tout HTML passe par le gabarit `h` : chaque donnée interpolée est échappée.
+// Voir html-sur.ts — correction de la XSS persistante des impressions.
+import { h, ouvrirImpression } from "./html-sur";
 
 // ─── Bordereau de validation imprimable (circuit papier // circuit numérique) ──
 export function imprimerBordereau(det: Record<string, unknown>, v: Record<string, unknown>) {
@@ -7,7 +10,7 @@ export function imprimerBordereau(det: Record<string, unknown>, v: Record<string
   const fdate = (x: unknown) => x ? new Date(x as string).toLocaleString("fr-FR") : "—";
   const decision = String(v.decision ?? "");
   const decColor = decision === "APPROUVE" ? "#16a34a" : decision === "REJETE" ? "#dc2626" : "#d97706";
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+  const html = h`<!DOCTYPE html><html><head><meta charset="utf-8">
     <title>Bordereau — ${det.reference}</title>
     <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px;color:#111}
       table{width:100%;border-collapse:collapse;margin-bottom:14px}
@@ -43,7 +46,7 @@ export function imprimerBordereau(det: Record<string, unknown>, v: Record<string
       <tr><td class="lbl">Décision</td><td style="font-weight:bold;color:${decColor}">${decision}</td></tr>
       <tr><td class="lbl">Validé par</td><td>${v.valideNom ?? v.validePar ?? "—"} (${v.valideRole ?? "—"})</td></tr>
       <tr><td class="lbl">Date / heure</td><td>${fdate(v.valideAt)}</td></tr>
-      ${v.signatureRef ? `<tr><td class="lbl">Réf. signature électronique</td><td style="font-family:monospace">${v.signatureRef}</td></tr>` : ""}
+      ${v.signatureRef ? h`<tr><td class="lbl">Réf. signature électronique</td><td style="font-family:monospace">${v.signatureRef}</td></tr>` : ""}
       <tr><td class="lbl">Avis / Commentaire</td><td>${v.commentaire ?? "—"}</td></tr>
     </table>
     <p style="font-size:10px;color:#6b7280;margin:16px 0 30px">
@@ -56,11 +59,7 @@ export function imprimerBordereau(det: Record<string, unknown>, v: Record<string
     </div>
     <button onclick="window.print()" style="position:fixed;bottom:20px;right:20px;background:#1B2A4A;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer">Imprimer</button>
   </body></html>`;
-  const win = window.open("", "_blank");
-  if (!win) return;
-  win.document.write(html);
-  win.document.close();
-  setTimeout(() => win.print(), 500);
+  ouvrirImpression(html);
 }
 
 
@@ -73,7 +72,7 @@ export function imprimerFicheAnalyse(det: Record<string, unknown>, validations: 
     const v = validations.filter((x) => x.etape === etape && x.decision !== "RECEPTION").slice(0, 1)[0];
     return v ? `${v.decision} — ${v.commentaire ?? ""} (${v.valideNom ?? ""}, ${v.valideAt ? new Date(v.valideAt as string).toLocaleDateString("fr-FR") : ""})` : "En attente";
   };
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Fiche d'analyse — ${det.reference}</title>
+  const html = h`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Fiche d'analyse — ${det.reference}</title>
     <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px;color:#111}
       table{width:100%;border-collapse:collapse;margin-bottom:14px}
       td{border:1px solid #d1d5db;padding:6px 10px}
@@ -118,10 +117,7 @@ export function imprimerFicheAnalyse(det: Record<string, unknown>, validations: 
     </div>
     <button onclick="window.print()" style="position:fixed;bottom:20px;right:20px;background:#1B2A4A;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer">Imprimer</button>
   </body></html>`;
-  const win = window.open("", "_blank");
-  if (!win) return;
-  win.document.write(html); win.document.close();
-  setTimeout(() => win.print(), 500);
+  ouvrirImpression(html);
 }
 
 // ─── Bordereau de paiement — produit pour la DAF / le DG ──────────────────────
@@ -129,7 +125,7 @@ export function imprimerBordereauPaiement(det: Record<string, unknown>) {
   const marche = det.marche as Record<string, unknown> | undefined;
   const entreprise = det.entreprise as Record<string, unknown> | undefined;
   const g = (k: string) => fmtGnf(String(det[k] ?? "0"));
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Bordereau de paiement — ${det.reference}</title>
+  const html = h`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Bordereau de paiement — ${det.reference}</title>
     <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px;color:#111}
       table{width:100%;border-collapse:collapse;margin-bottom:14px}
       td{border:1px solid #d1d5db;padding:6px 10px}
@@ -169,10 +165,7 @@ export function imprimerBordereauPaiement(det: Record<string, unknown>) {
     </div>
     <button onclick="window.print()" style="position:fixed;bottom:20px;right:20px;background:#166534;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer">Imprimer</button>
   </body></html>`;
-  const win = window.open("", "_blank");
-  if (!win) return;
-  win.document.write(html); win.document.close();
-  setTimeout(() => win.print(), 500);
+  ouvrirImpression(html);
 }
 
 
@@ -183,7 +176,7 @@ export function imprimerPV(rec: Record<string, unknown>) {
   const TYPE_LBL: Record<string, string> = { OPR: "OPÉRATIONS PRÉALABLES À LA RÉCEPTION (OPR)", PROVISOIRE: "RÉCEPTION PROVISOIRE", DEFINITIVE: "RÉCEPTION DÉFINITIVE" };
   const fdate = (x: unknown) => x ? new Date(x as string).toLocaleDateString("fr-FR") : "—";
   const reserves = Array.isArray(rec.reserves) ? (rec.reserves as string[]) : [];
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>PV — ${marche?.reference ?? ""}</title>
+  const html = h`<!DOCTYPE html><html><head><meta charset="utf-8"><title>PV — ${marche?.reference ?? ""}</title>
     <style>body{font-family:Arial,sans-serif;font-size:12px;margin:24px;color:#111}
       table{width:100%;border-collapse:collapse;margin-bottom:14px}
       td{border:1px solid #d1d5db;padding:6px 10px}
@@ -211,11 +204,11 @@ export function imprimerPV(rec: Record<string, unknown>) {
       <tr><td class="lbl">Autres (bailleur, bureau de contrôle…)</td><td>${rec.presentsAutres ?? "—"}</td></tr>
     </table>
     <h3 style="font-size:13px;color:#1B2A4A;margin:14px 0 8px">RÉSERVES ${reserves.length ? `(${reserves.length})` : "— NÉANT"}</h3>
-    ${reserves.length ? `<table>${reserves.map((x, i) => `<tr><td class=\"lbl\">Réserve ${i + 1}</td><td>${x}</td></tr>`).join("")}
+    ${reserves.length ? h`<table>${reserves.map((x, i) => h`<tr><td class="lbl">Réserve ${i + 1}</td><td>${x}</td></tr>`)}
       <tr><td class="lbl">Délai de levée</td><td>${rec.delaiLeveeReserves ? rec.delaiLeveeReserves + " jours" : "—"}</td></tr>
       <tr><td class="lbl">Levées le</td><td>${fdate(rec.dateLeveeReserves)}</td></tr></table>` : ""}
-    ${rec.observations ? `<h3 style="font-size:13px;color:#1B2A4A;margin:14px 0 8px">OBSERVATIONS</h3><p style="border:1px solid #d1d5db;padding:8px 10px">${rec.observations}</p>` : ""}
-    ${Array.isArray(rec.pieces) && (rec.pieces as Array<{nom:string}>).length ? `<h3 style="font-size:13px;color:#1B2A4A;margin:14px 0 8px">PIÈCES ANNEXÉES AU PRÉSENT PV</h3><table>${(rec.pieces as Array<{nom:string;type?:string}>).map((pc, i) => `<tr><td class=\"lbl\">Annexe ${i + 1}</td><td>${pc.type === "PHOTO" ? "Photo" : "Document"} — ${pc.nom}</td></tr>`).join("")}</table>` : ""}
+    ${rec.observations ? h`<h3 style="font-size:13px;color:#1B2A4A;margin:14px 0 8px">OBSERVATIONS</h3><p style="border:1px solid #d1d5db;padding:8px 10px">${rec.observations}</p>` : ""}
+    ${Array.isArray(rec.pieces) && (rec.pieces as Array<{nom:string}>).length ? h`<h3 style="font-size:13px;color:#1B2A4A;margin:14px 0 8px">PIÈCES ANNEXÉES AU PRÉSENT PV</h3><table>${(rec.pieces as Array<{nom:string;type?:string}>).map((pc, i) => h`<tr><td class="lbl">Annexe ${i + 1}</td><td>${pc.type === "PHOTO" ? "Photo" : "Document"} — ${pc.nom}</td></tr>`)}</table>` : ""}
     <p style="font-size:10px;color:#6b7280;margin:16px 0 30px">
       Le présent procès-verbal est établi en application du CCAG Travaux. Il est signé par les membres
       de la commission et vaut ${String(rec.type) === "DEFINITIVE" ? "libération des obligations contractuelles sous réserve de la garantie décennale" : "prise de possession partielle des ouvrages sous réserve des garanties contractuelles"}.
@@ -230,8 +223,5 @@ export function imprimerPV(rec: Record<string, unknown>) {
     </div>
     <button onclick="window.print()" style="position:fixed;bottom:20px;right:20px;background:#1B2A4A;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer">Imprimer</button>
   </body></html>`;
-  const win = window.open("", "_blank");
-  if (!win) return;
-  win.document.write(html); win.document.close();
-  setTimeout(() => win.print(), 500);
+  ouvrirImpression(html);
 }
