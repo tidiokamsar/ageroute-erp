@@ -136,7 +136,40 @@ ssh gec 'docker run --rm --network erp-ageroute_erp-net -v $D/backend/src:/app/s
 
 Attendu : `# pass 3`. Le conteneur `erp-repetition` est supprimé ensuite.
 
-## 8. Clore
+## 8. Sauvegarde quotidienne — base ET pièces
+
+`scripts/sauvegarde.sh`, installé en `~/sauvegarde.sh` sur le serveur et lancé par cron chaque
+jour à 02:00, produit dans `/home/agergec/sauvegardes/AAAAMMJJ-HHMM/` :
+
+| Fichier | Contenu |
+|---|---|
+| `erp.dump` | `pg_dump -Fc` de la base |
+| `uploads.tar.gz` | le volume `erp-ageroute_erp_uploads` — **les pièces jointes, que `deploy.sh` n'a jamais sauvegardées** |
+| `SHA256SUMS`, `MANIFESTE` | empreintes, tailles, nombre de fichiers, image backend en service |
+
+Rétention 14 jours sur le serveur. **Copier le dossier hors du serveur** (`F:\ERP-sauvegarde\`)
+au moins chaque semaine : une sauvegarde qui vit sur la machine qu'elle protège n'en est pas
+une. Journal : `~/sauvegardes/journal.log`.
+
+Restauration = §4b pour la base, puis `docker run --rm -v erp-ageroute_erp_uploads:/u -v
+<dossier>:/s alpine tar xzf /s/uploads.tar.gz -C /u` pour les pièces — **les deux ensemble**,
+d'une même sauvegarde, sinon les dossiers renvoient à des fichiers qui n'existent pas.
+
+## 9. Reconstruire une base vierge
+
+`backend/prisma/sql/0000-baseline-2026-08-22.sql` est l'état complet du schéma (76 tables, dont
+`bpmn_*`, `ref_*`, `sig_*` hors Prisma). Sur un PostgreSQL vierge :
+
+```bash
+psql -v ON_ERROR_STOP=1 -f 0000-baseline-2026-08-22.sql
+for f in 2026-*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done    # idempotents
+node dist/lib/seed.js
+```
+
+Prouvé le 22/08/2026 sur un conteneur jetable. Régénérer la baseline après chaque série de
+migrations (voir `backend/prisma/sql/README.md`).
+
+## 10. Clore
 
 Noter dans le message de commit ou le rapport : commit déployé, fichiers copiés, migrations
 appliquées, vérifications observées, et ce qui n'a **pas** pu être prouvé.
