@@ -79,15 +79,15 @@ const router = createBrowserRouter(
           <Route path="entreprises" element={<EntreprisesPage />} handle={{ title: "Référentiel Entreprises" }} />
           <Route path="financements" element={<FinancementsPage />} handle={{ title: "Gestion des Financements" }} />
           <Route path="paiements" element={<PaiementsPage />} handle={{ title: "Paiements" }} />
-          <Route path="projets" element={<ProjetsPage />} handle={{ title: "Projets §6" }} />
+          <Route path="projets" element={<ProjetsPage />} handle={{ title: "Projets" }} />
           <Route path="marches" element={<MarchesPage />} handle={{ title: "Marchés" }} />
-          <Route path="decomptes" element={<DecomptesPage />} handle={{ title: "e-Décomptes §7-16" }} />
-          <Route path="attachements" element={<AttachementsPage />} handle={{ title: "Attachements §9" }} />
-          <Route path="audit" element={<AuditPage />} handle={{ title: "Journal d'audit §19" }} />
-          <Route path="workflow" element={<WorkflowPage />} handle={{ title: "Mes tâches §10" }} />
+          <Route path="decomptes" element={<DecomptesPage />} handle={{ title: "e-Décomptes" }} />
+          <Route path="attachements" element={<AttachementsPage />} handle={{ title: "Attachements" }} />
+          <Route path="audit" element={<AuditPage />} handle={{ title: "Journal d'audit" }} />
+          <Route path="workflow" element={<WorkflowPage />} handle={{ title: "Mes tâches" }} />
           <Route path="routier" element={<RoutierPage />} handle={{ title: "Référentiel Routier" }} />
-          <Route path="utilisateurs" element={<UsersPage />} handle={{ title: "Gestion Utilisateurs §23" }} />
-          <Route path="parametrage"  element={<ParametragePage />}  handle={{ title: "Paramétrage §22" }} />
+          <Route path="utilisateurs" element={<UsersPage />} handle={{ title: "Gestion Utilisateurs" }} />
+          <Route path="parametrage"  element={<ParametragePage />}  handle={{ title: "Paramétrage" }} />
           <Route path="garanties"   element={<GarantiesPage />}   handle={{ title: "Garanties marchés" }} />
           <Route path="receptions"  element={<ReceptionsPage />}  handle={{ title: "Réceptions — OPR / PV" }} />
           <Route path="avenants"    element={<AvenantsPage />}    handle={{ title: "Avenants marchés" }} />

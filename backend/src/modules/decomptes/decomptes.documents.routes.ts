@@ -24,7 +24,7 @@ export const decompteDocumentsRouter = Router({ mergeParams: true });
 /** Natures attendues — miroir du bordereau de pièces affiché à l'écran. */
 export const NATURES_PIECES = [
   { cle: "decompteSigné",     libelle: "Décompte signé",          requis: true },
-  { cle: "attachements",      libelle: "Attachements validés §9", requis: true },
+  { cle: "attachements",      libelle: "Attachements validés", requis: true },
   { cle: "facture",           libelle: "Facture de l'entreprise", requis: true },
   { cle: "rapportAvancement", libelle: "Rapport d'avancement",    requis: true },
   { cle: "photosChantier",    libelle: "Photos de chantier",      requis: false },
@@ -169,7 +169,7 @@ decompteDocumentsRouter.post("/", async (req: Request, res: Response, next: Next
 /**
  * DELETE /api/decomptes/:id/documents/:documentId
  * Archivage, pas suppression : une pièce justificative retirée doit rester
- * traçable (AGENTS.md §3.4).
+ * traçable (AGENTS.md).
  */
 decompteDocumentsRouter.delete("/:documentId", async (req: Request, res: Response, next: NextFunction) => {
   try {

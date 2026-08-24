@@ -248,12 +248,12 @@ export function BiPage() {
               <div key={label} className={`${color} rounded-xl p-3 text-center`}>
                 <p className="text-xs font-bold">{label}</p>
                 <p className="text-lg font-black mt-1">{sla}</p>
-                <p className="text-[9px] mt-1 opacity-70">SLA paramétré §22</p>
+                <p className="text-[9px] mt-1 opacity-70">SLA paramétré</p>
               </div>
             ))}
           </div>
           <p className="text-xs text-gray-400 mt-4">
-            Les délais SLA sont modifiables sans redéveloppement via la page <strong>Paramétrage §22</strong>.
+            Les délais SLA sont modifiables sans redéveloppement via la page <strong>Paramétrage</strong>.
             Un moteur d'alertes automatiques notifie les responsables avant expiration.
           </p>
         </div>
@@ -265,7 +265,7 @@ export function BiPage() {
           <div className="grid grid-cols-3 gap-3">
             {[
               { label:"Total entreprises", value: general?.entreprises?.total ?? "—" },
-              { label:"Bloquées §CDC", value: general?.entreprises?.bloquees ?? "—" },
+              { label:"Bloquées", value: general?.entreprises?.bloquees ?? "—" },
               { label:"Alertes conformité", value: general?.alertes?.nonEnvoyees ?? "—" },
             ].map(({ label, value }) => (
               <div key={label} className="bg-white rounded-xl border border-gray-100 shadow-card px-4 py-3">

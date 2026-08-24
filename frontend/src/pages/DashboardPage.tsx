@@ -1,7 +1,7 @@
 /**
- * §21 CDC — Tableaux de bord adaptés par profil :
+ * — Tableaux de bord adaptés par profil :
  * DG | DAF | DMC | UGP | ENTREPRISE | ADMIN/MISSION/TECHNIQUE
- * §17 CDC — Suivi statut décomptes en temps réel
+ * — Suivi statut décomptes en temps réel
  */
 import { useQuery } from "@tanstack/react-query";
 import { api, fmtGnf } from "../lib/api";
@@ -57,7 +57,7 @@ type PipelineStep = {
   }[];
 };
 
-// ─── Vue DG §21 ────────────────────────────────────────────────────────────────
+// ─── Vue DG ────────────────────────────────────────────────────────────────
 function DashboardDg({
   data,
   pipeline,
@@ -185,7 +185,7 @@ function DashboardDg({
   );
 }
 
-// ─── Vue DAF §21 ───────────────────────────────────────────────────────────────
+// ─── Vue DAF ───────────────────────────────────────────────────────────────
 function DashboardDaf({ data }: {
   data: {
     enAttenteVisa: number;
@@ -213,7 +213,7 @@ function DashboardDaf({ data }: {
       {data.circuitsEnCours.length > 0 && (
         <div>
           <p className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <GitBranch className="h-4 w-4 text-navy"/> Circuits financiers en cours §16
+            <GitBranch className="h-4 w-4 text-navy"/> Circuits financiers en cours
           </p>
           <div className="space-y-2">
             {data.circuitsEnCours.slice(0, 10).map((c) => {
@@ -241,7 +241,7 @@ function DashboardDaf({ data }: {
   );
 }
 
-// ─── Vue DMC §21 ───────────────────────────────────────────────────────────────
+// ─── Vue DMC ───────────────────────────────────────────────────────────────
 function DashboardDmc({ data }: {
   data: {
     enAnalyse: number;
@@ -267,7 +267,7 @@ function DashboardDmc({ data }: {
         <Kpi label="Rejetés"            value={data.rejets}      icon={AlertTriangle} accent="bg-red-500"/>
       </div>
       <div>
-        <p className="text-sm font-semibold text-gray-700 mb-3">Dossiers à traiter — Contrôle contractuel DMC §13</p>
+        <p className="text-sm font-semibold text-gray-700 mb-3">Dossiers à traiter — Contrôle contractuel DMC</p>
         <div className="space-y-2">
           {data.dossiers.map((d) => (
             <div key={d.id} className="bg-white rounded-lg border border-gray-200 px-4 py-3 flex items-center justify-between text-sm">
@@ -292,7 +292,7 @@ function DashboardDmc({ data }: {
   );
 }
 
-// ─── Vue UGP §21 ───────────────────────────────────────────────────────────────
+// ─── Vue UGP ───────────────────────────────────────────────────────────────
 function DashboardUgp({ data }: {
   data: {
     circuitsBailleur: {
@@ -315,7 +315,7 @@ function DashboardUgp({ data }: {
         <Kpi label="Demandes décaissement en cours" value={data.circuitsBailleur.length} icon={CircleDollarSign} accent="bg-blue-600"/>
       </div>
       <div>
-        <p className="text-sm font-semibold text-gray-700 mb-3">Circuits bailleurs en cours §16.2</p>
+        <p className="text-sm font-semibold text-gray-700 mb-3">Circuits bailleurs en cours</p>
         <div className="space-y-2">
           {data.circuitsBailleur.map((c) => {
             const etapeCourante = c.etapes[c.etapeActuelle];
@@ -358,7 +358,7 @@ function DashboardUgp({ data }: {
   );
 }
 
-// ─── Vue Générale §21 (ADMIN / MISSION / TECHNIQUE) ────────────────────────────
+// ─── Vue Générale (ADMIN / MISSION / TECHNIQUE) ────────────────────────────
 function DashboardGeneral({ data }: {
   data: {
     role: string;
@@ -520,41 +520,41 @@ export function DashboardPage() {
           </a>
         </div>
       )}
-      {/* Vue DG §21 */}
+      {/* Vue DG */}
       {(role === "DG" || role === "ADMIN") && dgData && (
         <section>
           <h2 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <Eye className="h-5 w-5 text-navy"/> Vue Direction Générale §15/§21
+            <Eye className="h-5 w-5 text-navy"/> Vue Direction Générale/
           </h2>
           <DashboardDg data={dgData} pipeline={pipelineData?.pipeline}/>
         </section>
       )}
 
-      {/* Vue DAF §21 */}
+      {/* Vue DAF */}
       {(role === "DAF" || role === "ADMIN") && dafData && (
         <section>
           <h2 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <Stamp className="h-5 w-5 text-blue-600"/> Vue DAF — Engagements & Circuits financiers §14/§16/§21
+            <Stamp className="h-5 w-5 text-blue-600"/> Vue DAF — Engagements & Circuits financiers//
           </h2>
           <DashboardDaf data={dafData}/>
         </section>
       )}
 
-      {/* Vue DMC §21 */}
+      {/* Vue DMC */}
       {(role === "DMC" || role === "ADMIN") && dmcData && (
         <section>
           <h2 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <FileText className="h-5 w-5 text-indigo-600"/> Vue DMC — Contrôle contractuel §13/§21
+            <FileText className="h-5 w-5 text-indigo-600"/> Vue DMC — Contrôle contractuel/
           </h2>
           <DashboardDmc data={dmcData}/>
         </section>
       )}
 
-      {/* Vue UGP §21 */}
+      {/* Vue UGP */}
       {(role === "UGP" || role === "ADMIN") && ugpData && (
         <section>
           <h2 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <CircleDollarSign className="h-5 w-5 text-blue-600"/> Vue UGP — Demandes de décaissement §16.2/§21
+            <CircleDollarSign className="h-5 w-5 text-blue-600"/> Vue UGP — Demandes de décaissement/
           </h2>
           <DashboardUgp data={ugpData}/>
         </section>

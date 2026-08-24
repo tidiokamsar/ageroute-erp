@@ -1,5 +1,5 @@
 /**
- * Référentiel Entreprises — Module complet CDC §3-15
+ * Référentiel Entreprises — Module complet CDC
  * Onglets : Identité · Documents · Conformité · Contacts · Marchés · Décomptes · Performance · Historique
  */
 import { useState } from "react";
@@ -538,11 +538,11 @@ export function EntreprisesPage() {
               ))}
             </div>
 
-            {/* ── Identité §3.1-3.2 ── */}
+            {/* ── Identité ── */}
             {detailTab === "identite" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-3 gap-x-6 gap-y-3 text-sm">
-                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1">§3.1 Identité légale</div>
+                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1"> Identité légale</div>
                   {[
                     ["Raison sociale", detail.raisonSociale], ["Sigle", detail.sigle], ["Forme juridique", detail.formeJuridique],
                     ["NIF", detail.nif], ["N° TVA", detail.numerotva], ["RCCM", detail.rccm],
@@ -553,7 +553,7 @@ export function EntreprisesPage() {
                     <div key={String(k)}><p className="text-[10px] text-gray-400">{k}</p><p className="font-medium text-gray-800 mt-0.5">{v ?? "—"}</p></div>
                   ))}
 
-                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2">§3.2 Administratif</div>
+                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2"> Administratif</div>
                   {[
                     ["Adresse", detail.adresse], ["Ville", detail.ville], ["Commune", detail.commune],
                     ["Téléphone", detail.telephone], ["Email", detail.email], ["Site web", detail.siteWeb],
@@ -563,7 +563,7 @@ export function EntreprisesPage() {
                     <div key={String(k)}><p className="text-[10px] text-gray-400">{k}</p><p className="font-medium text-gray-800 mt-0.5 break-all">{v ?? "—"}</p></div>
                   ))}
 
-                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2">§3.3 Fiscal & social</div>
+                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2"> Fiscal & social</div>
                   {[
                     ["Régime fiscal", detail.regimeFiscal], ["Assujetti TVA", detail.assujettTVA ? "Oui" : "Non"],
                     ["Régularité fiscale", detail.regulariteFiscale ? "✅ Oui" : "❌ Non"],
@@ -578,7 +578,7 @@ export function EntreprisesPage() {
                     return <div key={String(k)}><p className="text-[10px] text-gray-400">{k}</p><p className="font-medium text-gray-800 mt-0.5">{v ?? "—"}</p></div>;
                   })}
 
-                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2">§3.4 Statut juridique</div>
+                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2"> Statut juridique</div>
                   {[
                     ["Radiée", detail.estRadie ? "🔴 Oui" : "Non"],
                     ["Suspendue", detail.estSuspendu ? "🟠 Oui" : "Non"],
@@ -591,7 +591,7 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Documents §5 ── */}
+            {/* ── Documents ── */}
             {detailTab === "documents" && (
               <div className="space-y-3">
                 {canWrite(user?.role) && (
@@ -640,7 +640,7 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Conformité §4 ── */}
+            {/* ── Conformité ── */}
             {detailTab === "conformite" && (
               <div className="space-y-4">
                 {/* Panneau score */}
@@ -699,7 +699,7 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Contacts §3.2 ── */}
+            {/* ── Contacts ── */}
             {detailTab === "contacts" && (
               <div className="space-y-3">
                 {canWrite(user?.role) && (
@@ -726,7 +726,7 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Marchés §7 ── */}
+            {/* ── Marchés ── */}
             {detailTab === "marches" && (
               <div className="overflow-x-auto">
                 {!(marchesLies ?? []).length && <p className="text-sm text-gray-400 py-8 text-center">Aucun marché</p>}
@@ -763,7 +763,7 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Décomptes §8 ── */}
+            {/* ── Décomptes ── */}
             {detailTab === "decomptes" && (
               <div className="overflow-x-auto">
                 {!(decomptesLies ?? []).length && <p className="text-sm text-gray-400 py-8 text-center">Aucun décompte</p>}
@@ -795,7 +795,7 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Performance §11 ── */}
+            {/* ── Performance ── */}
             {detailTab === "performance" && (
               <div className="space-y-4">
                 {!performance ? (
@@ -848,7 +848,7 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Historique conformité §6 ── */}
+            {/* ── Historique conformité ── */}
             {detailTab === "historique" && (
               <div className="space-y-2">
                 {!(conformiteHisto ?? []).length && <p className="text-sm text-gray-400 py-8 text-center">Aucun historique</p>}
@@ -870,7 +870,7 @@ export function EntreprisesPage() {
             )}
 
 
-            {/* ── Utilisateurs liés §7.2 ── */}
+            {/* ── Utilisateurs liés ── */}
             {detailTab === "utilisateurs" && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -905,7 +905,7 @@ export function EntreprisesPage() {
               </div>
             )}
 
-            {/* ── Suivi & Audit §7.6 ── */}
+            {/* ── Suivi & Audit ── */}
             {detailTab === "suivi" && (
               <div className="space-y-4">
                 {/* Changement de statut */}
@@ -992,9 +992,9 @@ export function EntreprisesPage() {
       <Modal open={modal !== null} onClose={() => setModal(null)}
         title={modal === "new" ? "Nouvelle entreprise" : "Modifier l'entreprise"} size="xl">
         <div className="max-h-[70vh] overflow-y-auto pr-1 space-y-4">
-          {/* §3.1 Identité */}
+          {/* Identité */}
           <div>
-            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2">§3.1 Identité légale</p>
+            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2"> Identité légale</p>
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Raison sociale" required className="col-span-2"><Input value={String(form.raisonSociale??"")} onChange={e=>f("raisonSociale",e.target.value)}/></FormField>
               <FormField label="Sigle"><Input value={String(form.sigle??"")} onChange={e=>f("sigle",e.target.value)}/></FormField>
@@ -1018,9 +1018,9 @@ export function EntreprisesPage() {
             </div>
           </div>
 
-          {/* §3.2 Administratif */}
+          {/* Administratif */}
           <div>
-            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2">§3.2 Administratif & Bancaire</p>
+            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2"> Administratif & Bancaire</p>
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Adresse" className="col-span-2"><Input value={String(form.adresse??"")} onChange={e=>f("adresse",e.target.value)}/></FormField>
               <FormField label="Ville"><Input value={String(form.ville??"")} onChange={e=>f("ville",e.target.value)}/></FormField>
@@ -1039,9 +1039,9 @@ export function EntreprisesPage() {
             </div>
           </div>
 
-          {/* §3.3 Conformité */}
+          {/* Conformité */}
           <div>
-            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2">§3.3 Conformité fiscale & sociale</p>
+            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2"> Conformité fiscale & sociale</p>
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Régime fiscal">
                 <Select value={String(form.regimeFiscal??"")} onChange={e=>f("regimeFiscal",e.target.value)}>

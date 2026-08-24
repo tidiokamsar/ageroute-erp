@@ -1,5 +1,5 @@
 /**
- * Référentiel Marchés — Module complet CDC §3-17
+ * Référentiel Marchés — Module complet CDC
  * Onglets : Identification · Lots · OS · Avenants · Garanties · Réceptions · Décomptes · Situation · Historique
  */
 import { h, ouvrirImpression } from "../lib/html-sur";
@@ -528,7 +528,7 @@ export function MarchesPage() {
     { key:"garanties",      label:"Garanties",       icon:Shield },
     { key:"receptions",     label:"Réceptions",      icon:CheckCircle2 },
     { key:"decomptes",      label:"Décomptes",       icon:Receipt },
-    { key:"situation",      label:"Situation §13",   icon:TrendingUp },
+    { key:"situation",      label:"Situation",   icon:TrendingUp },
     { key:"courbes",        label:"Courbe S",        icon:Activity },
     { key:"historique",     label:"Historique",      icon:Activity },
   ];
@@ -703,7 +703,7 @@ export function MarchesPage() {
               ))}
             </div>
 
-            {/* ── Tab Identification §3 ── */}
+            {/* ── Tab Identification ── */}
             {detailTab === "identification" && (
               <div className="space-y-4">
                 {/* Checklist conformité */}
@@ -724,8 +724,8 @@ export function MarchesPage() {
                 )}
 
                 <div className="grid grid-cols-3 gap-x-6 gap-y-3 text-sm">
-                  {/* §3.1 Identification */}
-                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1">§3.1 Identification</div>
+                  {/* Identification */}
+                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1"> Identification</div>
                   {[
                     ["Référence", detail.reference],["N° Contrat", detail.numContrat],["N° Approbation", detail.numApprobation],
                     ["Type", detail.type],["Procédure", detail.procedure],["Financement", detail.financement],
@@ -736,8 +736,8 @@ export function MarchesPage() {
                   ].map(([k,v]) => (
                     <div key={String(k)}><p className="text-[10px] text-gray-400">{k}</p><p className="font-medium text-gray-800 mt-0.5">{v ?? "—"}</p></div>
                   ))}
-                  {/* §3.2 Contractuel */}
-                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2">§3.2 Données contractuelles</div>
+                  {/* Contractuel */}
+                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2"> Données contractuelles</div>
                   {[
                     ["Entreprise titulaire", detail.entreprise.raisonSociale],
                     ["Co-traitants", detail.coTraitants],["Sous-traitants", detail.sousTraitants],
@@ -752,8 +752,8 @@ export function MarchesPage() {
                   ].map(([k,v]) => (
                     <div key={String(k)}><p className="text-[10px] text-gray-400">{k}</p><p className="font-medium text-gray-800 mt-0.5">{v ?? "—"}</p></div>
                   ))}
-                  {/* §3.3 Financier */}
-                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2">§3.3 Données financières</div>
+                  {/* Financier */}
+                  <div className="col-span-3 text-[10px] font-black tracking-widest text-gray-400 uppercase border-b pb-1 mt-2"> Données financières</div>
                   {[
                     ["Montant initial HT", fmtGnf(detail.montantInitialGnf)],
                     ["Montant actualisé HT", fmtGnf(detail.montantActualiseGnf ?? detail.montantInitialGnf)],
@@ -776,7 +776,7 @@ export function MarchesPage() {
               </div>
             )}
 
-            {/* ── Tab Lots §5 ── */}
+            {/* ── Tab Lots ── */}
             {detailTab === "lots" && (
               <div className="space-y-3">
                 {canWrite(user?.role) && <Button size="sm" onClick={() => { setLotForm({}); setLotModal(true); }}><Plus className="h-4 w-4 mr-1"/>Ajouter un lot</Button>}
@@ -799,7 +799,7 @@ export function MarchesPage() {
               </div>
             )}
 
-            {/* ── Tab Ordres de Service §6 ── */}
+            {/* ── Tab Ordres de Service ── */}
             {detailTab === "os" && (
               <div className="space-y-3">
                 {canWrite(user?.role) && (
@@ -828,7 +828,7 @@ export function MarchesPage() {
               </div>
             )}
 
-            {/* ── Tab Avenants §7 ── */}
+            {/* ── Tab Avenants ── */}
             {detailTab === "avenants" && (
               <div className="space-y-3">
                 {canWrite(user?.role) && (
@@ -870,7 +870,7 @@ export function MarchesPage() {
               </div>
             )}
 
-            {/* ── Tab Garanties §9 ── */}
+            {/* ── Tab Garanties ── */}
             {detailTab === "garanties" && (
               <div className="space-y-3">
                 {canWrite(user?.role) && (
@@ -899,7 +899,7 @@ export function MarchesPage() {
               </div>
             )}
 
-            {/* ── Tab Réceptions §10 ── */}
+            {/* ── Tab Réceptions ── */}
             {detailTab === "receptions" && (
               <div className="space-y-3">
                 {!(receptionData ?? []).length && <p className="text-sm text-gray-400 py-8 text-center">Aucune réception enregistrée</p>}
@@ -966,7 +966,7 @@ export function MarchesPage() {
               </div>
             )}
 
-            {/* ── Tab Situation Financière §13 ── */}
+            {/* ── Tab Situation Financière ── */}
             {detailTab === "situation" && (
               <div className="space-y-4">
                 {!situation ? (
@@ -1227,7 +1227,7 @@ export function MarchesPage() {
               </div>
             )}
 
-            {/* ── Tab Historique statuts §4 ── */}
+            {/* ── Tab Historique statuts ── */}
             {detailTab === "historique" && (
               <div className="space-y-2">
                 {!(historiqueData ?? []).length && <p className="text-sm text-gray-400 py-8 text-center">Aucun historique</p>}
@@ -1269,9 +1269,9 @@ export function MarchesPage() {
       <Modal open={modal !== null} onClose={() => setModal(null)}
         title={modal === "new" ? "Nouveau marché" : "Modifier le marché"} size="xl">
         <div className="max-h-[70vh] overflow-y-auto pr-1 space-y-4">
-          {/* §3.1 Identification */}
+          {/* Identification */}
           <div>
-            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2">§3.1 Identification</p>
+            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2"> Identification</p>
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Référence marché" required><Input value={String(form.reference??"")} onChange={e=>f("reference",e.target.value)}/></FormField>
               <FormField label="N° Contrat"><Input value={String(form.numContrat??"")} onChange={e=>f("numContrat",e.target.value)}/></FormField>
@@ -1301,9 +1301,9 @@ export function MarchesPage() {
             </div>
           </div>
 
-          {/* §3.2 Contractuel */}
+          {/* Contractuel */}
           <div>
-            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2">§3.2 Contractuel</p>
+            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2"> Contractuel</p>
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Entreprise titulaire" required className="col-span-2">
                 <Select value={String(form.entrepriseId??"")} onChange={e=>f("entrepriseId",e.target.value)}>
@@ -1328,9 +1328,9 @@ export function MarchesPage() {
             </div>
           </div>
 
-          {/* §3.3 Financier */}
+          {/* Financier */}
           <div>
-            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2">§3.3 Financier</p>
+            <p className="text-[10px] font-black tracking-widest text-gray-400 uppercase mb-2"> Financier</p>
             <div className="grid grid-cols-2 gap-3">
               <FormField label="Montant initial HT (GNF)" required><Input type="number" value={String(form.montantInitialGnf??"")} onChange={e=>f("montantInitialGnf",Number(e.target.value))}/></FormField>
               <FormField label="Taux TVA (%)"><Input type="number" value={String(form.tauxTva??18)} onChange={e=>f("tauxTva",Number(e.target.value))}/></FormField>

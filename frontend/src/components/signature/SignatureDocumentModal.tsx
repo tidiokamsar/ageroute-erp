@@ -1,5 +1,5 @@
 /**
- * Fenêtre de signature — exigence « SIGNATURE INTÉGRÉE AUX DOCUMENTS » §3.
+ * Fenêtre de signature — exigence « SIGNATURE INTÉGRÉE AUX DOCUMENTS ».
  *
  * Le signataire voit LE PDF EXACT qui sera signé (flux authentifié, jamais une
  * régénération), son empreinte SHA-256, son identité, sa qualité, l'étape, le

@@ -1,5 +1,5 @@
 /**
- * L0.4 — Onglet « Règles financières » du Paramétrage (§22 CDC).
+ * L0.4 — Onglet « Règles financières » du Paramétrage ().
  * Liste des règles A1-A10 avec cycle de vie (brouillon→soumise→approuvée/gelée),
  * simulateur avant/après, et historique par règle.
  */

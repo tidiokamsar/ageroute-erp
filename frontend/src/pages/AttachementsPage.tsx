@@ -1,5 +1,5 @@
 /**
- * Module Attachements §9 CDC — BPMN Avancé AGEROUTE Guinée
+ * Module Attachements — BPMN Avancé AGEROUTE Guinée
  * Workflow : BROUILLON → SOUMIS → EN_CONTROLE_MISSION → EN_CONTROLE_TECHNIQUE → VALIDE
  * AMÉLIORATIONS :
  *   - Bandeau "Mes tâches en attente" filtré par rôle

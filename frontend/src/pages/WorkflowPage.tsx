@@ -1,6 +1,6 @@
 /**
  * Workflow BPMN — AGEROUTE ERP
- * §7 CDC : MISSION → TECHNIQUE → DMC → DAF → DG → circuit financier
+ * : MISSION → TECHNIQUE → DMC → DAF → DG → circuit financier
  * 6 décisions : APPROUVE | REJETE | DEMANDE_CORRECTION | DEMANDE_COMPLEMENT | SUSPENDRE | AUDIT
  * DG/ADMIN : vue superviseur avec toutes les instances en cours
  */

@@ -3,7 +3,7 @@
  *
  * Pendant du dossier de décompte, pour le niveau au-dessus : identification,
  * lots, bordereau des prix, ordres de service, avenants, garanties, réceptions,
- * décomptes, situation §13, avancement, historique des statuts et circuit BPMN.
+ * décomptes, situation, avancement, historique des statuts et circuit BPMN.
  *
  * Le dossier signale les incohérences plutôt que de les taire : un marché qui
  * porte des décomptes sans bordereau des prix chargé, ou dont le circuit de
@@ -64,7 +64,7 @@ dossierMarcheRouter.get("/marche/:id/dossier/pdf", async (req: Request, res: Res
     });
     if (!m) throw new ApiError(404, "Marché introuvable");
 
-    // Les tables BPMN vivent hors du schéma Prisma (§3.1 AGENTS.md).
+    // Les tables BPMN vivent hors du schéma Prisma (AGENTS.md).
     const bpmn = await prisma.$queryRaw<BpmnInstanceBrute[]>`
       SELECT id, etape_actuelle, statut, created_at FROM bpmn_instances
       WHERE module_type = 'MARCHE' AND entity_id = ${m.id} LIMIT 1`;
@@ -295,8 +295,8 @@ dossierMarcheRouter.get("/marche/:id/dossier/pdf", async (req: Request, res: Res
       "Aucun décompte établi sur ce marché.",
     );
 
-    // ───────────────────── 10. SITUATION §13 ─────────────────────
-    dossier.section(10, "Situation du marché (§13)");
+    // ───────────────────── 10. SITUATION ─────────────────────
+    dossier.section(10, "Situation du marché");
     dossier.paires([
       ["Montant de référence", `${gnf(montantRef)} GNF`],
       ["Cumul des décomptes (net à payer)", `${gnf(cumulDecomptes)} GNF`],

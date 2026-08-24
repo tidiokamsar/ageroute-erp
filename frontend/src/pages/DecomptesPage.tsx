@@ -1,5 +1,5 @@
 /**
- * Module e-Décomptes §7-16 CDC — AGEROUTE Guinée
+ * Module e-Décomptes — AGEROUTE Guinée
  * Workflow BPMN : BROUILLON → SOUMIS → EN_CONTROLE → EN_VALIDATION → VALIDE → PAYE
  * 9 onglets : Résumé | Lignes BPU | Calculs | Pièces | Validations | Workflow | Paiement | Audit | Historique
  */
@@ -123,7 +123,7 @@ const PAYMENT_STEPS = [
 
 const PIECES_CFG = [
   { key: "decompteSigné",     label: "Décompte signé",           requis: true },
-  { key: "attachements",      label: "Attachements validés §9",  requis: true },
+  { key: "attachements",      label: "Attachements validés",  requis: true },
   { key: "facture",           label: "Facture de l'entreprise",  requis: true },
   { key: "rapportAvancement", label: "Rapport d'avancement",     requis: true },
   { key: "photosChantier",    label: "Photos de chantier",       requis: false },
@@ -371,7 +371,7 @@ export function DecomptesPage() {
 
   // Éligibilité de signature du dossier ouvert : le bouton « Signer ce
   // document » n'existe que si TOUTES les conditions sont réunies côté serveur
-  // (module actif, compte nominatif, étape active pour CE rôle, RG9…). §2.
+  // (module actif, compte nominatif, étape active pour CE rôle, RG9…)..
   const { data: sigElig } = useQuery<{ autorise: boolean; etape: string | null; mode: string; motifs: string[] }>({
     queryKey: ["signature-eligibilite", detailId],
     queryFn: () => api.get(`/signature-numerique/decomptes/${detailId}/eligibilite`).then((r) => r.data).catch(() => null),
@@ -588,7 +588,7 @@ export function DecomptesPage() {
                     confirme que tout est réuni : module actif, compte nominatif,
                     étape active pour ce rôle, séparation des tâches. La fenêtre
                     montre le PDF exact, exige le consentement et la
-                    réauthentification (§3) — jamais un clic. */}
+                    réauthentification — jamais un clic. */}
                 {sigElig?.autorise && (
                   <button className="px-2.5 py-1.5 text-xs bg-amber-600 text-white rounded-lg flex items-center gap-1.5 hover:bg-amber-700"
                     title={`Signer l'étape « ${sigElig.etape} » — mode ${sigElig.mode}`}
@@ -1029,7 +1029,7 @@ export function DecomptesPage() {
             {activeTab === 6 && (
               <div>
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold text-gray-700">Circuit de paiement §16 CDC</h3>
+                  <h3 className="text-sm font-semibold text-gray-700">Circuit de paiement</h3>
                   {(canDaf || canDg) && (
                     <Button size="sm" onClick={() => { setPayForm({ etape: "ORDONNANCEMENT", statut: "EN_ATTENTE" }); setPayModal(true); }}>
                       <Plus className="h-3.5 w-3.5" /> Étape paiement
@@ -1185,7 +1185,7 @@ export function DecomptesPage() {
       </Modal>
 
       {/* ===== MODAL CRÉER DÉCOMPTE ===== */}
-      <Modal open={createModal} onClose={() => setCreateModal(false)} title="Nouveau e-Décompte §7 CDC" size="lg">
+      <Modal open={createModal} onClose={() => setCreateModal(false)} title="Nouveau e-Décompte" size="lg">
         <div className="grid grid-cols-2 gap-3">
           <FormField label="Marché actif *">
             <Select value={String(form.marcheId ?? "")} onChange={(e) => {
@@ -1318,7 +1318,7 @@ export function DecomptesPage() {
       </Modal>
 
       {/* ===== MODAL PAYMENT TRACE ===== */}
-      <Modal open={payModal} onClose={() => setPayModal(false)} title="Étape du circuit de paiement §16 CDC" size="sm">
+      <Modal open={payModal} onClose={() => setPayModal(false)} title="Étape du circuit de paiement" size="sm">
         <div className="space-y-3">
           <FormField label="Étape">
             <Select value={String(payForm.etape ?? "ORDONNANCEMENT")} onChange={(e) => setPayForm({ ...payForm, etape: e.target.value })}>

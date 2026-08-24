@@ -1,5 +1,5 @@
 /**
- * §22 CDC — Paramétrage métier (sans développement lourd)
+ * — Paramétrage métier (sans développement lourd)
  * SLA, seuils, règles calcul, types pièces, délais, droits
  */
 import { useState } from "react";
@@ -112,7 +112,7 @@ export function ParametragePage() {
       <div>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Settings className="h-4 w-4"/> Paramétrage métier §22</h2>
+          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2"><Settings className="h-4 w-4"/> Paramétrage métier</h2>
           <p className="text-xs text-gray-400 mt-0.5">Configurable sans développement : SLA, calculs, alertes, workflow</p>
         </div>
         <div className="flex gap-2">

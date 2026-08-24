@@ -61,7 +61,7 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: "§6 RÉFÉRENTIELS",
+    title: " RÉFÉRENTIELS",
     items: [
       {
         to: "/projets",
@@ -90,7 +90,7 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: "§7-16 E-DÉCOMPTES",
+    title: " E-DÉCOMPTES",
     items: [
       {
         to: "/decomptes",
@@ -100,13 +100,13 @@ const NAV_SECTIONS: NavSection[] = [
       },
       {
         to: "/attachements",
-        label: "Attachements §9",
+        label: "Attachements",
         icon: Paperclip,
         roles: ["ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE"],
       },
       {
         to: "/workflow",
-        label: "Mes tâches §10",
+        label: "Mes tâches",
         icon: GitBranch,
         roles: ["ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE","BUDGET","TRESOR","BCRG","FER_AGT"],
       },
@@ -341,7 +341,7 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
           {["ADMIN","DG","DAF","DMC","UGP"].includes(role) && (
             <div className="mb-4">
               <p className="px-4 mb-1.5 text-[9px] font-black tracking-[0.18em] text-white/25 uppercase">
-                CONFORMITÉ §CDC
+                CONFORMITÉ
               </p>
               <NavLink to="/entreprises"
                 className={({ isActive }) => clsx(
@@ -360,8 +360,8 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
               <p className="px-4 mb-1.5 text-[9px] font-black tracking-[0.18em] text-white/25 uppercase">
                 ADMINISTRATION
               </p>
-              <Item to="/utilisateurs" label="Utilisateurs §23" Icon={Users} />
-              <Item to="/parametrage"  label="Paramétrage §22"  Icon={Settings} />
+              <Item to="/utilisateurs" label="Utilisateurs" Icon={Users} />
+              <Item to="/parametrage"  label="Paramétrage"  Icon={Settings} />
             </div>
           )}
         </nav>
