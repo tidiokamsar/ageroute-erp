@@ -1,13 +1,18 @@
 /**
- * Routes du module signature-numerique.
- *   GET  /etat                         — configuration effective, santé, portes (ADMIN, DG, DAF)
- *   POST /decomptes/:id/signer         — signe le dossier complet d'un décompte
- *   GET  /decomptes/:id/documents      — documents signés d'un décompte
- *   GET  /documents/:id/pdf            — le PDF signé (session + périmètre)
- *   GET  /documents/:id/rapport        — rapport de validation DSS
- * Le périmètre est contrôlé par genererDossierDecompte (à la signature) et par
- * assertDecompteAutorise (à la lecture). La configuration se modifie par
- * l'administration : PUT /api/parametrage/:cle, catégorie SIGNATURE.
+ * Routes du service transversal signature-numerique.
+ *
+ * DÉCISION D'ARCHITECTURE (23/08/2026, docs/adr/ADR-003) : ce module n'est PAS
+ * une application autonome de recherche, de téléversement ou de signature. Les
+ * modules métier l'appellent depuis la page du document ; le signataire ne
+ * téléverse rien, ne cherche rien, ne choisit aucun certificat.
+ *
+ *   GET  /etat                          — configuration effective, santé, portes
+ *   GET  /decomptes/:id/eligibilite     — le bouton « Signer » a-t-il le droit d'exister ?
+ *   POST /decomptes/:id/preparer        — gel + empreinte + demande (2 temps, §3)
+ *   GET  /demandes/:id/pdf              — le PDF EXACT qui sera signé
+ *   POST /demandes/:id/confirmer        — consentement + réauthentification + apposition
+ *   GET  /decomptes/:id/documents       — chaîne des documents signés
+ *   GET  /documents/:id/pdf, /rapport   — consultation et rapport de validation
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import fs from "node:fs";
@@ -17,20 +22,39 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { ApiError } from "../../middleware/error.middleware";
 import { assertDecompteAutorise, entrepriseDuCompte } from "../../lib/perimetre";
-import { signerDecompte, etatSignature, cheminAbsolu } from "../../lib/signature/orchestrateur";
+import { preparerSignatureDecompte, confirmerSignature, lireDemandePdf, eligibiliteSignature, etatSignature, cheminAbsolu } from "../../lib/signature/orchestrateur";
 
 export const signatureNumeriqueRouter = Router();
 signatureNumeriqueRouter.use(requireAuth);
+
+const ROLES_SIGNATAIRES = ["ADMIN", "DG", "DAF", "DMC", "UGP", "MISSION", "TECHNIQUE"] as const;
 
 signatureNumeriqueRouter.get("/etat", requireRole("ADMIN", "DG", "DAF", "DMC"), async (_req: Request, res: Response, next: NextFunction) => {
   try { res.json(await etatSignature()); } catch (err) { next(err); }
 });
 
-// DGA sera ajouté ici quand le rôle existera (lot « versionnement des circuits »).
-signatureNumeriqueRouter.post("/decomptes/:id/signer", requireRole("ADMIN", "DG", "DAF", "DMC", "UGP", "MISSION", "TECHNIQUE"), async (req: Request, res: Response, next: NextFunction) => {
+signatureNumeriqueRouter.get("/decomptes/:id/eligibilite", async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(await eligibiliteSignature(req, req.params.id)); } catch (err) { next(err); }
+});
+
+signatureNumeriqueRouter.post("/decomptes/:id/preparer", requireRole(...ROLES_SIGNATAIRES), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.status(201).json(await preparerSignatureDecompte(req, req.params.id)); } catch (err) { next(err); }
+});
+
+signatureNumeriqueRouter.get("/demandes/:id/pdf", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { motif } = z.object({ motif: z.string().trim().min(5).max(200) }).parse(req.body);
-    res.status(201).json(await signerDecompte(req, req.params.id, motif));
+    const { chemin } = await lireDemandePdf(req, req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", "inline");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.sendFile(chemin);
+  } catch (err) { next(err); }
+});
+
+signatureNumeriqueRouter.post("/demandes/:id/confirmer", requireRole(...ROLES_SIGNATAIRES), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const corps = z.object({ motDePasse: z.string().min(1), consentement: z.boolean() }).parse(req.body);
+    res.json(await confirmerSignature(req, req.params.id, corps));
   } catch (err) { next(err); }
 });
 
@@ -47,8 +71,8 @@ signatureNumeriqueRouter.get("/decomptes/:id/documents", async (req: Request, re
     await verifierAcces(req, req.params.id);
     const docs = await prisma.sigDocumentFinalise.findMany({
       where: { decompteId: req.params.id },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, reference: true, mode: true, prestataire: true, niveauPades: true, filigrane: true, validationIndication: true, sha256Signe: true, signeParEmail: true, signeParRole: true, signeParQualite: true, createdAt: true },
+      orderBy: { rang: "asc" },
+      select: { id: true, reference: true, rang: true, etape: true, mode: true, prestataire: true, niveauPades: true, filigrane: true, validationIndication: true, sha256Signe: true, signeParEmail: true, signeParRole: true, signeParQualite: true, createdAt: true },
     });
     res.json(docs);
   } catch (err) { next(err); }
@@ -62,7 +86,7 @@ signatureNumeriqueRouter.get("/documents/:id/pdf", async (req: Request, res: Res
     const abs = cheminAbsolu(doc.cheminFichier);
     if (!fs.existsSync(abs)) throw new ApiError(404, "Fichier signé absent du stockage");
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="dossier-${doc.reference}-signe.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="dossier-${doc.reference}-r${doc.rang}-signe.pdf"`);
     res.setHeader("Cache-Control", "private, no-store");
     res.sendFile(abs);
   } catch (err) { next(err); }
@@ -73,6 +97,6 @@ signatureNumeriqueRouter.get("/documents/:id/rapport", async (req: Request, res:
     const doc = await prisma.sigDocumentFinalise.findUnique({ where: { id: req.params.id } });
     if (!doc) throw new ApiError(404, "Document introuvable");
     await verifierAcces(req, doc.decompteId);
-    res.json({ id: doc.id, validationIndication: doc.validationIndication, rapport: doc.rapportValidation, mode: doc.mode, prestataire: doc.prestataire });
+    res.json({ id: doc.id, rang: doc.rang, etape: doc.etape, validationIndication: doc.validationIndication, rapport: doc.rapportValidation, mode: doc.mode, prestataire: doc.prestataire });
   } catch (err) { next(err); }
 });

@@ -1660,10 +1660,38 @@ model SigDocumentFinalise {
   signeParEmail        String
   signeParRole         String
   signeParQualite      String?
+  rang                 Int      @default(1)
+  etape                String?
+  demandeId            String?
   createdAt            DateTime @default(now())
 
   @@map("sig_documents_finalises")
   @@index([decompteId])
+}
+
+/// Demande de signature en deux temps (préparer → consentir → confirmer).
+/// Porte la clé d'idempotence (id), l'empreinte présentée au signataire et
+/// l'expiration. Déclaré ici, évolué par SQL (2026-08-23-signature-demandes.sql).
+model SigDemandeSignature {
+  id             String    @id @default(uuid())
+  decompteId     String
+  cheminFichier  String
+  sha256         String
+  signataireId   String
+  etape          String
+  roleEtape      String
+  niveau         String
+  mode           String
+  rang           Int       @default(1)
+  statut         String    @default("EN_ATTENTE") // EN_ATTENTE | EN_COURS | SIGNEE | ANNULEE | EXPIREE
+  motifAnnulation String?
+  expiresAt      DateTime
+  confirmeAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@map("sig_demandes")
+  @@index([decompteId])
+  @@index([signataireId])
 }
 
 /// Affectation d'un agent à un PROJET.

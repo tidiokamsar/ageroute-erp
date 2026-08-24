@@ -12,6 +12,7 @@ import { Button } from "../components/ui/Button";
 import { Input, Select, FormField, Textarea } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { toast } from "../components/ui/Toast";
+import { SignatureDocumentModal } from "../components/signature/SignatureDocumentModal";
 import {
   Plus, Receipt, ChevronRight, Check, X, Send, FileDown, CreditCard,
   CheckCircle, XCircle, Trash2, Calculator, AlertTriangle, Shield,
@@ -368,20 +369,16 @@ export function DecomptesPage() {
     onError: (e) => toast.error(parseApiError(e)),
   });
 
-  // État du module de signature — pilote l'affichage du bouton « Signer ».
-  const { data: sigEtat } = useQuery<any>({
-    queryKey: ["signature-etat"],
-    queryFn: () => api.get("/signature-numerique/etat").then((r) => r.data).catch(() => null),
-    staleTime: 60_000,
+  // Éligibilité de signature du dossier ouvert : le bouton « Signer ce
+  // document » n'existe que si TOUTES les conditions sont réunies côté serveur
+  // (module actif, compte nominatif, étape active pour CE rôle, RG9…). §2.
+  const { data: sigElig } = useQuery<{ autorise: boolean; etape: string | null; mode: string; motifs: string[] }>({
+    queryKey: ["signature-eligibilite", detailId],
+    queryFn: () => api.get(`/signature-numerique/decomptes/${detailId}/eligibilite`).then((r) => r.data).catch(() => null),
+    enabled: !!detailId,
+    staleTime: 15_000,
   });
-  const signerMut = useMutation({
-    mutationFn: (b: { id: string; motif: string }) => api.post(`/signature-numerique/decomptes/${b.id}/signer`, { motif: b.motif }).then((r) => r.data),
-    onSuccess: (r: any) => {
-      qc.invalidateQueries();
-      toast.success(`Document signé — ${r.prestataire}, niveau ${r.niveauPades}, validation ${r.validationIndication}. Valeur juridique : ${r.valeurJuridique}`);
-    },
-    onError: (e) => toast.error(parseApiError(e)),
-  });
+  const [signatureModal, setSignatureModal] = useState(false);
 
   /**
    * Téléchargement d'un PDF.
@@ -587,18 +584,16 @@ export function DecomptesPage() {
                   onClick={() => downloadPdf(det.id, det.reference, "resume")}>
                   <FileDown className="h-3.5 w-3.5" /> Résumé
                 </button>
-                {/* Signature électronique du dossier complet — n'apparaît que si
-                    le module est actif (Paramétrage → Signature). Hors mode
-                    provider, le document porte un filigrane et n'a aucune valeur. */}
-                {sigEtat?.configuration?.actif && !["ENTREPRISE", "AUDITEUR", "DSF"].includes(role ?? "") && (
+                {/* SIGNER CE DOCUMENT — visible seulement quand le serveur
+                    confirme que tout est réuni : module actif, compte nominatif,
+                    étape active pour ce rôle, séparation des tâches. La fenêtre
+                    montre le PDF exact, exige le consentement et la
+                    réauthentification (§3) — jamais un clic. */}
+                {sigElig?.autorise && (
                   <button className="px-2.5 py-1.5 text-xs bg-amber-600 text-white rounded-lg flex items-center gap-1.5 hover:bg-amber-700"
-                    title={`Signer le dossier complet — mode ${sigEtat.configuration.mode}`}
-                    onClick={() => {
-                      const motif = window.prompt("Motif de la signature (obligatoire, min 5 caractères)", `Validation du décompte ${det.reference}`);
-                      if (motif && motif.trim().length >= 5) signerMut.mutate({ id: det.id, motif: motif.trim() });
-                    }}
-                    disabled={signerMut.isPending}>
-                    <Check className="h-3.5 w-3.5" /> {signerMut.isPending ? "Signature…" : `Signer (${sigEtat.configuration.mode})`}
+                    title={`Signer l'étape « ${sigElig.etape} » — mode ${sigElig.mode}`}
+                    onClick={() => setSignatureModal(true)}>
+                    <Check className="h-3.5 w-3.5" /> Signer ce document
                   </button>
                 )}
                 {canWrite(role) && det.statut === "BROUILLON" && (
@@ -1287,6 +1282,10 @@ export function DecomptesPage() {
       </Modal>
 
       {/* ===== MODAL VALIDATION BPMN ===== */}
+      {signatureModal && detailId && (
+        <SignatureDocumentModal decompteId={detailId} onClose={() => setSignatureModal(false)} onSigne={() => qc.invalidateQueries()} />
+      )}
+
       <Modal open={valModal} onClose={() => setValModal(false)} title={`Traiter — étape ${etapeCourante?.nom ?? ""}`} size="sm">
         <div className="space-y-3">
           <div className="bg-navy/5 rounded-lg px-3 py-2 text-xs">
