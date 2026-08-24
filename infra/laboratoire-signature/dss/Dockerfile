@@ -29,7 +29,11 @@ RUN mkdir -p /root/.m2 && cat > /root/.m2/settings.xml <<'XML'
 </settings>
 XML
 # Seul le webapp REST/SOAP nous sert ; on ignore les tests et les modules annexes.
-RUN mvn -q -B -pl dss-demo-webapp -am -DskipTests -Dmaven.javadoc.skip=true package
+# -Dmdep.skip=true : la webapp tente d'embarquer l'application autonome JavaFX
+# (dss-standalone-app-package), publiée nulle part et inutile ici — elle ne
+# sert qu'au bouton de téléchargement de la page de démonstration. Le service
+# REST de validation, lui, est complet sans elle.
+RUN mvn -q -B -pl dss-demo-webapp -am -DskipTests -Dmaven.javadoc.skip=true -Dmdep.skip=true package
 
 FROM tomcat:10.1-jre17-temurin
 ARG DSS_VERSION=6.1
