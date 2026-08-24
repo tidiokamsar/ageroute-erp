@@ -52,6 +52,26 @@ export function cheminAbsolu(cheminFichier: string): string {
   return abs;
 }
 
+/**
+ * Comptes de FONCTION : reçoivent des tâches, ne signent JAMAIS.
+ *
+ * La présence d'un prénom ne suffit pas à prouver la nominativité : le
+ * remplissage historique a découpé « Direction Marchés et Contrats » en
+ * prenom = « Direction » — et un rang de signature a été apposé par `dmc@`
+ * avant ce durcissement (constaté sur la chaîne du décompte de démonstration
+ * le 23/08/2026). La liste ci-dessous reflète la fiche de désignation L0 ;
+ * un compte s'en retire en devenant une personne (prenom.nom@).
+ */
+const COMPTES_FONCTIONNELS = new Set([
+  "admin@ageroute.gov.gn", "support@ageroute.gov.gn",
+  "dg@ageroute.gov.gn", "daf@ageroute.gov.gn", "dmc@ageroute.gov.gn",
+  "ugp@ageroute.gov.gn", "mission@ageroute.gov.gn", "technique@ageroute.gov.gn",
+  "auditeur@ageroute.gov.gn", "bailleur@ageroute.gov.gn", "budget@ageroute.gov.gn",
+  "tresor@ageroute.gov.gn", "fer@ageroute.gov.gn", "bcrg@ageroute.gov.gn",
+  "entreprise@ageroute.gov.gn", "colas@ageroute.gov.gn", "sogea@ageroute.gov.gn",
+  "sored@ageroute.gov.gn",
+]);
+
 async function signataireNominatif(userId: string) {
   const u = await prisma.user.findFirst({
     where: { id: userId, actif: true },
@@ -59,6 +79,9 @@ async function signataireNominatif(userId: string) {
   });
   if (!u) throw new ApiError(403, "Signataire introuvable ou inactif");
   // §2 et §13 : un compte fonctionnel peut RECEVOIR la tâche, jamais signer.
+  if (COMPTES_FONCTIONNELS.has(u.email.toLowerCase())) {
+    throw new ApiError(403, `Le compte « ${u.email} » est un compte de fonction : il ne peut pas signer. La personne qui traite doit utiliser son propre compte nominatif (voir la fiche de désignation).`);
+  }
   if (!u.prenom || !u.nom) {
     throw new ApiError(403, "Ce compte n'est pas nominatif (nom et prénom absents) : il ne peut pas signer. La personne qui traite doit utiliser son propre compte.");
   }
