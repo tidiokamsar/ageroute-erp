@@ -7,7 +7,7 @@ confiance changent — workflows, génération PDF, audit et moteur de validatio
 | Composant | Image | Rôle | Ce qu'il n'est PAS |
 |---|---|---|---|
 | EJBCA Community | `keyfactor/ejbca-ce:9.3.7` | PKI de **test** : racine hors ligne, intermédiaire, certificats nominatifs **fictifs**, CRL, OCSP | un prestataire agréé |
-| SignServer Community | `keyfactor/signserver-ce:7.3.2` | prestataire et TSA **simulés** : signature PAdES serveur, RFC 3161, REST ; clés dans SoftHSM2 | un HSM certifié |
+| SignServer Community | `keyfactor/signserver-ce:7.3.2` | prestataire et TSA **simulés** : signature PAdES serveur, RFC 3161, REST ; clés dans un keystore PKCS#12 (l'image ne contient pas SoftHSM2 — écart au mandat consigné) | un HSM certifié |
 | DSS | construit depuis `esig/dss-demonstrations` 6.1 | validation PAdES, chaînes, OCSP/CRL, rapport `TOTAL_PASSED / FAILED / INDETERMINATE` | lié à un prestataire |
 
 ## Règles
@@ -27,7 +27,8 @@ confiance changent — workflows, génération PDF, audit et moteur de validatio
 ```bash
 cp laboratoire.env.example laboratoire.env      # renseigner
 docker compose -p labo-signature --env-file laboratoire.env up -d --build   # DSS se construit (~10 min)
-./initialiser.sh                                 # clé SoftHSM2 + certificat de test + worker PDF + TSA
+./initialiser.sh                                 # keystore PKCS#12 + certificat de test + worker PDF + TSA
+./enrolement-ejbca.sh                            # hiérarchie EJBCA : racine → intermédiaire → cachet du worker
 ```
 
 Puis dans l'ERP — **Paramétrage → Signature électronique** :
@@ -46,17 +47,28 @@ Et dans l'environnement du backend : `SIGNATURE_LAB_AUTORISE=oui` — sans quoi 
 laboratoire reste refusé (garde-fou G2). Le backend doit être rattaché au réseau
 `laboratoire-signature` (voir `DEPLOIEMENT.md §11`).
 
-## Ce que `initialiser.sh` fait — et ce qu'il ne fait pas encore
+## Les deux scripts
 
-Il crée dans SignServer une clé **SoftHSM2** et un certificat **auto-émis de test** pour le
-worker `PDFSignerLab`, ainsi qu'un worker `TimeStampLab` (TSA RFC 3161 de laboratoire), puis
-imprime le certificat à coller dans `SIG_ANCRES_CONFIANCE`.
+`initialiser.sh` crée dans SignServer un keystore **PKCS#12** et un certificat **auto-émis de
+test** pour le worker `PDFSignerLab`, ainsi qu'un worker `TimeStampLab` (TSA RFC 3161 de
+laboratoire), puis imprime le certificat à coller dans `SIG_ANCRES_CONFIANCE`.
 
-**Il n'enrôle pas encore le worker auprès d'EJBCA.** La chaîne complète — racine EJBCA hors
-ligne → intermédiaire → certificat du worker, avec CRL et OCSP — est l'étape suivante ; elle
-demande l'initialisation interactive d'EJBCA (profils, entité finale) que ce script ne fait pas à
-l'aveugle. Jusque-là, DSS répondra `INDETERMINATE` sur les documents signés : **c'est exact**, la
-chaîne n'est pas encore vérifiable, et l'ERP l'affiche tel quel.
+`enrolement-ejbca.sh` (**fait en production de laboratoire le 24/08/2026**) remplace ce
+certificat auto-émis par une vraie hiérarchie : AC racine de test (10 ans, **mise hors ligne**
+après usage) → AC intermédiaire de test (5 ans, profil SUBCA) → certificat du cachet émis sur
+**CSR** — la clé privée ne quitte jamais le conteneur SignServer. Les signatures embarquent
+depuis lors la chaîne complète (3 certificats), que DSS lit et restitue nommément dans son
+rapport.
+
+Limites assumées, dans l'ordre des travaux restants :
+- **La TSA reste sur la chaîne keytool d'origine** — EJBCA exige un profil de certificat avec
+  EKU `timeStamping`, pas encore créé. D'où la double racine dans `SIG_ANCRES_CONFIANCE`
+  (racine EJBCA **et** ancienne racine keytool) : retirer la seconde casserait la vérification
+  des horodatages.
+- DSS répond `INDETERMINATE` / `NO_CERTIFICATE_CHAIN_FOUND` : il ne fait confiance qu'à la
+  liste européenne (LOTL), pas à notre racine de test. C'est **exact et voulu** — un
+  laboratoire ne doit pas se déclarer digne de confiance. `TOTAL_PASSED` viendra du prestataire
+  agréé, ou d'un magasin de confiance DSS dédié au labo si l'on veut la répétition complète.
 
 ## Arrêter, purger
 
