@@ -373,7 +373,7 @@ export function DecomptesPage() {
   // Éligibilité de signature du dossier ouvert : le bouton « Signer ce
   // document » n'existe que si TOUTES les conditions sont réunies côté serveur
   // (module actif, compte nominatif, étape active pour CE rôle, RG9…)..
-  const { data: sigElig } = useQuery<{ autorise: boolean; etape: string | null; mode: string; motifs: string[] }>({
+  const { data: sigElig } = useQuery<{ autorise: boolean; etape: string | null; etapeCourante: { nom: string; roleAttendu: string; ordre: number; total: number } | null; niveau: string; mode: string; motifs: string[] }>({
     queryKey: ["signature-eligibilite", detailId],
     queryFn: () => api.get(`/signature-numerique/decomptes/${detailId}/eligibilite`).then((r) => r.data).catch(() => null),
     enabled: !!detailId,
@@ -669,6 +669,18 @@ export function DecomptesPage() {
             />
 
             {/* Tabs */}
+            {/* QUI SIGNE CETTE ÉTAPE — visible même quand ce n'est pas vous.
+                Sans ce bandeau, l'écran ne montrait que des validations et
+                personne ne savait qui portait la signature de l'étape. */}
+            {sigElig && !sigElig.autorise && sigElig.etapeCourante && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs">
+                <span className="font-bold text-amber-900">
+                  Étape {sigElig.etapeCourante.ordre}/{sigElig.etapeCourante.total} — « {sigElig.etapeCourante.nom} » : signature électronique (PAdES-{sigElig.niveau}, mode {sigElig.mode}) attendue d'un compte NOMINATIF du rôle {sigElig.etapeCourante.roleAttendu}.
+                </span>
+                {sigElig.motifs.length > 0 && <span className="text-amber-800"> Vous : {sigElig.motifs[0]}</span>}
+              </div>
+            )}
+
             {/* SIGNATURES ÉLECTRONIQUES — la chaîne, visible sur le dossier */}
             {(docsSignes ?? []).length > 0 && (
               <div className="rounded-xl border border-green-200 bg-green-50/50 p-3">

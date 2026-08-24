@@ -397,14 +397,30 @@ export async function eligibiliteSignature(req: Request, decompteId: string) {
   const cfg = await chargerConfigurationSignature();
   if (!cfg.actif) motifs.push(cfg.motifBlocage!);
   try { await signataireNominatif(req.user.id); } catch (e) { motifs.push((e as ApiError).message); }
+
+  // L'étape courante est renvoyée MÊME quand ce n'est pas celle de l'appelant :
+  // « qui peut signer, et à quel niveau » doit se lire sur la fiche, pas se
+  // deviner. Constat utilisateur du 24/08/2026 — l'écran ne montrait que des
+  // validations, sans dire qui portait la signature de l'étape.
   let etapeNom: string | null = null;
+  let etapeCourante: { nom: string; roleAttendu: string; ordre: number; total: number } | null = null;
+  const instanceBrute = await prisma.workflowInstance.findFirst({
+    where: { decompteId, statut: "EN_COURS" },
+    include: { definition: { include: { etapes: { orderBy: { ordre: "asc" } } } } },
+    orderBy: { createdAt: "desc" },
+  });
+  if (instanceBrute) {
+    const e = instanceBrute.definition.etapes[instanceBrute.etapeActuelle];
+    if (e) etapeCourante = { nom: e.nom, roleAttendu: e.roleRequis, ordre: instanceBrute.etapeActuelle + 1, total: instanceBrute.definition.etapes.length };
+  }
+
   try {
     const { etape, instance } = await etapeActivePour(req.user.id, req.user.role, decompteId);
     etapeNom = etape.nom;
     const marcheId = (await prisma.decompte.findUnique({ where: { id: decompteId }, select: { marcheId: true } }))?.marcheId ?? null;
     await verifierRg9(instance.id, decompteId, req.user.id, marcheId);
   } catch (e) { motifs.push((e as ApiError).message); }
-  return { autorise: motifs.length === 0, etape: etapeNom, mode: cfg.mode, motifs };
+  return { autorise: motifs.length === 0, etape: etapeNom, etapeCourante, niveau: cfg.niveau, mode: cfg.mode, motifs };
 }
 
 // ─────────────────────────────── ÉTAT ADMIN ──────────────────────────────────
