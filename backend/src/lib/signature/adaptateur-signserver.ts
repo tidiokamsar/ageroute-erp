@@ -28,6 +28,23 @@ export interface OptionsSignServer {
   laboratoire: boolean;
 }
 
+/**
+ * Détecte un jeton d'horodatage RFC 3161 (attribut CMS signature-time-stamp,
+ * OID 1.2.840.113549.1.9.16.2.14) dans les blocs /Contents du PDF. Les CMS y
+ * sont encodés en hexadécimal : on décode avant de chercher l'OID en DER.
+ */
+export function contientJetonRfc3161(pdf: Buffer): boolean {
+  const OID_DER = Buffer.from("060b2a864886f70d010910020e", "hex");
+  const texte = pdf.toString("latin1");
+  const motif = /\/Contents\s*<([0-9A-Fa-f\s]+)>/g;
+  for (let m = motif.exec(texte); m !== null; m = motif.exec(texte)) {
+    let hex = m[1].replace(/\s/g, "");
+    if (hex.length % 2 === 1) hex = hex.slice(0, -1);
+    if (Buffer.from(hex, "hex").includes(OID_DER)) return true;
+  }
+  return false;
+}
+
 export class AdaptateurSignServer implements AdaptateurPrestataire {
   readonly nom: string;
   readonly simule = false;
@@ -75,14 +92,18 @@ export class AdaptateurSignServer implements AdaptateurPrestataire {
       },
     );
     if (!reponse.data?.data) throw new Error("SignServer n'a renvoyé aucun document");
-    // Le niveau réellement obtenu dépend du worker (TSA configurée → T ; LT/LTA
-    // exigent une post-extension DSS). On annonce au plus le niveau demandé.
-    const niveauObtenu: NiveauPades = ctx.tsaUrl ? (ctx.niveau === "B" ? "T" : ctx.niveau) : "B";
+    const pdfSigne = Buffer.from(reponse.data.data, "base64");
+    // Le niveau annoncé est CONSTATÉ, pas supposé : T seulement si un jeton
+    // RFC 3161 est réellement présent dans la signature. En SignServer CE 7.3.2,
+    // l'override TSA_URL par métadonnée de requête est resté sans effet (prouvé
+    // le 24/08/2026) — la TSA se configure par la propriété TSA_WORKER du worker.
+    const horodate = contientJetonRfc3161(pdfSigne);
+    const niveauObtenu: NiveauPades = horodate ? (ctx.niveau === "B" ? "T" : ctx.niveau) : "B";
     return {
-      pdfSigne: Buffer.from(reponse.data.data, "base64"),
+      pdfSigne,
       prestataire: this.nom,
       niveauObtenu,
-      detail: { worker: this.opts.worker, archiveId: reponse.data.archiveId ?? null, metaData: reponse.data.metaData ?? null, laboratoire: this.opts.laboratoire },
+      detail: { worker: this.opts.worker, archiveId: reponse.data.archiveId ?? null, metaData: reponse.data.metaData ?? null, laboratoire: this.opts.laboratoire, horodatageConstate: horodate },
     };
   }
 

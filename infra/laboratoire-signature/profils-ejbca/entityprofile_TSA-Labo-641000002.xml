@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<java version="1.8" class="java.beans.XMLDecoder">
+ <object class="java.util.LinkedHashMap">
+  <void method="put"><string>version</string><float>20.0</float></void>
+  <void method="put"><int>0</int><string></string></void>
+  <void method="put"><int>1000000</int><boolean>true</boolean></void>
+  <void method="put"><int>2000000</int><boolean>true</boolean></void>
+  <void method="put"><int>3000000</int><boolean>true</boolean></void>
+  <void method="put"><int>1</int><string></string></void>
+  <void method="put"><int>1000001</int><boolean>true</boolean></void>
+  <void method="put"><int>2000001</int><boolean>true</boolean></void>
+  <void method="put"><int>3000001</int><boolean>true</boolean></void>
+  <void method="put"><int>5</int><string></string></void>
+  <void method="put"><int>1000005</int><boolean>true</boolean></void>
+  <void method="put"><int>2000005</int><boolean>true</boolean></void>
+  <void method="put"><int>3000005</int><boolean>true</boolean></void>
+  <void method="put"><int>12</int><string></string></void>
+  <void method="put"><int>1000012</int><boolean>true</boolean></void>
+  <void method="put"><int>2000012</int><boolean>false</boolean></void>
+  <void method="put"><int>3000012</int><boolean>true</boolean></void>
+  <void method="put"><int>16</int><string></string></void>
+  <void method="put"><int>1000016</int><boolean>true</boolean></void>
+  <void method="put"><int>2000016</int><boolean>false</boolean></void>
+  <void method="put"><int>3000016</int><boolean>true</boolean></void>
+  <void method="put"><int>26</int><string></string></void>
+  <void method="put"><int>1000026</int><boolean>false</boolean></void>
+  <void method="put"><int>2000026</int><boolean>false</boolean></void>
+  <void method="put"><int>3000026</int><boolean>true</boolean></void>
+  <void method="put"><int>29</int><string>641000001</string></void>
+  <void method="put"><int>1000029</int><boolean>true</boolean></void>
+  <void method="put"><int>2000029</int><boolean>true</boolean></void>
+  <void method="put"><int>3000029</int><boolean>true</boolean></void>
+  <void method="put"><int>30</int><string>641000001</string></void>
+  <void method="put"><int>1000030</int><boolean>true</boolean></void>
+  <void method="put"><int>2000030</int><boolean>true</boolean></void>
+  <void method="put"><int>3000030</int><boolean>true</boolean></void>
+  <void method="put"><int>31</int><string>1</string></void>
+  <void method="put"><int>1000031</int><boolean>true</boolean></void>
+  <void method="put"><int>2000031</int><boolean>true</boolean></void>
+  <void method="put"><int>3000031</int><boolean>true</boolean></void>
+  <void method="put"><int>32</int><string>1</string></void>
+  <void method="put"><int>1000032</int><boolean>true</boolean></void>
+  <void method="put"><int>2000032</int><boolean>true</boolean></void>
+  <void method="put"><int>3000032</int><boolean>true</boolean></void>
+  <void method="put"><int>37</int><string>-1578337254</string></void>
+  <void method="put"><int>1000037</int><boolean>true</boolean></void>
+  <void method="put"><int>2000037</int><boolean>true</boolean></void>
+  <void method="put"><int>3000037</int><boolean>true</boolean></void>
+  <void method="put"><int>38</int><string>1</string></void>
+  <void method="put"><int>1000038</int><boolean>true</boolean></void>
+  <void method="put"><int>2000038</int><boolean>true</boolean></void>
+  <void method="put"><int>3000038</int><boolean>true</boolean></void>
+  <void method="put"><string>NUMBERARRAY</string><object class="java.util.ArrayList"><void method="add"><int>1</int></void><void method="add"><int>1</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>1</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>1</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>1</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>1</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>1</int></void><void method="add"><int>1</int></void><void method="add"><int>1</int></void><void method="add"><int>1</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>1</int></void><void method="add"><int>1</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void><void method="add"><int>0</int></void></object></void>
+  <void method="put"><string>SUBJECTDNFIELDORDER</string><object class="java.util.ArrayList"><void method="add"><int>500</int></void><void method="add"><int>1200</int></void><void method="add"><int>1600</int></void></object></void>
+  <void method="put"><string>SUBJECTALTNAMEFIELDORDER</string><object class="java.util.ArrayList"/></void>
+  <void method="put"><string>SUBJECTDIRATTRFIELDORDER</string><object class="java.util.ArrayList"/></void>
+ </object>
+</java>

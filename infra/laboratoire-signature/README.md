@@ -60,11 +60,18 @@ après usage) → AC intermédiaire de test (5 ans, profil SUBCA) → certificat
 depuis lors la chaîne complète (3 certificats), que DSS lit et restitue nommément dans son
 rapport.
 
+`enrolement-ejbca-tsa.sh` (**fait le 24/08/2026**) fait de même pour la clé d'horodatage :
+profil de certificat `TSA-Labo` (EKU `timeStamping` critique, exigence RFC 3161) et profil
+d'entité importés depuis `profils-ejbca/` — EJBCA CE n'ayant ni configdump ni création de
+profil par CLI, les XML committés sont la seule voie rejouable. La TSA s'active par la
+propriété `TSA_WORKER` du PDFSigner : l'override `TSA_URL` par métadonnée de requête est
+resté sans effet en CE 7.3.2 (prouvé — PDF signé sans jeton). L'adaptateur ERP n'annonce
+d'ailleurs plus le niveau T que s'il **constate** le jeton RFC 3161 dans le PDF signé.
+
 Limites assumées, dans l'ordre des travaux restants :
-- **La TSA reste sur la chaîne keytool d'origine** — EJBCA exige un profil de certificat avec
-  EKU `timeStamping`, pas encore créé. D'où la double racine dans `SIG_ANCRES_CONFIANCE`
-  (racine EJBCA **et** ancienne racine keytool) : retirer la seconde casserait la vérification
-  des horodatages.
+- L'ancienne racine keytool reste dans `SIG_ANCRES_CONFIANCE` (2e position) : elle couvre les
+  signatures et horodatages apposés AVANT l'enrôlement EJBCA. La retirer casserait leur
+  vérification. Les nouvelles signatures sont entièrement EJBCA (cachet **et** TSA).
 - DSS répond `INDETERMINATE` / `NO_CERTIFICATE_CHAIN_FOUND` : il ne fait confiance qu'à la
   liste européenne (LOTL), pas à notre racine de test. C'est **exact et voulu** — un
   laboratoire ne doit pas se déclarer digne de confiance. `TOTAL_PASSED` viendra du prestataire

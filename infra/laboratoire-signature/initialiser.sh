@@ -68,6 +68,10 @@ WORKERGENID2.DIGESTALGORITHM=SHA256
 WORKERGENID2.REASON=Signature de laboratoire - SANS VALEUR JURIDIQUE
 WORKERGENID2.LOCATION=AGEROUTE Guinee (laboratoire)
 WORKERGENID2.ALLOW_PROPERTY_OVERRIDE=REASON,LOCATION,TSA_URL
+# TSA en PROPRIÉTÉ du worker : l'override TSA_URL par métadonnée de requête est
+# resté sans effet en CE 7.3.2 (prouvé le 24/08/2026 : PDF signé sans jeton).
+# TSA_WORKER = appel interne, pas de boucle HTTP du conteneur vers lui-même.
+WORKERGENID2.TSA_WORKER=TimeStampLab
 
 WORKERGENID3.NAME=TimeStampLab
 WORKERGENID3.TYPE=PROCESSABLE
