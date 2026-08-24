@@ -166,7 +166,7 @@ export default function WorkflowPage() {
   const [selected, setSelected] = useState<WorkflowInstance | null>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [commentaire, setCommentaire] = useState("");
-  const [activeTab, setActiveTab] = useState<"taches" | "supervision" | "definitions" | "bpmn">("taches");
+  const [activeTab, setActiveTab] = useState<"taches" | "supervision" | "definitions">("taches");
 
   const tachesQ = useQuery({
     queryKey: ["workflow", "mes-taches"],
@@ -183,7 +183,20 @@ export default function WorkflowPage() {
   const defsQ = useQuery({
     queryKey: ["workflow", "definitions"],
     queryFn: () => api.get("/workflow/definitions").then((r) => r.data),
-    enabled: activeTab === "definitions",
+    // Chargé dès l'arrivée : l'onglet affichait « Circuits (?) » tant qu'on
+    // n'avait pas cliqué dessus — un compteur qui ne compte pas.
+    staleTime: 300_000,
+  });
+
+  // Éligibilité de signature du dossier sélectionné : quand elle est acquise,
+  // l'étape SE SIGNE — la fenêtre envoie vers le document, elle n'offre plus
+  // d'« Approuver » sans signature (exigence « signature intégrée », ADR-003).
+  const selDecompteId = (selected as unknown as { decompte?: { id?: string } } | null)?.decompte?.id;
+  const { data: sigElig } = useQuery<{ autorise: boolean; etape: string | null; mode: string }>({
+    queryKey: ["signature-eligibilite", selDecompteId],
+    queryFn: () => api.get(`/signature-numerique/decomptes/${selDecompteId}/eligibilite`).then((r) => r.data).catch(() => null),
+    enabled: !!selDecompteId,
+    staleTime: 15_000,
   });
 
   const slaQ = useQuery({
@@ -293,9 +306,6 @@ export default function WorkflowPage() {
           <button onClick={() => setActiveTab("definitions")} className={`px-4 py-2.5 text-xs font-semibold transition-colors ${activeTab === "definitions" ? "bg-navy text-white" : "text-gray-500 hover:text-navy"}`}>
             Circuits ({defs.length || "?"})
           </button>
-          <button onClick={() => setActiveTab("bpmn")} className={`px-4 py-2.5 text-xs font-semibold transition-colors ${activeTab === "bpmn" ? "bg-navy text-white" : "text-gray-500 hover:text-navy"}`}>
-            BPMN 5 modules
-          </button>
           <button onClick={() => { tachesQ.refetch(); supervQ.refetch(); }} className="ml-auto px-3 py-2 text-gray-400 hover:text-navy transition-colors">
             <RefreshCw className={`h-3.5 w-3.5 ${tachesQ.isFetching ? "animate-spin" : ""}`} />
           </button>
@@ -309,7 +319,14 @@ export default function WorkflowPage() {
                 <RefreshCw className="h-4 w-4 animate-spin mr-2" /> Chargement…
               </div>
             )}
-            {!tachesQ.isLoading && taches.length === 0 && (
+            {tachesQ.isError && (
+              <div className="py-10 text-center">
+                <p className="text-sm font-semibold text-red-700">Impossible de charger les tâches.</p>
+                <p className="text-xs text-gray-500 mt-1">Le serveur n'a pas répondu — la liste ci-dessous serait fausse, elle n'est donc pas affichée.</p>
+                <button className="mt-3 text-xs text-navy underline" onClick={() => tachesQ.refetch()}>Réessayer</button>
+              </div>
+            )}
+            {!tachesQ.isLoading && !tachesQ.isError && taches.length === 0 && (
               <div className="py-16 text-center text-gray-400">
                 <CheckCircle className="h-10 w-10 mx-auto mb-3 opacity-20" />
                 <p className="font-medium text-sm">Aucune tâche en attente</p>
@@ -469,12 +486,6 @@ export default function WorkflowPage() {
           </div>
         )}
 
-        {/* ── TAB BPMN 5 MODULES ──────────────────────────────────────────────── */}
-        {activeTab === "bpmn" && (
-          <div className="p-5">
-            <BpmnAllDefinitions />
-          </div>
-        )}
       </div>
 
       {/* ── Modal détail / action ──────────────────────────────────────────────── */}
@@ -515,10 +526,26 @@ export default function WorkflowPage() {
                     {role === "DG" && <span className="text-xs text-amber-600 ml-2 font-normal">(Superviseur : accès aux décisions DG)</span>}
                   </p>
 
+                  {/* Quand la signature est active et que c'est VOTRE étape,
+                      l'approbation EST la signature : elle se fait sur le
+                      document, avec consultation du PDF exact, consentement et
+                      réauthentification — jamais depuis cette fenêtre. */}
+                  {sigElig?.autorise && (
+                    <button
+                      className="w-full mb-3 px-4 py-3 bg-amber-600 text-white rounded-xl text-sm font-bold hover:bg-amber-700 flex items-center justify-center gap-2"
+                      onClick={() => { setSelected(null); navigate(`/decomptes?id=${selDecompteId}&signer=1`); }}>
+                      Signer ce document — étape « {sigElig.etape} »
+                    </button>
+                  )}
+                  {sigElig?.autorise && (
+                    <p className="text-[11px] text-gray-500 mb-2">Cette étape se clôture par signature électronique. Les décisions ci-dessous restent disponibles pour rejeter ou demander une correction.</p>
+                  )}
+
                   {/* 6 boutons de décision */}
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {(Object.entries(DECISIONS_CFG) as [Decision, typeof DECISIONS_CFG[Decision]][])
                       .filter(([d]) => {
+                        if (sigElig?.autorise && d === "APPROUVE") return false; // l'approbation = la signature, sur le document
                         if (DG_ONLY.includes(d)) return ROLES_SUPERVISEURS.includes(role);
                         return true;
                       })

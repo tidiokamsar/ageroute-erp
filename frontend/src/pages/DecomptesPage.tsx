@@ -13,6 +13,7 @@ import { Input, Select, FormField, Textarea } from "../components/ui/Input";
 import { Modal } from "../components/ui/Modal";
 import { toast } from "../components/ui/Toast";
 import { SignatureDocumentModal } from "../components/signature/SignatureDocumentModal";
+import { useSearchParams } from "react-router-dom";
 import {
   Plus, Receipt, ChevronRight, Check, X, Send, FileDown, CreditCard,
   CheckCircle, XCircle, Trash2, Calculator, AlertTriangle, Shield,
@@ -379,6 +380,19 @@ export function DecomptesPage() {
     staleTime: 15_000,
   });
   const [signatureModal, setSignatureModal] = useState(false);
+
+  // Lien profond depuis « Mes tâches » : /decomptes?id=<décompte>&signer=1
+  // ouvre le dossier, et la fenêtre de signature si demandé. Le paramètre est
+  // consommé puis retiré de l'URL — un rechargement ne rejoue pas l'intention.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const idCible = searchParams.get("id");
+    if (!idCible) return;
+    setDetailId(idCible);
+    if (searchParams.get("signer") === "1") setSignatureModal(true);
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Téléchargement d'un PDF.
