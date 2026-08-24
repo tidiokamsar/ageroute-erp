@@ -225,9 +225,17 @@ export class Dossier {
     this.doc.fillColor("#000000");
   }
 
-  /** Cartouches de signature manuscrite, sur une nouvelle page si la place manque. */
-  cartouchesSignature(signataires: Array<{ role: string; nom?: string; qualite?: string }>): void {
-    this.espace(30 + Math.ceil(signataires.length / 3) * 70);
+  /**
+   * Cartouches de signature — remplis pour les étapes déjà signées
+   * ÉLECTRONIQUEMENT, lignes manuscrites pour les autres.
+   *
+   * Avant le 24/08/2026, tous les cartouches sortaient vides (« Date et
+   * signature ») même quand la chaîne PAdES portait déjà cinq rangs : le
+   * dossier imprimé contredisait l'état réel du circuit. Le cartouche imprimé
+   * reste une REPRÉSENTATION — la preuve est la signature dans le PDF signé.
+   */
+  cartouchesSignature(signataires: Array<{ role: string; nom?: string; qualite?: string; signeElectroniquement?: { par: string; qualite?: string | null; date: Date; id: string; validation: string; rang: number } }>): void {
+    this.espace(30 + Math.ceil(signataires.length / 3) * 78);
     const l = this.doc.page.width - 2 * MARGE;
     const parLigne = 3;
     const largeurCase = l / parLigne;
@@ -235,21 +243,39 @@ export class Dossier {
     signataires.forEach((s, i) => {
       const colonne = i % parLigne;
       const x = MARGE + colonne * largeurCase;
-      if (colonne === 0 && i > 0) this.y += 70;
+      if (colonne === 0 && i > 0) this.y += 78;
       this.doc.fontSize(7).font("Helvetica-Bold").fillColor("#1e3a5f")
         .text(assainirTexte(s.role), x + 4, this.y, { width: largeurCase - 8, align: "center" });
-      this.doc.fontSize(6).font("Helvetica").fillColor("#555")
-        .text(assainirTexte(s.nom ?? "…………………………"), x + 4, this.y + 11, { width: largeurCase - 8, align: "center" });
-      if (s.qualite) {
-        this.doc.fontSize(5.5).fillColor("#888")
-          .text(assainirTexte(s.qualite), x + 4, this.y + 20, { width: largeurCase - 8, align: "center" });
+
+      const e = s.signeElectroniquement;
+      if (e) {
+        this.doc.rect(x + 8, this.y + 10, largeurCase - 16, 52).fillAndStroke("#f0f7f1", "#2e7d32");
+        this.doc.fillColor("#1b5e20").fontSize(6.5).font("Helvetica-Bold")
+          .text(assainirTexte(e.par), x + 12, this.y + 14, { width: largeurCase - 24, align: "center" });
+        if (e.qualite) {
+          this.doc.fontSize(5.5).font("Helvetica").fillColor("#33691e")
+            .text(assainirTexte(e.qualite), x + 12, this.y + 23, { width: largeurCase - 24, align: "center" });
+        }
+        this.doc.fontSize(5.5).font("Helvetica-Bold").fillColor("#1b5e20")
+          .text(`SIGNÉ ÉLECTRONIQUEMENT — rang ${e.rang}`, x + 12, this.y + 32, { width: largeurCase - 24, align: "center" });
+        this.doc.fontSize(5).font("Helvetica").fillColor("#33691e")
+          .text(`${e.date.toLocaleString("fr-FR")} · validation ${assainirTexte(e.validation)}`, x + 12, this.y + 40, { width: largeurCase - 24, align: "center" });
+        this.doc.fontSize(4.5).fillColor("#558b2f")
+          .text(`id ${e.id}`, x + 12, this.y + 48, { width: largeurCase - 24, align: "center", lineBreak: false });
+      } else {
+        this.doc.fontSize(6).font("Helvetica").fillColor("#555")
+          .text(assainirTexte(s.nom ?? "…………………………"), x + 4, this.y + 11, { width: largeurCase - 8, align: "center" });
+        if (s.qualite) {
+          this.doc.fontSize(5.5).fillColor("#888")
+            .text(assainirTexte(s.qualite), x + 4, this.y + 20, { width: largeurCase - 8, align: "center" });
+        }
+        this.doc.moveTo(x + 12, this.y + 55).lineTo(x + largeurCase - 12, this.y + 55)
+          .strokeColor("#999").lineWidth(0.5).stroke();
+        this.doc.fontSize(5).fillColor("#999")
+          .text("Date et signature", x + 4, this.y + 58, { width: largeurCase - 8, align: "center" });
       }
-      this.doc.moveTo(x + 12, this.y + 55).lineTo(x + largeurCase - 12, this.y + 55)
-        .strokeColor("#999").lineWidth(0.5).stroke();
-      this.doc.fontSize(5).fillColor("#999")
-        .text("Date et signature", x + 4, this.y + 58, { width: largeurCase - 8, align: "center" });
     });
-    this.y += 75;
+    this.y += 82;
     this.doc.fillColor("#000000");
   }
 }

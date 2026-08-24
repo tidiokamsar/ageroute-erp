@@ -77,7 +77,7 @@ export async function genererDossierDecompte(
     }
     await assertDecompteAutorise(req, d.id, async () => d.marcheId);
 
-    const [instance, auditLogs, attachementsDecompte, attachementsMarche] = await Promise.all([
+    const [instance, auditLogs, attachementsDecompte, attachementsMarche, chaineSignatures] = await Promise.all([
       prisma.workflowInstance.findFirst({
         where: { decompteId: d.id },
         include: {
@@ -101,6 +101,7 @@ export async function genererDossierDecompte(
         where: { decompte: { marcheId: d.marcheId }, NOT: { decompteId: d.id } },
         orderBy: { createdAt: "asc" as const },
       }),
+      prisma.sigDocumentFinalise.findMany({ where: { decompteId: d.id }, orderBy: { rang: "asc" as const } }),
     ]);
 
     const doc = creerDocumentOfficiel({
@@ -390,11 +391,18 @@ export async function genererDossierDecompte(
 
     // ──────────────────────── SIGNATURES ────────────────────────
     dossier.section(11, "Signatures du circuit");
+    // Cartouche rempli si l'étape porte déjà une signature électronique de la
+    // chaîne (correspondance par nom d'étape) — sinon ligne manuscrite.
+    const parEtape = new Map(chaineSignatures.map((c) => [c.etape, c]));
     const signataires = instance
-      ? instance.definition.etapes.map((e) => ({
-          role: LIBELLE_ROLE[e.roleRequis] ?? e.roleRequis,
-          qualite: e.nom ?? undefined,
-        }))
+      ? instance.definition.etapes.map((e) => {
+          const c = parEtape.get(e.nom);
+          return {
+            role: LIBELLE_ROLE[e.roleRequis] ?? e.roleRequis,
+            qualite: e.nom ?? undefined,
+            signeElectroniquement: c ? { par: c.signeParEmail, qualite: c.signeParQualite, date: c.createdAt, id: c.id, validation: c.validationIndication, rang: c.rang } : undefined,
+          };
+        })
       : [
           { role: "Mission de contrôle" },
           { role: "Direction Technique" },
@@ -411,7 +419,9 @@ export async function genererDossierDecompte(
     dossier.cartouchesSignature(signataires);
 
     dossier.encadre(
-      "Ce dossier est un état imprimé de l'ERP. Les signatures manuscrites apposées ci-dessus en font foi. L'application ne produit à ce jour AUCUNE signature électronique opposable : les mentions de validation qu'elle contient tracent une action informatique, elles ne valent pas signature au sens de la loi L/2016/035/AN.",
+      chaineSignatures.length > 0
+        ? "Ce dossier est un état imprimé de l'ERP. Les cartouches verts attestent qu'une signature électronique a été apposée sur la version gelée correspondante : la PREUVE est dans le PDF signé conservé (voir le panneau Signatures de la fiche), pas dans cette impression. En mode laboratoire, ces signatures n'ont AUCUNE valeur juridique. Les cartouches vides restent à signer, électroniquement ou de façon manuscrite."
+        : "Ce dossier est un état imprimé de l'ERP. Les signatures manuscrites apposées ci-dessus en font foi. Aucune signature électronique n'a encore été apposée sur ce dossier.",
       "#eef2f7", "#1e3a5f", "#1e3a5f",
     );
 
