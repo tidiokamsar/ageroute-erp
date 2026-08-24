@@ -1,80 +1,89 @@
 #!/bin/bash
 # Initialisation du laboratoire de signature — SANS VALEUR JURIDIQUE.
 #
-# Crée dans SignServer Community :
-#   · un crypto-token SoftHSM2 « LaboToken » (PKCS#11 émulé — pas un HSM) ;
-#   · une clé RSA 3072 et un certificat de TEST auto-émis, sujet explicite ;
-#   · le worker PDFSignerLab (signature PAdES) ;
-#   · le worker TimeStampLab (TSA RFC 3161 de laboratoire).
-# Puis imprime le certificat à coller dans SIG_ANCRES_CONFIANCE.
+# L'image SignServer CE 7.3.2 n'embarque ni SoftHSM2 ni openssl : le jeton de
+# laboratoire est un KeystoreCryptoToken (PKCS#12) qui vit dans le volume
+# persistant du conteneur — les clés ne quittent JAMAIS SignServer, l'ERP ne
+# les voit pas. L'AC racine de test est créée au keytool ; l'enrôlement EJBCA
+# (racine → intermédiaire → worker, CRL, OCSP) est l'étape suivante.
 #
-# Idempotent : relancer ne recrée pas ce qui existe. Arrêt à la première erreur.
+# Idempotent. Arrêt à la première erreur.
 set -euo pipefail
 
 C=labo-signserver
-SUJET="CN=LABORATOIRE AGEROUTE - CERTIFICAT DE TEST - SANS VALEUR JURIDIQUE,O=AGEROUTE Guinee (laboratoire),C=GN"
-PIN="${SOFTHSM_PIN:-labo-pin-1234}"      # PIN du jeton de TEST — pas un secret de production
+SS=/opt/keyfactor/signserver
+P=/mnt/persistent
+PIN="${LABO_PIN:-labo-pin-de-test-1234}"   # PIN de TEST — pas un secret de production
+DN_CA="CN=LABORATOIRE AGEROUTE - AC RACINE DE TEST - SANS VALEUR JURIDIQUE,O=AGEROUTE Guinee (laboratoire),C=GN"
+DN_SIGN="CN=LABORATOIRE AGEROUTE - SIGNATURE PDF DE TEST - SANS VALEUR JURIDIQUE,O=AGEROUTE Guinee (laboratoire),C=GN"
+DN_TSA="CN=LABORATOIRE AGEROUTE - HORODATAGE DE TEST - SANS VALEUR JURIDIQUE,O=AGEROUTE Guinee (laboratoire),C=GN"
 
-cli() { docker exec "$C" /opt/keyfactor/signserver/bin/signserver "$@"; }
+x() { docker exec "$C" bash -c "$1"; }
 
-echo "[1/5] SignServer joignable ?"
-docker exec "$C" curl -sf http://localhost:8080/signserver/healthcheck/signserverhealth | grep -q ALLOK
+echo "[1/6] SignServer joignable"
+x "curl -sf http://localhost:8080/signserver/healthcheck/signserverhealth" | grep -q ALLOK
 
-echo "[2/5] Crypto-token SoftHSM2 « LaboToken »"
-if ! cli getstatus brief all 2>/dev/null | grep -q "LaboToken"; then
-  docker exec "$C" sh -c "softhsm2-util --init-token --free --label LaboToken --pin $PIN --so-pin $PIN" >/dev/null
-  cli setproperties <<EOF
+echo "[2/6] AC racine de laboratoire (keytool, PKCS#12)"
+x "[ -f $P/labo-ca.p12 ] || keytool -genkeypair -alias laborootca -keyalg RSA -keysize 3072 -validity 3650 \
+   -dname '$DN_CA' -ext bc:c=ca:true -ext ku:c=keyCertSign,cRLSign \
+   -keystore $P/labo-ca.p12 -storetype PKCS12 -storepass '$PIN'"
+x "keytool -exportcert -alias laborootca -keystore $P/labo-ca.p12 -storepass '$PIN' -rfc -file $P/labo-ca.pem"
+
+echo "[3/6] Clé de signature PDF + certificat émis par l'AC de test"
+x "[ -f $P/labo-keys.p12 ] || keytool -genkeypair -alias signkey -keyalg RSA -keysize 3072 -validity 1095 \
+   -dname '$DN_SIGN' -keystore $P/labo-keys.p12 -storetype PKCS12 -storepass '$PIN'"
+x "keytool -certreq -alias signkey -keystore $P/labo-keys.p12 -storepass '$PIN' -file /tmp/sign.csr"
+x "keytool -gencert -alias laborootca -keystore $P/labo-ca.p12 -storepass '$PIN' \
+   -ext ku:c=digitalSignature -validity 1095 -rfc -infile /tmp/sign.csr -outfile /tmp/sign.pem"
+x "keytool -importcert -alias laborootca -keystore $P/labo-keys.p12 -storepass '$PIN' -noprompt -file $P/labo-ca.pem 2>/dev/null || true"
+x "keytool -importcert -alias signkey    -keystore $P/labo-keys.p12 -storepass '$PIN' -noprompt -file /tmp/sign.pem"
+
+echo "[4/6] Clé d'horodatage + certificat (extension timeStamping critique — exigée par la RFC 3161)"
+x "keytool -list -keystore $P/labo-keys.p12 -storepass '$PIN' -alias tsakey >/dev/null 2>&1 || keytool -genkeypair -alias tsakey -keyalg RSA -keysize 3072 -validity 1095 \
+   -dname '$DN_TSA' -keystore $P/labo-keys.p12 -storetype PKCS12 -storepass '$PIN'"
+x "keytool -certreq -alias tsakey -keystore $P/labo-keys.p12 -storepass '$PIN' -file /tmp/tsa.csr"
+x "keytool -gencert -alias laborootca -keystore $P/labo-ca.p12 -storepass '$PIN' \
+   -ext ku:c=digitalSignature -ext eku:c=timeStamping -validity 1095 -rfc -infile /tmp/tsa.csr -outfile /tmp/tsa.pem"
+x "keytool -importcert -alias tsakey -keystore $P/labo-keys.p12 -storepass '$PIN' -noprompt -file /tmp/tsa.pem"
+
+echo "[5/6] Workers : jeton, PDFSignerLab, TimeStampLab"
+x "cat > /tmp/workers.properties <<EOF
 WORKERGENID1.NAME=LaboToken
 WORKERGENID1.TYPE=CRYPTO_WORKER
 WORKERGENID1.IMPLEMENTATION_CLASS=org.signserver.server.signers.CryptoWorker
-WORKERGENID1.CRYPTOTOKEN_IMPLEMENTATION_CLASS=org.signserver.server.cryptotokens.PKCS11CryptoToken
-WORKERGENID1.SHAREDLIBRARYNAME=SoftHSM
-WORKERGENID1.SLOTLABELTYPE=SLOT_LABEL
-WORKERGENID1.SLOTLABELVALUE=LaboToken
-WORKERGENID1.PIN=$PIN
-WORKERGENID1.DEFAULTKEY=labokey
-EOF
-  cli reload all >/dev/null
-fi
-TOKEN_ID=$(cli getstatus brief all | awk '/LaboToken/ {gsub(/[^0-9]/,"",$0); print; exit}')
+WORKERGENID1.CRYPTOTOKEN_IMPLEMENTATION_CLASS=org.signserver.server.cryptotokens.KeystoreCryptoToken
+WORKERGENID1.KEYSTOREPATH=$P/labo-keys.p12
+WORKERGENID1.KEYSTORETYPE=PKCS12
+WORKERGENID1.KEYSTOREPASSWORD=$PIN
+WORKERGENID1.DEFAULTKEY=signkey
 
-echo "[3/5] Clé de test + certificat auto-émis (sujet de laboratoire explicite)"
-if ! cli getstatus complete "$TOKEN_ID" 2>/dev/null | grep -q "labokey"; then
-  cli generatekey "$TOKEN_ID" -alias labokey -keyalg RSA -keyspec 3072 >/dev/null
-fi
-# Un certificat AUTO-ÉMIS, pour que le worker fonctionne avant l'enrôlement EJBCA.
-# Il sera remplacé par un certificat de la CA de test (étape suivante).
-cli generatecertreq "$TOKEN_ID" "$SUJET" "SHA256WithRSA" /tmp/labo.csr -alias labokey >/dev/null 2>&1 || true
+WORKERGENID2.NAME=PDFSignerLab
+WORKERGENID2.TYPE=PROCESSABLE
+WORKERGENID2.IMPLEMENTATION_CLASS=org.signserver.module.pdfsigner.PDFSigner
+WORKERGENID2.CRYPTOTOKEN=LaboToken
+WORKERGENID2.DEFAULTKEY=signkey
+WORKERGENID2.AUTHTYPE=NOAUTH
+WORKERGENID2.DISABLEKEYUSAGECOUNTER=true
+WORKERGENID2.DIGESTALGORITHM=SHA256
+WORKERGENID2.REASON=Signature de laboratoire - SANS VALEUR JURIDIQUE
+WORKERGENID2.LOCATION=AGEROUTE Guinee (laboratoire)
+WORKERGENID2.ALLOW_PROPERTY_OVERRIDE=REASON,LOCATION,TSA_URL
 
-echo "[4/5] Workers PDFSignerLab et TimeStampLab"
-cli setproperties <<EOF
-WORKERGENID1.NAME=PDFSignerLab
-WORKERGENID1.TYPE=PROCESSABLE
-WORKERGENID1.IMPLEMENTATION_CLASS=org.signserver.module.pdfsigner.PDFSigner
-WORKERGENID1.CRYPTOTOKEN=LaboToken
-WORKERGENID1.DEFAULTKEY=labokey
-WORKERGENID1.AUTHTYPE=NOAUTH
-WORKERGENID1.ADD_VISIBLE_SIGNATURE=False
-WORKERGENID1.REASON=Signature de laboratoire - SANS VALEUR JURIDIQUE
-WORKERGENID1.LOCATION=AGEROUTE Guinee (laboratoire)
-WORKERGENID1.ALLOW_PROPERTY_OVERRIDE=REASON,LOCATION,TSA_URL
-WORKERGENID1.DIGESTALGORITHM=SHA256
+WORKERGENID3.NAME=TimeStampLab
+WORKERGENID3.TYPE=PROCESSABLE
+WORKERGENID3.IMPLEMENTATION_CLASS=org.signserver.module.tsa.TimeStampSigner
+WORKERGENID3.CRYPTOTOKEN=LaboToken
+WORKERGENID3.DEFAULTKEY=tsakey
+WORKERGENID3.AUTHTYPE=NOAUTH
+WORKERGENID3.DISABLEKEYUSAGECOUNTER=true
+WORKERGENID3.DEFAULTTSAPOLICYOID=1.3.6.1.4.1.4711.42.1
+WORKERGENID3.ACCEPTANYPOLICY=true
 EOF
-cli setproperties <<EOF
-WORKERGENID1.NAME=TimeStampLab
-WORKERGENID1.TYPE=PROCESSABLE
-WORKERGENID1.IMPLEMENTATION_CLASS=org.signserver.module.tsa.TimeStampSigner
-WORKERGENID1.CRYPTOTOKEN=LaboToken
-WORKERGENID1.DEFAULTKEY=labokey
-WORKERGENID1.AUTHTYPE=NOAUTH
-WORKERGENID1.DEFAULTTSAPOLICYOID=1.3.6.1.4.1.99999.1.1
-WORKERGENID1.ACCEPTANYPOLICY=true
-WORKERGENID1.ACCURACYMICROS=500
-EOF
-cli reload all >/dev/null
+$SS/bin/signserver setproperties /tmp/workers.properties >/dev/null
+$SS/bin/signserver reload all >/dev/null"
 
-echo "[5/5] État"
-cli getstatus brief all | grep -E "PDFSignerLab|TimeStampLab|LaboToken" || true
+echo "[6/6] État des workers"
+x "$SS/bin/signserver getstatus brief all" | grep -E "LaboToken|PDFSignerLab|TimeStampLab|Status" | head -12
 echo
-echo "Colle le certificat ci-dessous dans SIG_ANCRES_CONFIANCE (Paramétrage → Signature) :"
-cli dumpproperties PDFSignerLab /dev/stdout 2>/dev/null | grep -i SIGNERCERT || echo "(certificat à exporter après enrôlement EJBCA — voir README, étape suivante)"
+echo "── ANCRE DE CONFIANCE (à coller dans Paramétrage → Signature → SIG_ANCRES_CONFIANCE) ──"
+x "cat $P/labo-ca.pem"
