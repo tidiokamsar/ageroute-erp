@@ -381,6 +381,23 @@ export function DecomptesPage() {
   });
   const [signatureModal, setSignatureModal] = useState(false);
 
+  // Chaîne des documents signés du dossier ouvert — c'est LÀ que la signature
+  // se voit : qui, quelle étape, quel rang, quelle empreinte, et le PDF signé
+  // à télécharger. Le PDF porte la preuve ; ce panneau la montre.
+  const { data: docsSignes } = useQuery<Array<{ id: string; rang: number; etape: string | null; signeParEmail: string; signeParQualite: string | null; validationIndication: string; sha256Signe: string; filigrane: boolean; createdAt: string }>>({
+    queryKey: ["signature-documents", detailId],
+    queryFn: () => api.get(`/signature-numerique/decomptes/${detailId}/documents`).then((r) => r.data).catch(() => []),
+    enabled: !!detailId,
+  });
+  const telechargerSigne = async (id: string, rang: number) => {
+    try {
+      const res = await api.get(`/signature-numerique/documents/${id}/pdf`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data as Blob);
+      const a = document.createElement("a"); a.href = url; a.download = `dossier-${det?.reference ?? "decompte"}-r${rang}-signe.pdf`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { toast.error("Document signé indisponible"); }
+  };
+
   // Lien profond depuis « Mes tâches » : /decomptes?id=<décompte>&signer=1
   // ouvre le dossier, et la fenêtre de signature si demandé. Le paramètre est
   // consommé puis retiré de l'URL — un rechargement ne rejoue pas l'intention.
@@ -598,6 +615,11 @@ export function DecomptesPage() {
                   onClick={() => downloadPdf(det.id, det.reference, "resume")}>
                   <FileDown className="h-3.5 w-3.5" /> Résumé
                 </button>
+                {(docsSignes ?? []).length > 0 && (
+                  <span className="px-2.5 py-1.5 text-xs bg-green-50 border border-green-200 text-green-800 rounded-lg font-semibold" title="Documents signés électroniquement — voir le panneau Signatures sous l'en-tête">
+                    {docsSignes!.length} signature(s)
+                  </span>
+                )}
                 {/* SIGNER CE DOCUMENT — visible seulement quand le serveur
                     confirme que tout est réuni : module actif, compte nominatif,
                     étape active pour ce rôle, séparation des tâches. La fenêtre
@@ -647,6 +669,26 @@ export function DecomptesPage() {
             />
 
             {/* Tabs */}
+            {/* SIGNATURES ÉLECTRONIQUES — la chaîne, visible sur le dossier */}
+            {(docsSignes ?? []).length > 0 && (
+              <div className="rounded-xl border border-green-200 bg-green-50/50 p-3">
+                <p className="text-xs font-bold text-green-900 mb-2">Signatures électroniques apposées sur ce dossier</p>
+                <div className="space-y-1">
+                  {docsSignes!.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between gap-3 bg-white border border-green-100 rounded-lg px-3 py-2 text-xs">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-800">Rang {d.rang} — {d.etape ?? "étape"} · {d.signeParEmail}{d.signeParQualite ? ` (${d.signeParQualite})` : ""}</p>
+                        <p className="text-[10px] text-gray-500 font-mono truncate">sha256 {d.sha256Signe.slice(0, 32)}… · validation {d.validationIndication}{d.filigrane ? " · FILIGRANE SIMULATION — sans valeur juridique" : ""} · {new Date(d.createdAt).toLocaleString("fr-FR")}</p>
+                      </div>
+                      <button className="shrink-0 px-2 py-1 border border-green-300 rounded-lg text-green-800 hover:bg-green-100" onClick={() => telechargerSigne(d.id, d.rang)}>
+                        Télécharger le PDF signé
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-0.5 overflow-x-auto border-b border-gray-100 mb-4">
               {TABS.map((tab, i) => (
                 <button key={tab} onClick={() => setActiveTab(i)}
@@ -1307,9 +1349,20 @@ export function DecomptesPage() {
             <span className="font-bold text-navy">{etapeCourante?.nom ?? "—"}</span>
             <span className="text-gray-400 ml-1">(rôle {etapeCourante?.roleRequis ?? "—"})</span>
           </div>
+          {/* Quand la signature est active et que c'est VOTRE étape,
+              l'approbation EST la signature — fenêtre dédiée, PDF exact,
+              consentement, réauthentification. Ici restent le refus et les
+              demandes de correction, qui ne sont pas des signatures. */}
+          {sigElig?.autorise && (
+            <button
+              className="w-full px-4 py-3 bg-amber-600 text-white rounded-xl text-sm font-bold hover:bg-amber-700"
+              onClick={() => { setValModal(false); setSignatureModal(true); }}>
+              Signer ce document — étape « {sigElig.etape} »
+            </button>
+          )}
           <FormField label="Décision">
-            <Select value={String(valForm.decision ?? "APPROUVE")} onChange={(e) => setValForm({ ...valForm, decision: e.target.value })}>
-              <option value="APPROUVE">Approuver — transmettre à l'étape suivante</option>
+            <Select value={String(valForm.decision ?? (sigElig?.autorise ? "REJETE" : "APPROUVE"))} onChange={(e) => setValForm({ ...valForm, decision: e.target.value })}>
+              {!sigElig?.autorise && <option value="APPROUVE">Approuver — transmettre à l'étape suivante</option>}
               <option value="REJETE">Rejeter</option>
               <option value="DEMANDE_CORRECTION">Demander correction</option>
               <option value="DEMANDE_COMPLEMENT">Demander complément</option>
@@ -1318,9 +1371,9 @@ export function DecomptesPage() {
           <FormField label={String(valForm.decision) === "APPROUVE" ? "Commentaire (min 5 caractères)" : "Motif obligatoire *"}>
             <Textarea rows={3} value={String(valForm.commentaire ?? "")} onChange={(e) => setValForm({ ...valForm, commentaire: e.target.value })} placeholder="Commentaire obligatoire (min 5 caractères)..." />
           </FormField>
-          <FormField label="Réf. signature (optionnel)">
-            <Input value={String(valForm.signatureRef ?? "")} onChange={(e) => setValForm({ ...valForm, signatureRef: e.target.value })} placeholder="SIG-AGEROUTE-XXXX" />
-          </FormField>
+          {/* Le champ « Réf. signature » en texte libre est retiré : une
+              référence tapée à la main ne prouve rien (audit signature, R1).
+              La vraie référence est écrite par le module de signature. */}
         </div>
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="secondary" onClick={() => setValModal(false)}>Annuler</Button>
