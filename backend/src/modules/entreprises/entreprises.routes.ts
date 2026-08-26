@@ -7,9 +7,23 @@ import { ApiError } from "../../middleware/error.middleware";
 import { z } from "zod";
 import { entrepriseIdOf } from "../../lib/scope";
 import { getMarchesAffectes } from "../../lib/affectations";
+import { entrepriseDuCompte } from "../../lib/perimetre";
 
 export const entreprisesRouter = Router();
 entreprisesRouter.use(requireAuth);
+
+/**
+ * Isolation ENTREPRISE d'une lecture par identifiant (revue du 20/08/2026) :
+ * la liste ne montre qu'une entreprise à un compte entreprise, mais le détail
+ * et ses sous-lectures (documents, contacts, performance, marchés,
+ * décomptes…) restaient ouverts à tout identifiant — contournement direct du
+ * portail. Un compte ENTREPRISE ne lit que SA fiche ; les rôles internes
+ * consultent le référentiel.
+ */
+async function assertAccesEntreprise(req: Request, entrepriseId: string): Promise<void> {
+  const mienne = await entrepriseDuCompte(req);
+  if (mienne && mienne !== entrepriseId) throw new ApiError(404, "Entreprise introuvable");
+}
 
 // ─── Stats globales ───────────────────────────────────────────────────────────
 
@@ -53,7 +67,10 @@ entreprisesRouter.get("/", async (req: Request, res: Response, next: NextFunctio
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
 entreprisesRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await entreprisesService.getById(req.params.id)); } catch (err) { next(err); }
+  try {
+    await assertAccesEntreprise(req, req.params.id);
+    res.json(await entreprisesService.getById(req.params.id));
+  } catch (err) { next(err); }
 });
 
 entreprisesRouter.post("/", requireRole("ADMIN","DMC","DAF"), async (req: Request, res: Response, next: NextFunction) => {
@@ -92,6 +109,7 @@ entreprisesRouter.post("/:id/conformite/verifier", requireRole("ADMIN","DMC"), a
 // Éligibilité (utilisée par décomptes/marchés — retourne ok + raisons)
 entreprisesRouter.get("/:id/eligibilite", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesEntreprise(req, req.params.id);
     res.json(await checkEligibilite(req.params.id));
   } catch (err) { next(err); }
 });
@@ -117,7 +135,10 @@ entreprisesRouter.post("/:id/debloquer", requireRole("ADMIN","DG","DMC"), async 
 // ─── Documents ────────────────────────────────────────────────────────────────
 
 entreprisesRouter.get("/:id/documents", async (req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await entreprisesService.listDocuments(req.params.id)); } catch (err) { next(err); }
+  try {
+    await assertAccesEntreprise(req, req.params.id);
+    res.json(await entreprisesService.listDocuments(req.params.id));
+  } catch (err) { next(err); }
 });
 
 entreprisesRouter.post("/:id/documents", requireRole("ADMIN","DMC","DAF"), async (req: Request, res: Response, next: NextFunction) => {
@@ -145,7 +166,10 @@ entreprisesRouter.delete("/:id/documents/:docId", requireRole("ADMIN","DMC"), as
 // ─── Contacts ─────────────────────────────────────────────────────────────────
 
 entreprisesRouter.get("/:id/contacts", async (req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await entreprisesService.listContacts(req.params.id)); } catch (err) { next(err); }
+  try {
+    await assertAccesEntreprise(req, req.params.id);
+    res.json(await entreprisesService.listContacts(req.params.id));
+  } catch (err) { next(err); }
 });
 
 entreprisesRouter.post("/:id/contacts", requireRole("ADMIN","DMC","DAF"), async (req: Request, res: Response, next: NextFunction) => {
@@ -165,6 +189,7 @@ entreprisesRouter.delete("/:id/contacts/:cid", requireRole("ADMIN","DMC"), async
 
 entreprisesRouter.get("/:id/alertes", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesEntreprise(req, req.params.id);
     const inclure = req.query.toutes === "true";
     res.json(await entreprisesService.listAlertes(req.params.id, inclure));
   } catch (err) { next(err); }
@@ -180,13 +205,17 @@ entreprisesRouter.post("/:id/alertes/:aid/acquitter", requireRole("ADMIN","DMC",
 // ─── Performance ─────────────────────────────────────────────────────────────
 
 entreprisesRouter.get("/:id/performance", async (req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await entreprisesService.getPerformance(req.params.id)); } catch (err) { next(err); }
+  try {
+    await assertAccesEntreprise(req, req.params.id);
+    res.json(await entreprisesService.getPerformance(req.params.id));
+  } catch (err) { next(err); }
 });
 
 // ─── Historique conformité ────────────────────────────────────────────────────
 
 entreprisesRouter.get("/:id/historique-conformite", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesEntreprise(req, req.params.id);
     const { prisma } = await import("../../lib/prisma");
     const data = await prisma.conformiteVerification.findMany({
       where: { entrepriseId: req.params.id },
@@ -201,6 +230,7 @@ entreprisesRouter.get("/:id/historique-conformite", async (req: Request, res: Re
 
 entreprisesRouter.get("/:id/marches", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesEntreprise(req, req.params.id);
     const { prisma } = await import("../../lib/prisma");
     const data = await prisma.marche.findMany({
       where: { entrepriseId: req.params.id, deletedAt: null },
@@ -213,6 +243,7 @@ entreprisesRouter.get("/:id/marches", async (req: Request, res: Response, next: 
 
 entreprisesRouter.get("/:id/decomptes", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesEntreprise(req, req.params.id);
     const { prisma } = await import("../../lib/prisma");
     const data = await prisma.decompte.findMany({
       where: { entrepriseId: req.params.id, deletedAt: null },

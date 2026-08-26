@@ -8,11 +8,23 @@ import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { entrepriseIdOf } from "../../lib/scope";
 import { getMarchesAffectes } from "../../lib/affectations";
+import { assertMarcheAutoriseEtPropre } from "../../lib/perimetre";
 import { z } from "zod";
 import { StatutMarche } from "@prisma/client";
 
 export const marchesRouter = Router();
 marchesRouter.use(requireAuth);
+
+// Cloisonnement d'une lecture de marché (revue du 20/08/2026) : la liste était
+// filtrée, les lectures par identifiant non — un compte ENTREPRISE lisait la
+// situation financière, les garanties bancaires et les paiements du marché
+// d'un concurrent. Périmètre d'affectation + appartenance, refus en 404.
+async function assertAccesMarche(req: Request, marcheId: string): Promise<void> {
+  await assertMarcheAutoriseEtPropre(req, marcheId, async (id) => {
+    const m = await prisma.marche.findFirst({ where: { id, deletedAt: null }, select: { entrepriseId: true } });
+    return m?.entrepriseId ?? null;
+  });
+}
 
 // ─── Lecture liste ─────────────────────────────────────────────────────────
 
@@ -42,6 +54,7 @@ marchesRouter.get("/by-contrat/:numContrat", async (req: Request, res: Response,
   try {
     const m = await marchesService.getByNumContrat(req.params.numContrat);
     if (!m) return res.status(404).json({ error: "Marché introuvable" });
+    await assertAccesMarche(req, m.id);
     res.json(m);
   } catch (err) { next(err); }
 });
@@ -49,7 +62,10 @@ marchesRouter.get("/by-contrat/:numContrat", async (req: Request, res: Response,
 // ─── Fiche complète ────────────────────────────────────────────────────────
 
 marchesRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
-  try { res.json(await marchesService.getById(req.params.id)); } catch (err) { next(err); }
+  try {
+    await assertAccesMarche(req, req.params.id);
+    res.json(await marchesService.getById(req.params.id));
+  } catch (err) { next(err); }
 });
 
 // ─── §13 — Situation financière consolidée ─────────────────────────────────
@@ -57,6 +73,7 @@ marchesRouter.get("/:id", async (req: Request, res: Response, next: NextFunction
 marchesRouter.get("/:id/situation", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id;
+    await assertAccesMarche(req, id);
     const marche = await prisma.marche.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -127,6 +144,7 @@ marchesRouter.get("/:id/situation", async (req: Request, res: Response, next: Ne
 
 marchesRouter.get("/:id/checklist", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     const marche = await prisma.marche.findFirst({
       where: { id: req.params.id, deletedAt: null },
       include: {
@@ -224,6 +242,7 @@ marchesRouter.post("/:id/transition", requireRole("ADMIN","DG","DAF","DMC"), asy
 
 marchesRouter.get("/:id/historique-statuts", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     const historique = await prisma.historiqueStatutMarche.findMany({
       where: { marcheId: req.params.id },
       orderBy: { createdAt: "desc" },
@@ -272,6 +291,7 @@ marchesRouter.delete("/:id", requireRole("ADMIN"), async (req: Request, res: Res
 
 marchesRouter.get("/:id/avenants", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     res.json(await prisma.avenant.findMany({
       where: { marcheId: req.params.id },
       orderBy: { numero: "asc" },
@@ -323,6 +343,7 @@ marchesRouter.post("/:id/avenants/:aid/valider", requireRole("ADMIN","DMC","DAF"
 
 marchesRouter.get("/:id/garanties", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     res.json(await prisma.garantie.findMany({ where: { marcheId: req.params.id }, orderBy: { createdAt: "asc" } }));
   } catch (err) { next(err); }
 });
@@ -367,6 +388,7 @@ marchesRouter.put("/:id/garanties/:gid", requireRole("ADMIN","DMC","DAF"), async
 
 marchesRouter.get("/:id/lots", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     res.json(await prisma.lot.findMany({ where: { marcheId: req.params.id, deletedAt: null }, orderBy: { numero: "asc" } }));
   } catch (err) { next(err); }
 });
@@ -402,6 +424,7 @@ marchesRouter.put("/:id/lots/:lid", requireRole("ADMIN","DMC"), async (req: Requ
 
 marchesRouter.get("/:id/receptions", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     res.json(await prisma.reception.findMany({
       where: { marcheId: req.params.id },
       orderBy: { createdAt: "asc" },
@@ -413,6 +436,7 @@ marchesRouter.get("/:id/receptions", async (req: Request, res: Response, next: N
 
 marchesRouter.get("/:id/decomptes", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     res.json(await prisma.decompte.findMany({
       where: { marcheId: req.params.id, deletedAt: null },
       include: { entreprise: { select: { raisonSociale: true } } },
@@ -425,6 +449,7 @@ marchesRouter.get("/:id/decomptes", async (req: Request, res: Response, next: Ne
 
 marchesRouter.get("/:id/paiements", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     const decomptes = await prisma.decompte.findMany({
       where: { marcheId: req.params.id, deletedAt: null },
       select: { id: true },
@@ -442,6 +467,7 @@ marchesRouter.get("/:id/paiements", async (req: Request, res: Response, next: Ne
 
 marchesRouter.get("/:id/os", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    await assertAccesMarche(req, req.params.id);
     res.json(await prisma.ordreService.findMany({
       where: { marcheId: req.params.id },
       orderBy: { numero: "asc" },

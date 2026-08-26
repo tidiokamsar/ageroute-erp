@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { requireRole } from "../../middleware/rbac.middleware";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
 import { bornerPagination, buildSignatureAuditWhere } from "./signature-audit.query";
@@ -95,7 +96,7 @@ async function logSigEvent(sigId: string, eventType: string, status: string, mes
 }
 
 // ─── GET /api/signature-audit ─────────────────────────────────────────────────
-signatureAuditRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.get("/", requireRole("ADMIN","DG","DAF","AUDITEUR"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, objectType } = req.query;
     // Entrées utilisateur bornées — requête paramétrée obligatoire (P3-11 REVUE).
@@ -127,7 +128,7 @@ signatureAuditRouter.get("/", async (req: Request, res: Response, next: NextFunc
 });
 
 // ─── POST /api/signature-audit ────────────────────────────────────────────────
-signatureAuditRouter.post("/", async (req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.post("/", requireRole("ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const { objectType, objectId, title, signerUserId, signerRole, method = "PASSWORD" } = z.object({
@@ -190,7 +191,7 @@ signatureAuditRouter.post("/", async (req: Request, res: Response, next: NextFun
 });
 
 // ─── GET /api/signature-audit/:id ────────────────────────────────────────────
-signatureAuditRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.get("/:id", requireRole("ADMIN","DG","DAF","AUDITEUR"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const [obj] = await prisma.$queryRaw<SigObject[]>`SELECT * FROM sig_objects WHERE id=${req.params.id}`;
     if (!obj) throw new ApiError(404, "Objet de signature introuvable");
@@ -407,7 +408,7 @@ signatureAuditRouter.post("/:id/reject", async (req: Request, res: Response, nex
 });
 
 // ─── GET /api/signature-audit/:id/events ─────────────────────────────────────
-signatureAuditRouter.get("/:id/events", async (req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.get("/:id/events", requireRole("ADMIN","DG","DAF","AUDITEUR"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const events = await prisma.$queryRaw<any[]>`
       SELECT se.*, u."nomComplet" as user_nom, ss.signer_role
@@ -422,7 +423,7 @@ signatureAuditRouter.get("/:id/events", async (req: Request, res: Response, next
 });
 
 // ─── GET /api/signature-audit/:id/audit-trail ────────────────────────────────
-signatureAuditRouter.get("/:id/audit-trail", async (req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.get("/:id/audit-trail", requireRole("ADMIN","DG","DAF","AUDITEUR"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const [obj] = await prisma.$queryRaw<SigObject[]>`SELECT * FROM sig_objects WHERE id=${req.params.id}`;
     if (!obj) throw new ApiError(404, "Objet introuvable");
@@ -455,7 +456,7 @@ signatureAuditRouter.get("/:id/audit-trail", async (req: Request, res: Response,
 });
 
 // ─── GET /api/signature-audit/:id/download ───────────────────────────────────
-signatureAuditRouter.get("/:id/download", async (req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.get("/:id/download", requireRole("ADMIN","DG","DAF","AUDITEUR"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const [obj] = await prisma.$queryRaw<SigObject[]>`SELECT * FROM sig_objects WHERE id=${req.params.id}`;
     if (!obj) throw new ApiError(404, "Objet introuvable");
@@ -594,7 +595,7 @@ signatureAuditRouter.post("/:id/package", async (req: Request, res: Response, ne
 });
 
 // ─── GET /api/signature-audit/:id/package ────────────────────────────────────
-signatureAuditRouter.get("/:id/package", async (req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.get("/:id/package", requireRole("ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const packages = await prisma.$queryRaw<(SigPackage & {operator_nom:string|null})[]>`
       SELECT sp.*, u."nomComplet" as operator_nom
@@ -679,7 +680,7 @@ signatureAuditRouter.post("/:id/package/archive", async (req: Request, res: Resp
 });
 
 // ─── GET /api/signature-audit/journal/securite ───────────────────────────────
-signatureAuditRouter.get("/journal/securite", async (req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.get("/journal/securite", requireRole("ADMIN","DG","DAF","AUDITEUR"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { page = "1", pageSize = "30" } = req.query;
     const limit = Number(pageSize);
@@ -707,7 +708,7 @@ signatureAuditRouter.get("/journal/securite", async (req: Request, res: Response
 });
 
 // ─── GET /api/signature-audit/stats ──────────────────────────────────────────
-signatureAuditRouter.get("/stats/global", async (_req: Request, res: Response, next: NextFunction) => {
+signatureAuditRouter.get("/stats/global", requireRole("ADMIN","DG","DAF","AUDITEUR"), async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await prisma.$queryRaw<any[]>`
       SELECT status, COUNT(*)::int as total FROM sig_objects GROUP BY status
