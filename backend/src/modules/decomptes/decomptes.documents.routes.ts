@@ -18,20 +18,16 @@ import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
 import { assertDecompteAutorise, entrepriseDuCompte } from "../../lib/perimetre";
+// Référentiel UNIQUE des pièces (lib/pieces-obligatoires.ts) : la liste vivait
+// ici et, recopiée en dur, dans la soumission au circuit — les deux avaient
+// divergé sur les photos de chantier. Réexporté pour les appelants existants.
+import { NATURES_PIECES, CLES_PIECES } from "../../lib/pieces-obligatoires";
 
 export const decompteDocumentsRouter = Router({ mergeParams: true });
 
-/** Natures attendues — miroir du bordereau de pièces affiché à l'écran. */
-export const NATURES_PIECES = [
-  { cle: "decompteSigné",     libelle: "Décompte signé",          requis: true },
-  { cle: "attachements",      libelle: "Attachements validés", requis: true },
-  { cle: "facture",           libelle: "Facture de l'entreprise", requis: true },
-  { cle: "rapportAvancement", libelle: "Rapport d'avancement",    requis: true },
-  { cle: "photosChantier",    libelle: "Photos de chantier",      requis: false },
-  { cle: "pvContradictoire",  libelle: "PV contradictoire",       requis: false },
-] as const;
+export { NATURES_PIECES };
 
-const CLES = NATURES_PIECES.map((n) => n.cle);
+const CLES = CLES_PIECES;
 
 /** Le décompte doit être dans le périmètre de l'appelant, et le sien s'il est entreprise. */
 async function assertAcces(req: Request, decompteId: string): Promise<{ id: string; entrepriseId: string; statut: string }> {

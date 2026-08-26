@@ -25,6 +25,7 @@ import {
 } from "../../lib/moteur-validation";
 import { chargerRegles, booleenRegles } from "../../lib/regles";
 import { motifStatutMarche } from "../../lib/eligibilite-depot";
+import { piecesRequisesManquantes } from "../../lib/pieces-obligatoires";
 import { getMarchesAffectes } from "../../lib/affectations";
 
 export const workflowRouter = Router();
@@ -89,15 +90,13 @@ workflowRouter.post("/soumettre/:decompteId", requireRole("ADMIN","DMC","MISSION
       throw new ApiError(400, "Aucun attachement pour ce marché — le décompte ne peut pas être soumis");
     }
 
-    const pieces = decompte.piecesObligatoires as Record<string, boolean> | null;
-    if (pieces) {
-      const manquantes = Object.entries({
-        decompteSigné: "Décompte signé", attachements: "Attachements",
-        facture: "Facture", rapportAvancement: "Rapport d'avancement",
-        photosChantier: "Photos de chantier",
-      }).filter(([k]) => !pieces[k]).map(([, v]) => v);
-      if (manquantes.length) throw new ApiError(400, `Pièces manquantes : ${manquantes.join(", ")}`);
-    }
+    // Pièces exigées : elles viennent du RÉFÉRENTIEL, plus d'une liste recopiée.
+    // Cette liste en dur exigeait « Photos de chantier », que le bordereau
+    // affiche pourtant comme facultative (NATURES_PIECES.requis = false) : un
+    // dossier conforme à l'écran était refusé par l'API. Pour rendre une pièce
+    // obligatoire, changer `requis` dans lib/pieces-obligatoires.ts — ici, rien.
+    const manquantes = piecesRequisesManquantes(decompte.piecesObligatoires as Record<string, boolean> | null);
+    if (manquantes.length) throw new ApiError(400, `Pièces manquantes : ${manquantes.join(", ")}`);
 
     const wfDef = await prisma.workflowDefinition.findFirst({
       where: { financement: decompte.marche.financement, actif: true },
