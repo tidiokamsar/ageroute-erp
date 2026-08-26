@@ -70,6 +70,27 @@ export async function assertDecompteAutorise(
   if (!marcheId || !autorises.includes(marcheId)) throw new ApiError(404, "Décompte introuvable");
 }
 
+/**
+ * Contrôle complet d'un marché désigné (revue du 20/08/2026) : périmètre
+ * d'affectation ET appartenance pour les comptes ENTREPRISE — ENTREPRISE
+ * n'est pas un rôle scopé, donc `assertMarcheAutorise` seul ne rejette pas
+ * un compte entreprise qui désigne le marché d'un concurrent.
+ *
+ * `chargerEntrepriseId` garde ce module pur (pas d'import Prisma) : il
+ * renvoie l'entreprise propriétaire du marché, ou null s'il n'existe pas.
+ */
+export async function assertMarcheAutoriseEtPropre(
+  req: Request,
+  marcheId: string,
+  chargerEntrepriseId: (id: string) => Promise<string | null>,
+): Promise<void> {
+  await assertMarcheAutorise(req, marcheId);
+  const mienne = await entrepriseDuCompte(req);
+  if (!mienne) return;
+  const proprietaire = await chargerEntrepriseId(marcheId);
+  if (!proprietaire || proprietaire !== mienne) throw new ApiError(404, "Marché introuvable");
+}
+
 /** Entreprise du compte ENTREPRISE, pour l'isolation des comptes externes. */
 export async function entrepriseDuCompte(req: Request): Promise<string | null> {
   if (req.user?.role !== "ENTREPRISE") return null;

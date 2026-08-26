@@ -7,6 +7,7 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { getMarchesAffectes } from "../../lib/affectations";
+import { entrepriseIdOf } from "../../lib/scope";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth);
@@ -17,9 +18,18 @@ async function generalDashboard(req: Request, res: Response, next: NextFunction)
     const role = req.user?.role ?? "ADMIN";
     // Vue par profil : les rôles scopés ne voient que leurs marchés affectés
     const affectes = req.user ? await getMarchesAffectes(req.user.id, role) : null;
-    const entrepriseFilter: Record<string,unknown> = {};
+    // Revue du 20/08/2026 : ce filtre était déclaré puis jamais alimenté — un
+    // compte ENTREPRISE recevait les agrégats et montants payés de TOUTE
+    // l'agence. Il borne désormais tous les compteurs et agrégats ci-dessous.
+    const mienne = role === "ENTREPRISE" && req.user ? await entrepriseIdOf(req.user.id) : null;
+    const entrepriseFilter: Record<string,unknown> = mienne ? { entrepriseId: mienne } : {};
     const marcheScope = affectes ? { marcheId: { in: affectes } } : {};
     const marcheScopeNonDeleted = affectes ? { deletedAt: null, ...marcheScope } : { deletedAt: null };
+    const marchesWhere = {
+      deletedAt: null,
+      ...(affectes ? { id: { in: affectes } } : {}),
+      ...(mienne ? { entrepriseId: mienne } : {}),
+    };
 
     const [
       totalDecomptes, enAttente, enCorrection, validesDg,
@@ -36,8 +46,11 @@ async function generalDashboard(req: Request, res: Response, next: NextFunction)
       prisma.decompte.count({ where: { ...marcheScopeNonDeleted, statut: "PAYE", ...entrepriseFilter } }),
       prisma.decompte.aggregate({ where: { ...marcheScopeNonDeleted, ...entrepriseFilter }, _sum: { netAPayer: true } }),
       prisma.decompte.aggregate({ where: { ...marcheScopeNonDeleted, statut: "PAYE", ...entrepriseFilter }, _sum: { netAPayer: true } }),
-      prisma.marche.count({ where: affectes ? { deletedAt: null, id: { in: affectes } } : { deletedAt: null } }),
-      prisma.marche.count({ where: affectes ? { deletedAt: null, statut: "ACTIF", id: { in: affectes } } : { deletedAt: null, statut: "ACTIF" } }),
+      prisma.marche.count({ where: marchesWhere }),
+      // Revue 20/08/2026 : ce compteur ne comptait que l'alias "ACTIF" qu'aucun
+      // marché ne porte — « marchés actifs » affichait toujours 0. Même règle
+      // que marches.service.ts : EN_EXECUTION (statut réel) + ACTIF (alias).
+      prisma.marche.count({ where: { ...marchesWhere, statut: { in: ["ACTIF","EN_EXECUTION"] } } }),
       prisma.entreprise.count({ where: { deletedAt: null } }),
       prisma.entreprise.count({ where: { deletedAt: null, statut: "BLOQUE" } }),
       prisma.decompte.groupBy({ by: ["statut"], where: { ...marcheScopeNonDeleted, ...entrepriseFilter }, _count: true }),
@@ -199,10 +212,16 @@ dashboardRouter.get("/dg", requireRole("ADMIN", "DG"), async (_req: Request, res
 });
 
 // §21 — Vue UGP : demandes décaissement bailleurs
-dashboardRouter.get("/ugp", requireRole("ADMIN", "UGP", "DG"), async (_req: Request, res: Response, next: NextFunction) => {
+dashboardRouter.get("/ugp", requireRole("ADMIN", "UGP", "DG"), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètre d'affectation (revue 20/08/2026) : UGP est un rôle scopé —
+    // sans ce filtre, il voyait les circuits de décaissement de toute l'agence.
+    const affectesUgp = await getMarchesAffectes(req.user!.id, req.user!.role);
     const circuitsBailleur = await prisma.circuitFinancier.findMany({
-      where: { type: "BAILLEUR", statut: "EN_COURS" },
+      where: {
+        type: "BAILLEUR", statut: "EN_COURS",
+        ...(affectesUgp ? { decompte: { marcheId: { in: affectesUgp } } } : {}),
+      },
       include: {
         etapes: { orderBy: { ordre: "asc" } },
         decompte: { include: { marche: { select: { reference: true, intitule: true, financement: true, bailleur: true } }, entreprise: { select: { raisonSociale: true } } } },
@@ -216,6 +235,20 @@ dashboardRouter.get("/ugp", requireRole("ADMIN", "UGP", "DG"), async (_req: Requ
 // §17 CDC — Suivi statut temps réel (entreprise + services)
 dashboardRouter.get("/statut/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Cloisonnement (revue 20/08/2026) : ce suivi complet (circuit, agents,
+    // montants) était lisible sur le décompte de n'importe qui. Mêmes règles
+    // que le garde centralisé router.param("id") du module décomptes :
+    // périmètre d'affectation + isolation ENTREPRISE, refus en 404.
+    if (req.user) {
+      const d = await prisma.decompte.findFirst({ where: { id: req.params.decompteId, deletedAt: null }, select: { marcheId: true, entrepriseId: true } });
+      if (!d) return res.status(404).json({ error: "Décompte introuvable" });
+      if (req.user.role === "ENTREPRISE") {
+        if (d.entrepriseId !== (await entrepriseIdOf(req.user.id))) return res.status(404).json({ error: "Décompte introuvable" });
+      } else {
+        const affectes = await getMarchesAffectes(req.user.id, req.user.role);
+        if (affectes !== null && !affectes.includes(d.marcheId)) return res.status(404).json({ error: "Décompte introuvable" });
+      }
+    }
     const decompte = await prisma.decompte.findFirst({
       where: { id: req.params.decompteId, deletedAt: null },
       include: {

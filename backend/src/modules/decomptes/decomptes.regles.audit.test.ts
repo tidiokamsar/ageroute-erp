@@ -75,11 +75,14 @@ test("rejeu LIGNES — combinaison du net vérifiée selon le snapshot (plancher
   const altere = { ...d, netAPayer: d.netAPayer - 1n };
   assert.equal(rejouerCalcul(altere, TAUX, construireSnapshot(DEFAUTS, "LIGNES")).concordance, false);
 
-  // Composants à combinaison NÉGATIVE (pénalités > montant, défauts sans plancher)
-  const negatif = decompteCalculeAvec(DEFAUTS, { penalitesCalc: 2_000_000n });
+  // Composants à combinaison NÉGATIVE (pénalités > montant). Depuis la
+  // décision DAF du 26/08/2026, le plancher est actif par défaut : le cas
+  // négatif se construit et se rejoue avec plancher désactivé explicitement.
+  const SANS_PLANCHER = { ...DEFAUTS, RG_NET_PLANCHER_ZERO: "false" as const };
+  const negatif = decompteCalculeAvec(SANS_PLANCHER, { penalitesCalc: 2_000_000n });
   assert.ok(negatif.netAPayer < 0n, "précondition : combinaison négative");
   // Sans plancher dans le snapshot : le rejeu attend le négatif tel quel
-  assert.equal(rejouerCalcul(negatif, TAUX, construireSnapshot(DEFAUTS, "LIGNES")).concordance, true);
+  assert.equal(rejouerCalcul(negatif, TAUX, construireSnapshot(SANS_PLANCHER, "LIGNES")).concordance, true);
   // Avec plancher dans le snapshot : le rejeu attend 0 → écart signalé
   const r = rejouerCalcul(negatif, TAUX, construireSnapshot({ ...DEFAUTS, RG_NET_PLANCHER_ZERO: "true" }, "LIGNES"));
   assert.equal(r.concordance, false);

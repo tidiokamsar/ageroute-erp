@@ -14,7 +14,10 @@ import { ApiError } from "../../middleware/error.middleware";
 import { verifierEligibiliteDepot } from "../../lib/eligibilite-depot";
 import { notifyWorkflowStep } from "../notifications/notifications.service";
 import { logAudit } from "../../lib/audit";
-import { notifyNextStep } from "../../lib/mailer";
+import { chargerRegles } from "../../lib/regles";
+import { calcDecompteRegles } from "../decomptes/decomptes.calc.regles";
+import { construireSnapshot } from "../decomptes/decomptes.regles.audit";
+import { z } from "zod";
 
 export const portailRouter = Router();
 portailRouter.use(requireAuth);
@@ -193,7 +196,8 @@ portailRouter.get("/eligibilite/:marcheId", entrepriseOnly, wrap(async (req, res
     blocagesEntreprise: raisons,
     statutMarche: marche.statut,
     garanties,
-    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    // Décision DAF du 26/08/2026 : exigence inconditionnelle (voir /eligibilite).
+    exigeBonneExecution: true,
     nbAttachements,
     maintenant: new Date(),
   });
@@ -323,7 +327,8 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
     blocagesEntreprise: raisons,
     statutMarche: decompte.marche.statut,
     garanties,
-    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    // Décision DAF du 26/08/2026 : exigence inconditionnelle (voir /eligibilite).
+    exigeBonneExecution: true,
     nbAttachements,
     maintenant: new Date(),
   });
@@ -369,12 +374,25 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
 }));
 
 // ─── POST /api/portail/deposer-decompte — soumettre un décompte ───────────────
+// Revue du 20/08/2026 : ce dépôt créait le décompte au statut SOUMIS et
+// démarrait l'ANCIEN moteur BPMN générique (bpmn_instances) — sans RG9, sans
+// ligne dans l'onglet Validations, invisible dans /suivi (qui lit le circuit
+// unifié) — pendant que /soumettre du même fichier créait, lui, une instance
+// du circuit unifié. Double moteur, double statut (SOUMIS vs DEPOSE).
+// Désormais : circuit unifié, statut DEPOSE, calcul par le moteur de règles
+// (BigInt pur, taux du marché et paramétrage A1-A7 — l'ancien code codait
+// 18 % / 0,6 % / 9-118e / 5 % en dur en arithmétique flottante).
 portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) => {
   const entrepriseId = await getEntrepriseId(req.user!.id);
   if (!entrepriseId) throw new ApiError(404, "Aucune entreprise liée");
 
-  const { marcheId, type, numero, observations, lignes } = req.body;
-  if (!marcheId || !type) throw new ApiError(400, "marcheId et type sont requis");
+  const { marcheId, type, observations, lignes } = z.object({
+    marcheId: z.string().min(1),
+    type: z.enum(["AVANCE", "PROVISOIRE", "PARTIEL", "INTERMEDIAIRE", "FINAL", "CLOTURE", "APRES_AVENANT"]),
+    observations: z.string().optional(),
+    montantHtGnf: z.union([z.string(), z.number()]).optional(),
+    lignes: z.array(z.object({ montantBrut: z.number().nonnegative() })).optional(),
+  }).parse(req.body);
 
   // Le marché doit appartenir à cette entreprise et être actif
   const marche = await prisma.marche.findFirst({
@@ -402,10 +420,11 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
     blocagesEntreprise: raisons,
     statutMarche: marche.statut,
     garanties,
-    // Toute garantie de bonne exécution déjà enregistrée sur le marché rend
-    // son maintien obligatoire : on n'autorise pas un dépôt sur un marché dont
-    // la caution a été souscrite puis laissée expirer.
-    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    // Décision DAF du 26/08/2026 : l'exigence est INCONDITIONNELLE — un marché
+    // sans aucune caution de bonne exécution enregistrée n'autorise AUCUN
+    // dépôt (l'ancien exigence dérivée de garanties.some(...) laissait passer
+    // les marchés où la caution n'avait jamais été saisie).
+    exigeBonneExecution: true,
     nbAttachements,
     maintenant: new Date(),
   });
@@ -420,70 +439,82 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
   const typeCode = type === "PARTIEL" ? "DP" : type === "FINAL" ? "DF" : type === "AVANCE" ? "DA" : "DI";
   const reference = `${marche.reference}-${typeCode}-${numStr}`;
 
-  // Montants depuis les lignes si fournies (sinon valeurs transmises)
-  let montantHtGnf = BigInt((req.body.montantHtGnf ?? 0) as string | number);
-  let montantTtcGnf = BigInt((req.body.montantTtcGnf ?? 0) as string | number);
-  let montantNetGnf = BigInt((req.body.netAPayer ?? 0) as string | number);
-
-  if (lignes && Array.isArray(lignes) && lignes.length > 0) {
-    const ht = lignes.reduce((s: number, l: { montantBrut?: number }) => s + (l.montantBrut ?? 0), 0);
-    montantHtGnf = BigInt(Math.round(ht));
-    const tva = Math.round(ht * 0.18);
-    const armp = Math.round(ht * 0.006);
-    const ttc = ht + tva + armp;
-    const precompte = Math.round(ttc * 9 / 118);
-    const rg = Math.round(ttc * 0.05);
-    montantTtcGnf = BigInt(Math.round(ttc));
-    montantNetGnf = BigInt(Math.round(ttc - precompte - rg - armp));
-  }
-
-  const decompte = await prisma.decompte.create({
-    data: {
-      reference,
-      type: type as never,
-      statut: "SOUMIS" as never,
-      marcheId,
-      entrepriseId,
-      observations,
-      montantPeriodeHtGnf: montantHtGnf,
-      montantTtcGnf,
-      netAPayer: montantNetGnf,
-    },
+  // Le circuit doit exister AVANT la création : un décompte déposé sans
+  // circuit est un dossier perdu (constat de la revue : dépôts SOUMIS qui
+  // n'entraient jamais dans la chaîne de validation).
+  const definition = await prisma.workflowDefinition.findFirst({
+    where: { financement: marche.financement, actif: true },
+    include: { etapes: { orderBy: { ordre: "asc" } } },
   });
-  await logAudit({ userId: req.user!.id, action: "CREATE", entityType: "Decompte", entityId: decompte.id, after: { via: "portail", reference } });
+  if (!definition) throw new ApiError(400, `Aucun circuit défini pour le financement ${marche.financement}.`);
 
-  // Lancer le circuit BPMN automatiquement
-  const [defRows] = await prisma.$queryRaw<[{ id: string }]>`
-    SELECT id FROM bpmn_definitions WHERE module_type = 'DECOMPTE' AND actif = TRUE LIMIT 1
-  `;
-  if (defRows?.id) {
-    const instanceId = crypto.randomUUID();
-    await prisma.$executeRaw`
-      INSERT INTO bpmn_instances (id, definition_id, module_type, entity_id, soumetteur_id)
-      VALUES (${instanceId}, ${defRows.id}, 'DECOMPTE', ${decompte.id}, ${req.user!.id})
-      ON CONFLICT (module_type, entity_id) DO NOTHING
-    `;
+  // Montant HT : somme des lignes si fournies, sinon montant déclaré.
+  // Arrondi au franc par ligne — aucune multiplication flottante. Un montant
+  // non numérique est REFUSÉ (400), jamais silencieusement converti en 0.
+  const htBrut = (lignes && lignes.length > 0)
+    ? lignes.reduce((s, l) => s + Math.round(l.montantBrut), 0)
+    : Math.round(Number(req.body.montantHtGnf ?? 0));
+  if (!Number.isFinite(htBrut) || htBrut < 0) throw new ApiError(400, "Montant HT invalide (GNF) — nombre entier requis");
+  const htSaisi = htBrut;
 
-    // Notifier les MISSION (première étape réelle après la vérification système)
-    const missionEmails = await prisma.user.findMany({
-      where: { role: "MISSION", actif: true },
-      select: { email: true },
+  // Cascade fiscale par le moteur de règles officiel (A1-A7) : mêmes taux que
+  // le marché, mêmes formules que la saisie interne, snapshot figé pour rejeu.
+  // A4 — report de l'excédent de pénalités (décision DAF du 26/08/2026) : le
+  // dépôt absorbe le report en attente du décompte précédent du marché.
+  const reportPrecedent = await prisma.decompte.findFirst({
+    where: { marcheId, deletedAt: null, penalitesReporteesGnf: { gt: 0n } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, penalitesReporteesGnf: true },
+  });
+  const regles = await chargerRegles({ marcheId, bailleur: marche.financement, typeMarche: marche.type });
+  const calc = calcDecompteRegles({
+    montantPeriodeHtGnf: BigInt(htSaisi),
+    penalites: reportPrecedent?.penalitesReporteesGnf ?? 0n,
+    tauxTva: marche.tauxTva ?? undefined,
+    tauxRetenueGarantie: marche.tauxRetenueGarantie ?? undefined,
+    tauxAvance: marche.tauxAvance ?? undefined,
+  }, regles);
+
+  // Décompte DEPOSE + instance du circuit unifié : une seule transaction.
+  // L'ancien code créait SOUMIS + instance BPMN (moteur hérité, sans RG9).
+  const decompte = await prisma.$transaction(async (tx) => {
+    const d = await tx.decompte.create({
+      data: {
+        reference,
+        type,
+        statut: "DEPOSE" as never,
+        marcheId,
+        entrepriseId,
+        observations,
+        ...calc,
+        reglesSnapshot: construireSnapshot(regles, "GLOBAL") as never,
+      },
     });
-    if (missionEmails.length > 0) {
-      const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { nomComplet: true } });
-      void notifyNextStep({
-        to: missionEmails.map(u => u.email),
-        moduleType: "DECOMPTE",
-        entityRef: reference,
-        stepNom: "Vérification mission contrôle",
-        roleRequis: "MISSION",
-        soumetteurNom: user?.nomComplet ?? req.user!.email,
-        entityId: decompte.id,
-      });
+    const instance = await tx.workflowInstance.create({
+      data: { definitionId: definition.id, decompteId: d.id, etapeActuelle: 0, statut: "EN_COURS" },
+    });
+    // Consommer le report absorbé : la créance reportable passe au dépôt
+    // courant (calc.penalitesReporteesGnf).
+    if (reportPrecedent) {
+      await tx.decompte.update({ where: { id: reportPrecedent.id }, data: { penalitesReporteesGnf: 0n } });
     }
+    await logAudit({
+      userId: req.user!.id, action: "CREATE", entityType: "Decompte", entityId: d.id,
+      after: { via: "portail", reference, statut: "DEPOSE", origine: "portail-entreprise", wfInstanceId: instance.id, reportPenalitesAbsorbeGnf: (reportPrecedent?.penalitesReporteesGnf ?? 0n).toString() }, tx,
+    });
+    return { d, instance };
+  });
+
+  // Notification du premier intervenant du circuit (non bloquant).
+  if (definition.etapes.length > 0) {
+    await notifyWorkflowStep(definition.etapes[0], reference, decompte.instance.id).catch(() => {});
   }
 
-  res.status(201).json({ message: "Décompte déposé et circuit lancé", decompte });
+  res.status(201).json({
+    message: `Décompte déposé — circuit « ${definition.nom} » démarré, ${definition.etapes.length} étapes.`,
+    decompte: decompte.d,
+    avertissements: controle.avertissements,
+  });
 }));
 
 // ─── GET /api/portail/mes-attachements — attachements de mes marchés ──────────

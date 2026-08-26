@@ -9,6 +9,7 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
 import { entrepriseIdOf } from "../../lib/scope";
+import { assertMarcheAutorise } from "../../lib/perimetre";
 import { creerDocumentOfficiel, ajouterPiedDePage, ajouterEncadreSynthese, ajouterTableau } from "../../lib/pdf-gabarit";
 import { formaterMontant } from "../../lib/montants";
 
@@ -39,6 +40,9 @@ documentsOfficielsRouter.get("/decompte/:id/pdf", async (req: Request, res: Resp
     if (req.user.role === "ENTREPRISE" && d.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
       throw new ApiError(404, "Décompte introuvable");
     }
+    // Périmètre d'affectation (revue 20/08/2026) : un agent scopé non affecté
+    // ne génère pas le PDF officiel d'un marché hors de son périmètre.
+    await assertMarcheAutorise(req, d.marcheId);
 
     const doc = creerDocumentOfficiel({
       titre: "Décompte Officiel",
@@ -148,6 +152,8 @@ documentsOfficielsRouter.get("/attachement/:id/pdf", async (req: Request, res: R
         throw new ApiError(404, "Attachement introuvable");
       }
     }
+    // Périmètre d'affectation (revue 20/08/2026) — voir route décompte.
+    if (a.decompte) await assertMarcheAutorise(req, a.decompte.marcheId);
 
     const doc = creerDocumentOfficiel({
       titre: "Attachement contradictoire",
@@ -266,6 +272,8 @@ documentsOfficielsRouter.get("/reception/:id/pdf", async (req: Request, res: Res
     if (req.user.role === "ENTREPRISE" && r.marche.entrepriseId !== (await entrepriseIdOf(req.user.id))) {
       throw new ApiError(404, "Réception introuvable");
     }
+    // Périmètre d'affectation (revue 20/08/2026) — voir route décompte.
+    await assertMarcheAutorise(req, r.marcheId);
 
     const TYPE_LABEL: Record<string, string> = {
       OPR: "Ordre de Pré-Réception (OPR)",

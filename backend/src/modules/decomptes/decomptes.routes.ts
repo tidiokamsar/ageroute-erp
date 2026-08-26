@@ -302,24 +302,49 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
     const totalTtc = somme("montantTtc"), totalPrecomp = somme("precompteTva");
     const totalRetenue = somme("montantRetenue"), totalAvance = somme("montantAvanceRecup"), totalPen = somme("montantPenalite");
     const reglesTotaux = await chargerRegles({ marcheId: decompte.marcheId, bailleur: decompte.marche.financement, typeMarche: decompte.marche.type });
-    let totalNet = totalTtc - totalPrecomp - totalRetenue - (reglesTotaux.RG_ARMP_INCLUSE_TTC === "true" ? totalArmp : 0n) - totalAvance - totalPen;
-    if (reglesTotaux.RG_NET_PLANCHER_ZERO === "true" && totalNet < 0n) totalNet = 0n;
+    // A4 — report de l'excédent de pénalités (décision DAF du 26/08/2026) :
+    // absorption du report en attente du décompte précédent du marché, puis
+    // écrêtage du propre excédent, reporté sur le décompte suivant. La colonne
+    // `penalites` porte le total imputé (saisies + report entrant) pour que le
+    // rejeu d'audit concorde. Le report est borné aux pénalités imputées.
+    const reportPrecedent = await prisma.decompte.findFirst({
+      where: { marcheId: decompte.marcheId, id: { not: req.params.id }, deletedAt: null, penalitesReporteesGnf: { gt: 0n } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, penalitesReporteesGnf: true },
+    });
+    const penalitesImputees = totalPen + (reportPrecedent?.penalitesReporteesGnf ?? 0n);
+    let totalNet = totalTtc - totalPrecomp - totalRetenue - (reglesTotaux.RG_ARMP_INCLUSE_TTC === "true" ? totalArmp : 0n) - totalAvance - penalitesImputees;
+    let reportSortant = 0n;
+    if (reglesTotaux.RG_NET_PLANCHER_ZERO === "true" && totalNet < 0n) {
+      const excedent = -totalNet;
+      if (reglesTotaux.RG_REPORT_PENALITES === "true") {
+        reportSortant = excedent > penalitesImputees ? penalitesImputees : excedent;
+      }
+      totalNet = 0n;
+    }
 
-    await prisma.decompte.update({
-      where: { id: req.params.id },
-      data: {
-        montantPeriodeHtGnf: totalBrut,
-        tva:             totalTva,
-        montantArmpGnf:  totalArmp,
-        montantTtcGnf:   totalTtc,
-        precompteTvaGnf: totalPrecomp,
-        retenueGarantie: totalRetenue,
-        avanceRecuperee: totalAvance,
-        penalites:       totalPen,
-        netAPayer:       totalNet,
-        // L1.2 — règles figées ayant servi à la combinaison du net (rejeu)
-        reglesSnapshot:  construireSnapshot(reglesTotaux, "LIGNES") as never,
-      },
+    // Totaux, nouveau report et consommation de l'ancien : une transaction.
+    await prisma.$transaction(async (tx) => {
+      await tx.decompte.update({
+        where: { id: req.params.id },
+        data: {
+          montantPeriodeHtGnf: totalBrut,
+          tva:             totalTva,
+          montantArmpGnf:  totalArmp,
+          montantTtcGnf:   totalTtc,
+          precompteTvaGnf: totalPrecomp,
+          retenueGarantie: totalRetenue,
+          avanceRecuperee: totalAvance,
+          penalites:       penalitesImputees,
+          netAPayer:       totalNet,
+          penalitesReporteesGnf: reportSortant,
+          // L1.2 — règles figées ayant servi à la combinaison du net (rejeu)
+          reglesSnapshot:  construireSnapshot(reglesTotaux, "LIGNES") as never,
+        },
+      });
+      if (reportPrecedent) {
+        await tx.decompte.update({ where: { id: reportPrecedent.id }, data: { penalitesReporteesGnf: 0n } });
+      }
     });
 
     res.status(201).json({ ...ligne, prixUnitaire: ligne.prixUnitaire.toString(), montantBrut: ligne.montantBrut.toString(), montantNet: ligne.montantNet.toString() });

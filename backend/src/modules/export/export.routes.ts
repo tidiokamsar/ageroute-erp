@@ -2,10 +2,21 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import { requireAuth } from "../../middleware/auth.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
-import { assertMarcheAutorise, filtreParDecompte, filtreParMarche, marchesAutorises } from "../../lib/perimetre";
+import { assertMarcheAutorise, entrepriseDuCompte, filtreParDecompte, filtreParMarche, marchesAutorises } from "../../lib/perimetre";
 
 export const exportRouter = Router();
 exportRouter.use(requireAuth);
+
+/**
+ * Isolation ENTREPRISE des exports (revue du 20/08/2026) : le périmètre
+ * d'affectation était appliqué, mais ENTREPRISE n'est pas un rôle scopé —
+ * un compte entreprise exportait les paiements et données de toutes les
+ * entreprises. Un export est une sortie de données massives : il doit obéir
+ * aux mêmes règles que l'écran.
+ */
+async function monEntreprise(req: Request): Promise<string | null> {
+  return entrepriseDuCompte(req);
+}
 
 function fmtGnf(v: bigint | number | string | null | undefined): string {
   if (v == null) return "";
@@ -37,10 +48,12 @@ exportRouter.get("/marches", async (req: Request, res: Response, next: NextFunct
     // Même règle que l'export des décomptes : le fichier ne doit pas contenir
     // ce que l'écran masque. Ici le marché porte l'identifiant directement.
     const autorises = await marchesAutorises(req);
+    const mienne = await monEntreprise(req);
     const where: Record<string, unknown> = { deletedAt: null };
     if (autorises !== null) where.id = { in: autorises };
     if (statut) where.statut = statut;
     if (entrepriseId) where.entrepriseId = entrepriseId;
+    if (mienne) where.entrepriseId = mienne; // l'isolation prime sur le filtre demandé
 
     const marchés = await prisma.marche.findMany({
       where,
@@ -69,6 +82,8 @@ exportRouter.get("/decomptes", async (req: Request, res: Response, next: NextFun
     const where: Record<string, unknown> = { deletedAt: null, ...(await filtreParMarche(req)) };
     if (statut) where.statut = statut;
     if (marcheId) { await assertMarcheAutorise(req, String(marcheId)); where.marcheId = marcheId; }
+    const mienneDec = await monEntreprise(req);
+    if (mienneDec) where.entrepriseId = mienneDec;
 
     const decomptes = await prisma.decompte.findMany({
       where,
@@ -92,8 +107,11 @@ exportRouter.get("/entreprises", async (req: Request, res: Response, next: NextF
   try {
     // Titulaires des marchés confiés, comme le référentiel à l'écran.
     const autorisesEnt = await marchesAutorises(req);
+    const mienneEnt = await monEntreprise(req);
     let filtreEnt: Record<string, unknown> = {};
-    if (autorisesEnt !== null) {
+    if (mienneEnt) {
+      filtreEnt = { id: mienneEnt };
+    } else if (autorisesEnt !== null) {
       const m = await prisma.marche.findMany({ where: { id: { in: autorisesEnt } }, select: { entrepriseId: true } });
       filtreEnt = { id: { in: [...new Set(m.map((x) => x.entrepriseId))] } };
     }
@@ -116,7 +134,13 @@ exportRouter.get("/entreprises", async (req: Request, res: Response, next: NextF
 exportRouter.get("/paiements", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { statut } = req.query;
-    const where: Record<string, unknown> = { deletedAt: null, ...(await filtreParDecompte(req)) };
+    const miennePay = await monEntreprise(req);
+    const wherePay: Record<string, unknown> = { deletedAt: null, ...(await filtreParDecompte(req)) };
+    if (miennePay) {
+      const base = (wherePay.decompte as Record<string, unknown>) ?? {};
+      wherePay.decompte = { ...base, entrepriseId: miennePay };
+    }
+    const where = wherePay;
     if (statut) where.statut = statut;
 
     const paiements = await prisma.paiement.findMany({
@@ -141,8 +165,14 @@ exportRouter.get("/paiements", async (req: Request, res: Response, next: NextFun
 // ─── Export garanties ─────────────────────────────────────────────────────────
 exportRouter.get("/garanties", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const mienneGar = await monEntreprise(req);
+    const whereGar: Record<string, unknown> = { ...(await filtreParMarche(req)) };
+    if (mienneGar) {
+      const base = (whereGar.marche as Record<string, unknown>) ?? {};
+      whereGar.marche = { ...base, entrepriseId: mienneGar };
+    }
     const garanties = await prisma.garantie.findMany({
-      where: { ...(await filtreParMarche(req)) },
+      where: whereGar,
       include: { marche: { select: { reference: true, entreprise: { select: { raisonSociale: true } } } } },
       orderBy: { createdAt: "desc" },
     });

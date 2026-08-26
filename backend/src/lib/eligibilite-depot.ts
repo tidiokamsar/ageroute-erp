@@ -18,6 +18,12 @@
  *     déposer : la régularité des garanties n'était contrôlée nulle part.
  *
  * Logique PURE, testable sans base. Les données sont chargées par l'appelant.
+ *
+ * Décision DAF du 26/08/2026 : l'exigence de garantie de bonne exécution est
+ * INCONDITIONNELLE — les appelants (portail : /eligibilite, /soumettre,
+ * /deposer-decompte) passent désormais exigeBonneExecution: true. Un marché
+ * sans aucune caution enregistrée n'autorise AUCUN dépôt. Le paramètre reste
+ * au contrat de la fonction pour les tests et un éventuel retour explicite.
  */
 
 /** Statuts de marché autorisant le dépôt d'un décompte. */

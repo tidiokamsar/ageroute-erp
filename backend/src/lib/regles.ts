@@ -13,20 +13,32 @@
  */
 import { prisma } from "./prisma";
 
-// ─── Registre des clés et de leurs valeurs par défaut (= comportement actuel) ─
+// ─── Registre des clés et de leurs valeurs par défaut ──────────────────────
+// Historiquement, ces défauts reproduisaient EXACTEMENT le comportement du
+// code d'origine. Deux arbitrages DAF les font désormais évoluer en tant que
+// décisions officielles (chaque date ci-dessous fait foi) ; un réglage
+// explicite dans regle_gestion peut toujours sursurcharger.
 export const REGLES_DEFAUT = {
   // A1 — Assiette et taux de la retenue de garantie
-  RG_ASSIETTE_RETENUE_GARANTIE: "TTC", // actuel : retenue calculée sur le TTC
+  // Validé DAF le 26/08/2026 : la retenue se calcule sur le TTC (TVA et ARMP
+  // incluses), conformément à la pratique actuelle.
+  RG_ASSIETTE_RETENUE_GARANTIE: "TTC",
   // A2 — Formule du précompte TVA
-  RG_FORMULE_PRECOMPTE_TVA: "PRORATA_9_118", // actuel : TTC × 9/118 (= 9 % du HT)
+  // Validé DAF le 26/08/2026 : précompte = TTC × 9/118 (= 9 % du HT).
+  RG_FORMULE_PRECOMPTE_TVA: "PRORATA_9_118",
   RG_TAUX_PRECOMPTE_HT: "9",
   // A3 — Redevance ARMP
   RG_TAUX_ARMP: "0.6",
   RG_ARMP_ASSIETTE: "HT",
-  RG_ARMP_INCLUSE_TTC: "true", // actuel : ajoutée au TTC puis déduite du net
+  RG_ARMP_INCLUSE_TTC: "true", // ajoutée au TTC puis déduite du net
   // A4 — Bornage du net à payer
-  RG_NET_PLANCHER_ZERO: "false",
-  RG_REPORT_PENALITES: "false",
+  // Décision DAF du 26/08/2026 : le net à payer est BORNÉ À ZÉRO — des
+  // pénalités supérieures au montant ne produisent plus de net négatif.
+  RG_NET_PLANCHER_ZERO: "true",
+  // Décision DAF du 26/08/2026 : l'excédent de pénalités est REPORTÉ sur le
+  // décompte suivant du même marché (borné au montant des pénalités saisies ;
+  // consommé au calcul du décompte suivant).
+  RG_REPORT_PENALITES: "true",
   // A5 — Pénalités de retard
   RG_PENALITE_MODE: "SAISIE", // actuel : montant saisi par ligne, pas de formule
   RG_PENALITE_ASSIETTE: "HT", // assiette du calcul au mode FORMULE (HT ou TTC)

@@ -42,6 +42,7 @@ import { signatureAuditRouter } from "./modules/signature-audit/signature-audit.
 import { signatureNumeriqueRouter } from "./modules/signature-numerique/signature-numerique.routes";
 import { uploadsRouter } from "./modules/uploads/uploads.routes";
 import { requireAuth } from "./middleware/auth.middleware";
+import { requireRole } from "./middleware/rbac.middleware";
 import { checkModuleAccess } from "./middleware/moduleAccess.middleware";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 import { prisma } from "./lib/prisma";
@@ -233,7 +234,10 @@ export function createApp() {
   });
 
   // Audit log endpoint — filtres optionnels (action, entité, utilisateur, période)
-  app.get("/api/audit", requireAuth, checkModuleAccess("audit"), async (req, res, next) => {
+  // Revue 20/08/2026 : aucune restriction de rôle — tout compte authentifié
+  // (ENTREPRISE inclus) lisait le journal complet (emails, userId, entités).
+  // Rôles alignés sur la déclaration du catalogue (modules.catalog.ts : audit).
+  app.get("/api/audit", requireAuth, checkModuleAccess("audit"), requireRole("ADMIN","DG","DAF","DMC","AUDITEUR"), async (req, res, next) => {
     try {
       const where: Record<string, unknown> = {};
       if (req.query.action)     where.action     = String(req.query.action);

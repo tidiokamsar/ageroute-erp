@@ -14,7 +14,7 @@ import { prisma } from "../../lib/prisma";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
-import { assertMarcheAutorise } from "../../lib/perimetre";
+import { assertMarcheAutorise, entrepriseDuCompte } from "../../lib/perimetre";
 import { creerDocumentOfficiel } from "../../lib/pdf-gabarit";
 import { Dossier, paginer, tronquer, fmtDate } from "../../lib/pdf-dossier";
 import { formaterMontant } from "../../lib/montants";
@@ -63,6 +63,15 @@ dossierMarcheRouter.get("/marche/:id/dossier/pdf", async (req: Request, res: Res
       },
     });
     if (!m) throw new ApiError(404, "Marché introuvable");
+
+    // Isolation ENTREPRISE (revue du 20/08/2026) : ENTREPRISE n'est pas un
+    // rôle scopé, assertMarcheAutorise ne le rejette donc pas. Sans ce
+    // contrôle, un compte entreprise obtenait les quatorze sections du
+    // dossier — BPU contractuel, garanties bancaires, emails d'agents — de
+    // n'importe quel marché, y compris ceux de ses concurrents. Le dossier de
+    // décompte applique déjà ce contrôle sur Decompte.entrepriseId.
+    const mienne = await entrepriseDuCompte(req);
+    if (mienne && m.entrepriseId !== mienne) throw new ApiError(404, "Marché introuvable");
 
     // Les tables BPMN vivent hors du schéma Prisma (AGENTS.md).
     const bpmn = await prisma.$queryRaw<BpmnInstanceBrute[]>`

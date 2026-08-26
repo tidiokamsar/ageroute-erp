@@ -77,13 +77,14 @@ test("DoD — A1 = HT ne change QUE la retenue de garantie (et le net)", () => {
   assert.equal(BigInt(apres.netAPayerGnf) - BigInt(avant.netAPayerGnf), 9_300n);
 });
 
-test("A4 — plancher à zéro : net négatif ramené à 0, mention dans la formule", () => {
+test("A4 — plancher à zéro : net négatif ramené à 0, mention dans la formule (décision DAF 26/08/2026)", () => {
   const entree = { montantHtGnf: 1_000_000n, penalitesGnf: 2_000_000n, tauxTva: 18, tauxRg: 5, tauxAvance: 20 };
-  const sansPlancher = simulerDecompte(entree, DEFAUTS);
-  assert.ok(BigInt(sansPlancher.netAPayerGnf) < 0n, "comportement actuel : net négatif autorisé");
-  const avecPlancher = simulerDecompte(entree, { ...DEFAUTS, RG_NET_PLANCHER_ZERO: "true" });
+  // Décision DAF du 26/08/2026 : le plancher est actif PAR DÉFAUT.
+  const avecPlancher = simulerDecompte(entree, DEFAUTS);
   assert.equal(avecPlancher.netAPayerGnf, "0");
   assert.ok(avecPlancher.lignes.find((l) => l.cle === "NET")!.formule.includes("plancher 0"));
+  const sansPlancher = simulerDecompte(entree, { ...DEFAUTS, RG_NET_PLANCHER_ZERO: "false" });
+  assert.ok(BigInt(sansPlancher.netAPayerGnf) < 0n, "plancher désactivé explicitement : net négatif");
 });
 
 test("A3 — ARMP hors TTC : le TTC exclut l'ARMP (et le net ne la déduit plus)", () => {

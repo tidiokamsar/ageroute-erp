@@ -15,6 +15,7 @@ import PDFDocument from "pdfkit";
 import { prisma } from "../../lib/prisma";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
+import { marchesAutorises } from "../../lib/perimetre";
 import { logAudit } from "../../lib/audit";
 import { formaterMontant } from "../../lib/montants";
 
@@ -72,13 +73,20 @@ interface RapportBailleur {
 }
 
 // ─── Calcul ────────────────────────────────────────────────────────────────────
-async function calculerRapport(bailleur?: string, projetId?: string): Promise<RapportBailleur> {
+async function calculerRapport(bailleur?: string, projetId?: string, marcheIds?: string[]): Promise<RapportBailleur> {
   const whereMarche: Record<string, unknown> = { deletedAt: null };
   if (bailleur && bailleur !== "TOUS") {
     whereMarche.financement = bailleur;
   }
   if (projetId) {
     whereMarche.projetId = projetId;
+  }
+  // Périmètre d'affectation (revue 20/08/2026) : UGP et BAILLEUR sont des
+  // rôles scopés — leur rapport ne couvrait que la règle « sans affectation =
+  // rien » ne fut jamais appliquée : ils voyaient la situation de décaissement
+  // de TOUTE l'agence.
+  if (marcheIds) {
+    whereMarche.id = { in: marcheIds };
   }
 
   const marches = await prisma.marche.findMany({
@@ -160,6 +168,7 @@ async function calculerRapport(bailleur?: string, projetId?: string): Promise<Ra
       deletedAt: null,
       createdAt: { gte: il30j },
       ...(bailleur && bailleur !== "TOUS" ? { decompte: { marche: { financement: bailleur } } } : {}),
+      ...(marcheIds ? { decompte: { marche: { id: { in: marcheIds } } } } : {}),
     } as never,
     orderBy: { createdAt: "desc" },
     take: 20,
@@ -212,6 +221,7 @@ rapportBailleurRouter.get("/rapport-bailleur", async (req: Request, res: Respons
     const rapport = await calculerRapport(
       req.query.bailleur as string | undefined,
       req.query.projet as string | undefined,
+      await marchesAutorises(req) ?? undefined,
     );
     const serialise = JSON.parse(JSON.stringify(rapport, (_, v) => typeof v === "bigint" ? v.toString() : v));
     res.json(serialise);
@@ -222,7 +232,11 @@ rapportBailleurRouter.get("/rapport-bailleur", async (req: Request, res: Respons
 rapportBailleurRouter.get("/rapport-bailleur/xlsx", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new Error("Non authentifié");
-    const r = await calculerRapport(req.query.bailleur as string | undefined, req.query.projet as string | undefined);
+    const r = await calculerRapport(
+      req.query.bailleur as string | undefined,
+      req.query.projet as string | undefined,
+      await marchesAutorises(req) ?? undefined,
+    );
 
     const sep = ";"; // séparateur Excel FR
     const lignes: string[] = [];
@@ -291,7 +305,11 @@ rapportBailleurRouter.get("/rapport-bailleur/xlsx", async (req: Request, res: Re
 rapportBailleurRouter.get("/rapport-bailleur/pdf", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new Error("Non authentifié");
-    const r = await calculerRapport(req.query.bailleur as string | undefined, req.query.projet as string | undefined);
+    const r = await calculerRapport(
+      req.query.bailleur as string | undefined,
+      req.query.projet as string | undefined,
+      await marchesAutorises(req) ?? undefined,
+    );
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="rapport-bailleur-${new Date().toISOString().slice(0, 10)}.pdf"`);
