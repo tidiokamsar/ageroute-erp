@@ -9,6 +9,7 @@ import { api, parseApiError } from "../lib/api";
 import { toast } from "../components/ui/Toast";
 import { useAuth, authStore } from "../lib/auth";
 import { FileUploadModal } from "../components/ui/FileUploadModal";
+import { SecureFileLink } from "../components/ui/SecureFile";
 
 // ─── ICÔNES (HeroIcons inline SVG léger) ─────────────────────────────────────
 const IC = {
@@ -154,31 +155,112 @@ interface Profil {
   alertes: Array<{ id: string; message: string; niveau: string }>;
 }
 
+type TypePieceDecompte = "DECOMPTE" | "ATTACHEMENT" | "FACTURE" | "RAPPORT_AVANCEMENT" | "PHOTO" | "PV";
+
+interface LigneDecompteForm {
+  designation: string;
+  unite: string;
+  quantite: number;
+  prixUnitaire: number;
+  montantBrut: number;
+}
+
+interface PieceDecompteForm {
+  type: TypePieceDecompte;
+  nom: string;
+  cheminFichier: string;
+  mimeType: string;
+  tailleOctets: number;
+  legende: string;
+}
+
+interface UploadResponse {
+  url: string;
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+}
+
+const TYPES_PIECE_DECOMPTE: Array<{ value: TypePieceDecompte; label: string; required: boolean }> = [
+  { value: "DECOMPTE", label: "Décompte signé", required: true },
+  { value: "ATTACHEMENT", label: "Attachements validés", required: true },
+  { value: "FACTURE", label: "Facture", required: true },
+  { value: "RAPPORT_AVANCEMENT", label: "Rapport d’avancement", required: true },
+  { value: "PHOTO", label: "Photos de chantier", required: false },
+  { value: "PV", label: "PV contradictoire", required: false },
+];
+
+const REQUIRED_PIECE_TYPES = TYPES_PIECE_DECOMPTE
+  .filter((piece) => piece.required)
+  .map((piece) => piece.value);
+
+const ALLOWED_PIECE_TYPES = new Set([
+  "application/pdf", "image/jpeg", "image/png",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/msword",
+]);
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} o`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
 type Tab = "dashboard" | "marches" | "decomptes" | "attachements" | "paiements" | "garanties" | "receptions" | "deposer";
 const TABS_VALIDES: Tab[] = ["dashboard", "marches", "decomptes", "attachements", "paiements", "garanties", "receptions", "deposer"];
 
 // ─── FORMULAIRE DÉPÔT ─────────────────────────────────────────────────────────
 function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () => void }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ marcheId: "", type: "PARTIEL", observations: "", lignes: [] as any[], pieces: [] as any[] });
-  const [uploading, setUploading] = useState(false);
+  const [form, setForm] = useState({
+    marcheId: "",
+    type: "PARTIEL",
+    observations: "",
+    lignes: [] as LigneDecompteForm[],
+    pieces: [] as PieceDecompteForm[],
+  });
+  const [uploadingPiece, setUploadingPiece] = useState<TypePieceDecompte | null>(null);
 
-  async function uploadPieces(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    setUploading(true);
+  async function uploadPiece(type: TypePieceDecompte, file: File | null) {
+    if (!file) return;
+    if (!ALLOWED_PIECE_TYPES.has(file.type)) {
+      toast.error("Format non autorisé — utilisez PDF, JPG, PNG, Word ou Excel");
+      return;
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error("Fichier trop volumineux — maximum 20 Mo");
+      return;
+    }
+    setUploadingPiece(type);
     try {
-      for (const file of Array.from(files)) {
-        const fd = new FormData();
-        fd.append("file", file);
-        const up = await api.post("/uploads", fd, { headers: { "Content-Type": "multipart/form-data" } }).then((r) => r.data);
-        setForm((f) => ({ ...f, pieces: [...f.pieces, {
-          type: file.type.startsWith("image/") ? "PHOTO" : "DOCUMENT",
-          cheminFichier: up.originalName ?? up.filename,
-          urlPublique: up.url,
-          legende: "",
-        }] }));
-      }
-    } finally { setUploading(false); }
+      const fd = new FormData();
+      fd.append("file", file);
+      const up = await api.post<UploadResponse>("/uploads", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      }).then((response) => response.data);
+      setForm((current) => ({
+        ...current,
+        pieces: [
+          ...current.pieces.filter((piece) => piece.type !== type),
+          {
+            type,
+            nom: up.originalName,
+            cheminFichier: up.url,
+            mimeType: up.mimeType,
+            tailleOctets: up.size,
+            legende: "",
+          },
+        ],
+      }));
+      toast.success("Pièce ajoutée au dossier");
+    } catch (error) {
+      toast.error(parseApiError(error));
+    } finally {
+      setUploadingPiece(null);
+    }
   }
   const [nl, setNl] = useState({ designation: "", unite: "ml", quantite: 0, prixUnitaire: 0 });
 
@@ -186,7 +268,8 @@ function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () 
 
   const mut = useMutation({
     mutationFn: () => api.post("/portail/deposer-decompte", form),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["portail-decomptes"] }); onSuccess(); },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["portail-decomptes"] }); toast.success("Brouillon enregistré avec son dossier obligatoire"); onSuccess(); },
+    onError: (error) => toast.error(parseApiError(error)),
   });
 
   const addLigne = () => {
@@ -204,6 +287,9 @@ function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () 
   const rg = ttc * 0.05;
   const net = ttc - precompte - rg - armp;
   const marcheChoisi = marches.find(m => m.id === form.marcheId);
+  const missingRequiredPieces = TYPES_PIECE_DECOMPTE.filter((definition) =>
+    definition.required && !form.pieces.some((piece) => piece.type === definition.value),
+  );
 
   // Éligibilité au dépôt, interrogée dès qu'un marché est choisi.
   // Sans cela l'entreprise remplissait tout le formulaire pour découvrir le refus
@@ -357,53 +443,102 @@ function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () 
         </div>
       )}
 
-      {/* ── Dossier de l'attachement : pièces scannées obligatoires ── */}
-      <div className="border-2 border-dashed border-blue-200 bg-blue-50/40 rounded-xl p-4">
-        <p className="text-sm font-bold text-gray-800 mb-1">Dossier de l'attachement (obligatoire)</p>
-        <p className="text-xs text-gray-500 mb-3">
-          Joignez l'attachement papier signé (scan), les PV, photos de chantier et toute pièce
-          accompagnant ce décompte. Ce dossier suivra votre décompte dans tout le circuit AGEROUTE
-          (Mission de contrôle → Direction Technique → DMC → DAF → DG).
-        </p>
-        <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-          onChange={(e) => { void uploadPieces(e.target.files); e.target.value = ""; }}
-          className="w-full text-sm file:mr-3 file:px-4 file:py-2 file:rounded-lg file:border-0 file:text-white file:text-xs file:font-bold"
-          style={{ colorScheme: "light" }} />
-        {uploading && <p className="text-xs text-blue-600 mt-2">Envoi en cours...</p>}
-        {form.pieces.length > 0 && (
-          <div className="mt-3 space-y-1.5">
-            {form.pieces.map((pc, i) => (
-              <div key={i} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 text-xs border border-blue-100">
-                <span className="truncate flex-1">{pc.type === "PHOTO" ? "🖼" : "📄"} {pc.cheminFichier}</span>
-                <button onClick={() => setForm(f => ({ ...f, pieces: f.pieces.filter((_, j) => j !== i) }))}
-                  className="text-red-400 hover:text-red-600 ml-2 font-bold">✕</button>
-              </div>
-            ))}
+      {/* Dossier du décompte : une pièce par ligne */}
+      <section className="border-2 border-blue-200 bg-blue-50/40 rounded-xl p-4" aria-labelledby="dossier-decompte-title">
+        <div className="flex flex-wrap items-start justify-between gap-2 mb-1">
+          <div>
+            <h3 id="dossier-decompte-title" className="text-sm font-bold text-gray-800">
+              Dossier du décompte — pièces obligatoires
+            </h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Chargez un seul fichier par ligne. Les quatre premières pièces sont obligatoires avant enregistrement du brouillon.
+            </p>
           </div>
-        )}
-      </div>
+          <span className={`text-xs font-bold rounded-full px-2.5 py-1 ${missingRequiredPieces.length === 0 ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+            {REQUIRED_PIECE_TYPES.length - missingRequiredPieces.length} / {REQUIRED_PIECE_TYPES.length} obligatoires
+          </span>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {TYPES_PIECE_DECOMPTE.map((definition, index) => {
+            const piece = form.pieces.find((item) => item.type === definition.value);
+            const inputId = `piece-decompte-${definition.value.toLowerCase()}`;
+            const isUploading = uploadingPiece === definition.value;
+            return (
+              <div key={definition.value} className={`grid grid-cols-1 md:grid-cols-[36px_190px_minmax(0,1fr)_auto] gap-3 items-center rounded-lg border px-3 py-3 ${piece ? "border-green-200 bg-white" : definition.required ? "border-amber-200 bg-amber-50/40" : "border-blue-100 bg-white/70"}`}>
+                <span className="w-7 h-7 rounded-full bg-gray-100 text-gray-500 text-xs font-bold flex items-center justify-center" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <div>
+                  <label htmlFor={inputId} className="text-xs font-bold text-gray-700">{definition.label}</label>
+                  <p className={`text-[10px] font-semibold mt-0.5 ${definition.required ? "text-red-600" : "text-gray-400"}`}>
+                    {definition.required ? "Obligatoire *" : "Optionnel"}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  {piece ? (
+                    <div className="mb-2 flex items-center gap-2 text-xs text-green-700" role="status">
+                      <span aria-hidden="true">✓</span>
+                      <span className="truncate font-semibold">{piece.nom}</span>
+                      <span className="shrink-0 text-gray-400">{formatFileSize(piece.tailleOctets)}</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 mb-2">{isUploading ? "Téléversement en cours…" : "Aucun fichier chargé"}</p>
+                  )}
+                  <input
+                    id={inputId}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                    aria-required={definition.required && !piece}
+                    aria-describedby="dossier-decompte-help"
+                    disabled={uploadingPiece !== null}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      void uploadPiece(definition.value, file);
+                      event.target.value = "";
+                    }}
+                    className="block w-full text-xs text-gray-500 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-navy file:text-white file:text-xs file:font-bold disabled:opacity-50"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={!piece || uploadingPiece !== null}
+                  onClick={() => setForm((current) => ({ ...current, pieces: current.pieces.filter((item) => item.type !== definition.value) }))}
+                  className="text-xs font-bold text-red-500 hover:text-red-700 disabled:opacity-30 md:justify-self-end"
+                  aria-label={`Retirer ${definition.label}`}
+                >
+                  Retirer
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <p id="dossier-decompte-help" className="text-[10px] text-gray-500 mt-3">
+          Formats autorisés : PDF, JPG, PNG, Word ou Excel — 20 Mo maximum par fichier.
+        </p>
+      </section>
 
       <textarea rows={2} placeholder="Observations / commentaires (optionnel)"
         value={form.observations} onChange={e => setForm(f => ({ ...f, observations: e.target.value }))}
         className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 focus:ring-2 focus:ring-blue-500 resize-none" />
 
-      {form.marcheId && form.lignes.length > 0 && form.pieces.length === 0 && (
+      {form.marcheId && form.lignes.length > 0 && missingRequiredPieces.length > 0 && (
         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          ⚠ Joignez au moins une pièce (attachement papier scanné) pour pouvoir soumettre.
+          ⚠ Pièces obligatoires manquantes : {missingRequiredPieces.map((piece) => piece.label).join(", ")}.
         </p>
       )}
       <button onClick={() => mut.mutate()}
-        disabled={!form.marcheId || form.lignes.length === 0 || form.pieces.length === 0 || mut.isPending || uploading
-          || (eligibilite ? !eligibilite.autorise : false)}
+        disabled={!form.marcheId || form.lignes.length === 0 || missingRequiredPieces.length > 0
+          || mut.isPending || uploadingPiece !== null || (eligibilite ? !eligibilite.autorise : false)}
         className="w-full py-3 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 disabled:opacity-40 transition"
         style={{ background: "#1B2A4A" }}>
         {mut.isPending ? IC.spin : IC.plus}
-        Soumettre le décompte au circuit AGEROUTE
+        Enregistrer le brouillon du décompte
       </button>
 
       {mut.isSuccess && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800 flex items-center gap-2">
-          {IC.check} Décompte soumis — circuit de validation lancé automatiquement.
+          {IC.check} Brouillon enregistré — la soumission au circuit sera disponible après la validation technique obligatoire.
         </div>
       )}
       {mut.isError && (
@@ -823,7 +958,19 @@ export default function PortailEntreprisePage() {
                             <span className="text-[11px] font-semibold text-amber-700">Non envoyé</span>
                           ) : <span className="text-gray-400">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-xs text-gray-500">{d.nbPieces ?? 0}</td>
+                        <td className="px-4 py-3 text-xs text-gray-500">
+                          <button
+                            type="button"
+                            className="font-bold text-blue-700 underline decoration-dotted hover:text-blue-900"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setPiecesDe({ id: d.id, reference: d.reference });
+                            }}
+                            title="Consulter ou remplacer les pièces du dossier"
+                          >
+                            {d.nbPieces ?? 0}
+                          </button>
+                        </td>
                         <td className="px-4 py-3 text-xs text-gray-400">{fmtDate(d.createdAt)}</td>
                       </tr>
                     ))}
@@ -1138,9 +1285,9 @@ function PiecesDossier({ decompteId, reference, onClose }: { decompteId: string;
                 return (
                   <div key={d.id} className="mt-2 border-t border-gray-50 pt-2">
                     <div className="flex items-center justify-between gap-2 text-xs">
-                      <a href={d.url} target="_blank" rel="noreferrer" className="truncate font-medium text-blue-700 hover:underline">
+                      <SecureFileLink href={d.url} className="truncate font-medium text-blue-700 hover:underline">
                         {d.nom} <span className="text-gray-400">v{d.version}</span>
-                      </a>
+                      </SecureFileLink>
                       <span className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold"
                         style={{ color: etat.couleur, background: etat.fond }}>
                         {etat.label}
@@ -1218,10 +1365,10 @@ function SuiviDecompte({ decompteId, onClose }: { decompteId: string; onClose: (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
               <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Action attendue de vous</p>
               <p className="mt-1 text-sm text-amber-900">{data.actionAttendue}</p>
-              {d?.statut === "BROUILLON" && (
+              {["BROUILLON", "EN_CORRECTION"].includes(d?.statut) && (
                 <button onClick={() => envoi.mutate()} disabled={envoi.isPending}
                   className="mt-3 rounded-lg bg-navy px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
-                  {envoi.isPending ? "Envoi…" : "Envoyer au circuit de validation"}
+                  {envoi.isPending ? "Envoi…" : d?.statut === "EN_CORRECTION" ? "Resoumettre après correction" : "Envoyer au circuit de validation"}
                 </button>
               )}
             </div>

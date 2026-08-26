@@ -17,6 +17,12 @@ import { logAudit } from "../../lib/audit";
 import { chargerRegles } from "../../lib/regles";
 import { calcDecompteRegles } from "../decomptes/decomptes.calc.regles";
 import { construireSnapshot } from "../decomptes/decomptes.regles.audit";
+import { bordereauDepuisTypes, clePourType } from "../../lib/pieces-obligatoires";
+import { getStoredFilenameFromUploadUrl, portailDecompteRequestSchema } from "./portail.decompte.schema";
+import { calculerMontantLigneGnf } from "./portail.decompte.service";
+import { access } from "node:fs/promises";
+import path from "node:path";
+import { env } from "../../config/env";
 import { z } from "zod";
 
 export const portailRouter = Router();
@@ -386,13 +392,12 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
   const entrepriseId = await getEntrepriseId(req.user!.id);
   if (!entrepriseId) throw new ApiError(404, "Aucune entreprise liée");
 
-  const { marcheId, type, observations, lignes } = z.object({
-    marcheId: z.string().min(1),
-    type: z.enum(["AVANCE", "PROVISOIRE", "PARTIEL", "INTERMEDIAIRE", "FINAL", "CLOTURE", "APRES_AVENANT"]),
-    observations: z.string().optional(),
-    montantHtGnf: z.union([z.string(), z.number()]).optional(),
-    lignes: z.array(z.object({ montantBrut: z.number().nonnegative() })).optional(),
-  }).parse(req.body);
+  // Corps STRICT : le dossier est exigé pièce par pièce, et les lignes portent
+  // désignation, unité, quantité et prix unitaire. Le schéma précédent
+  // acceptait un `montantBrut` calculé par le NAVIGATEUR et le sommait tel
+  // quel : le montant d'un décompte dépendait donc du client. Ici le serveur
+  // recalcule chaque ligne en arithmétique entière et ignore tout agrégat reçu.
+  const { marcheId, type, observations, lignes, pieces } = portailDecompteRequestSchema.parse(req.body);
 
   // Le marché doit appartenir à cette entreprise et être actif
   const marche = await prisma.marche.findFirst({
@@ -448,14 +453,16 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
   });
   if (!definition) throw new ApiError(400, `Aucun circuit défini pour le financement ${marche.financement}.`);
 
-  // Montant HT : somme des lignes si fournies, sinon montant déclaré.
-  // Arrondi au franc par ligne — aucune multiplication flottante. Un montant
-  // non numérique est REFUSÉ (400), jamais silencieusement converti en 0.
-  const htBrut = (lignes && lignes.length > 0)
-    ? lignes.reduce((s, l) => s + Math.round(l.montantBrut), 0)
-    : Math.round(Number(req.body.montantHtGnf ?? 0));
-  if (!Number.isFinite(htBrut) || htBrut < 0) throw new ApiError(400, "Montant HT invalide (GNF) — nombre entier requis");
-  const htSaisi = htBrut;
+  // Montant HT : recalculé ligne à ligne par le serveur, quantité × prix
+  // unitaire en arithmétique entière (aucune multiplication flottante, arrondi
+  // au franc le plus proche). Les agrégats éventuellement envoyés par le client
+  // ont été écartés par le schéma : ils ne peuvent pas influencer le montant.
+  const montantsLignes = lignes.map((l, i) => {
+    const montant = calculerMontantLigneGnf(l.quantite, l.prixUnitaire);
+    if (montant <= 0n) throw new ApiError(400, `La ligne ${i + 1} produit un montant nul`);
+    return montant;
+  });
+  const htSaisi = montantsLignes.reduce((s, m) => s + m, 0n);
 
   // Cascade fiscale par le moteur de règles officiel (A1-A7) : mêmes taux que
   // le marché, mêmes formules que la saisie interne, snapshot figé pour rejeu.
@@ -466,6 +473,28 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
     orderBy: { createdAt: "desc" },
     select: { id: true, penalitesReporteesGnf: true },
   });
+  // ── Dossier de pièces : présence réelle et propriété ──────────────────────
+  // Le schéma a garanti que chaque référence est un lien d'upload protégé et
+  // que les quatre pièces requises sont là. Reste à vérifier que les fichiers
+  // existent vraiment et qu'ils appartiennent bien au déposant — sans quoi une
+  // référence devinée rattacherait la pièce d'autrui à son propre décompte.
+  const fichiersPieces = pieces.map((p) => getStoredFilenameFromUploadUrl(p.cheminFichier)!);
+  const [presences, possedes, dejaRattachee] = await Promise.all([
+    Promise.all(fichiersPieces.map(async (f) => {
+      try { await access(path.resolve(env.UPLOAD_DIR, f)); return true; } catch { return false; }
+    })),
+    prisma.auditLog.count({
+      where: { userId: req.user!.id, action: "CREATE", entityType: "Upload", entityId: { in: fichiersPieces } },
+    }),
+    prisma.document.findFirst({
+      where: { cheminFichier: { in: pieces.map((p) => p.cheminFichier) } },
+      select: { id: true },
+    }),
+  ]);
+  if (presences.some((ok) => !ok)) throw new ApiError(400, "Une pièce du dossier n'a pas été téléversée");
+  if (possedes !== fichiersPieces.length) throw new ApiError(403, "Une pièce du dossier ne vous appartient pas");
+  if (dejaRattachee) throw new ApiError(409, "Une pièce du dossier est déjà rattachée à un autre décompte");
+
   const regles = await chargerRegles({ marcheId, bailleur: marche.financement, typeMarche: marche.type });
   const calc = calcDecompteRegles({
     montantPeriodeHtGnf: BigInt(htSaisi),
@@ -488,6 +517,23 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
         observations,
         ...calc,
         reglesSnapshot: construireSnapshot(regles, "GLOBAL") as never,
+        // Bordereau déduit des pièces réellement jointes, via le référentiel
+        // unique : le circuit de validation lira exactement ce que le dépôt a
+        // exigé. Auparavant le portail laissait ce champ nul et le contrôle
+        // des pièces à la soumission était donc entièrement sauté.
+        piecesObligatoires: bordereauDepuisTypes(pieces.map((p) => p.type)) as never,
+        // Les pièces deviennent des documents rattachés — pas des cases cochées.
+        documents: {
+          create: pieces.map((p) => ({
+            type: clePourType(p.type),
+            nom: p.nom,
+            description: p.legende || undefined,
+            cheminFichier: p.cheminFichier,
+            mimeType: p.mimeType,
+            tailleOctets: p.tailleOctets,
+            uploadePar: req.user!.id,
+          })),
+        },
       },
     });
     const instance = await tx.workflowInstance.create({

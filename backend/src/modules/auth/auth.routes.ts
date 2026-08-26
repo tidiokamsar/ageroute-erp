@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { loginSchema, refreshSchema } from "./auth.schema";
 import { login, refresh, logout } from "./auth.service";
+import { requireAuth } from "../../middleware/auth.middleware";
 
 export const authRouter = Router();
 
@@ -26,7 +27,7 @@ authRouter.post("/logout", async (req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 });
 
-authRouter.get("/me", (req: Request, res: Response) => {
+authRouter.get("/me", requireAuth, (req: Request, res: Response) => {
   if (!req.user) return res.status(401).json({ error: "Non authentifié" });
   res.json(req.user);
 });

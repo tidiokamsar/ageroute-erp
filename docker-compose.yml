@@ -35,6 +35,13 @@ services:
       SMTP_FROM: ${SMTP_FROM}
       GEOPORTAIL_URL: ${GEOPORTAIL_URL}
       UPLOAD_DIR: /app/uploads
+      # Proxys de confiance devant Express : Traefik puis nginx.
+      TRUST_PROXY: 2
+      # Garde-fou G2 du module de signature. Sans ce drapeau, le mode
+      # laboratoire est refusé et la signature devient inopérante.
+      # Il ne vivait jusqu'ici que dans le compose du serveur : chaque livraison
+      # par archive le perdait, et il fallait le reposer à la main.
+      SIGNATURE_LAB_AUTORISE: ${SIGNATURE_LAB_AUTORISE:-non}
     volumes:
       # Indispensable : sans ce volume, toutes les pièces jointes (contrats, PV,
       # photos d'attachement) sont détruites à chaque rebuild de l'image.
@@ -45,6 +52,21 @@ services:
     networks:
       - erp-net
       - proxy
+      # Accès au laboratoire de signature (SignServer, DSS). Réseau externe :
+      # absent en développement, le service démarre quand même.
+      - laboratoire-signature
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     labels:
       - "traefik.enable=false"
 
@@ -69,6 +91,10 @@ volumes:
   erp_uploads:
 
 networks:
+  # Créé par infra/laboratoire-signature. Déclaré externe : le laboratoire a
+  # son propre cycle de vie et n'est jamais démarré par ce fichier.
+  laboratoire-signature:
+    external: true
   erp-net:
     driver: bridge
   proxy:

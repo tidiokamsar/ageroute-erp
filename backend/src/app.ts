@@ -50,7 +50,13 @@ import { logAudit } from "./lib/audit";
 
 export function createApp() {
   const app = express();
-  app.set("trust proxy", 1);
+  // Nombre de proxys de confiance devant Express. La topologie appartient au
+  // DÉPLOIEMENT, pas au source : en production Traefik termine TLS puis nginx
+  // relaie /api, soit deux sauts ; en développement il n'y en a aucun. Une
+  // valeur trop basse fait voir à Express l'adresse du proxy — tous les
+  // utilisateurs partagent alors un seul compteur de limitation ; une valeur
+  // trop haute rend l'adresse cliente falsifiable par l'en-tête transmis.
+  app.set("trust proxy", env.TRUST_PROXY);
 
   app.use(helmet({ crossOriginEmbedderPolicy: false }));
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
@@ -68,6 +74,16 @@ export function createApp() {
   }));
 
   app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: "Trop de tentatives" } }));
+
+  // Consultation publique (Géoportail, vérification de signature) : plafond
+  // anti-abus. Il s'applique par adresse, faute d'identité à cet endroit.
+  app.use("/api/public", rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Trop de requêtes" },
+  }));
 
   app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "ERP AGEROUTE", timestamp: new Date().toISOString() }));
 

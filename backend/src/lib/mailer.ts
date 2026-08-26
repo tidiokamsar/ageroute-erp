@@ -4,9 +4,10 @@ import { env } from "../config/env";
 const transporter = nodemailer.createTransport({
   host: env.SMTP_HOST,
   port: env.SMTP_PORT,
-  secure: false,
+  secure: env.SMTP_PORT === 465,
+  requireTLS: env.SMTP_PORT !== 465,
   auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
-  tls: { rejectUnauthorized: false },
+  tls: { rejectUnauthorized: true },
 });
 
 export async function sendMail(to: string | string[], subject: string, html: string): Promise<void> {

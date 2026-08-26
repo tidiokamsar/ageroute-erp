@@ -40,6 +40,9 @@ usersRouter.put("/:id", async (req: Request, res: Response, next: NextFunction) 
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const data = userCreateSchema.partial().omit({ password: true }).parse(req.body);
     const updated = await prisma.user.update({ where: { id: req.params.id }, data });
+    if (data.role !== undefined || data.actif === false) {
+      await prisma.refreshToken.updateMany({ where: { userId: req.params.id }, data: { revoked: true } });
+    }
     await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "User", entityId: req.params.id });
     res.json({ id: updated.id, email: updated.email, nomComplet: updated.nomComplet, nom: updated.nom, prenom: updated.prenom, fonction: updated.fonction, signatureUrl: updated.signatureUrl, role: updated.role, actif: updated.actif });
   } catch (err) { next(err); }
@@ -51,6 +54,9 @@ usersRouter.put("/:id/actif", async (req: Request, res: Response, next: NextFunc
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const { actif } = z.object({ actif: z.boolean() }).parse(req.body);
     await prisma.user.update({ where: { id: req.params.id }, data: { actif } });
+    if (!actif) {
+      await prisma.refreshToken.updateMany({ where: { userId: req.params.id }, data: { revoked: true } });
+    }
     await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "User", entityId: req.params.id, after: { actif } });
     res.json({ message: actif ? "Compte activé" : "Compte désactivé" });
   } catch (err) { next(err); }

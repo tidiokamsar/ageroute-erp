@@ -26,7 +26,12 @@ export async function login(email: string, password: string, ip?: string) {
 }
 
 export async function refresh(token: string) {
-  const payload = verifyRefresh(token);
+  let payload;
+  try {
+    payload = verifyRefresh(token);
+  } catch {
+    throw new ApiError(401, "Refresh token invalide");
+  }
   const user = await prisma.user.findUnique({ where: { id: payload.userId } });
   if (!user || !user.actif) throw new ApiError(401, "Utilisateur inactif");
 

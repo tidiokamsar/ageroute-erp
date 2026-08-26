@@ -19,7 +19,10 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
 COPY assets ./assets
+RUN mkdir -p /app/uploads && chown -R node:node /app
+USER node
 EXPOSE 4001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD node -e "fetch(\"http://127.0.0.1:4001/api/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 # Plus aucun .env dans l'image — revue du 22/08/2026. `COPY .env* ./` embarquait
 # tout fichier de secrets présent dans le contexte de build, et la commande de
 # démarrage le sourçait. En production rien n'était copié (le .env vit à la
