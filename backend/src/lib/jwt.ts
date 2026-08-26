@@ -9,22 +9,27 @@ export interface JwtPayload {
 }
 
 export function signAccess(payload: JwtPayload) {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: "15m" });
+  return jwt.sign(payload, env.JWT_SECRET, {
+    algorithm: "HS256", issuer: "erp-ageroute", audience: "erp-ageroute-api",
+    subject: payload.userId, jwtid: randomUUID(), expiresIn: "15m",
+  });
 }
 
 export function signRefresh(payload: JwtPayload) {
-  // `jwtid` aléatoire : sans lui, deux jetons signés pour le même compte dans
-  // la même seconde (iat identique) sont BYTE POUR BYTE identiques, et le
-  // second viole la contrainte d'unicité de refresh_tokens.token — 500 au
-  // lieu d'une session. Défaut latent depuis l'origine, exposé le 22/08/2026
-  // par un test qui enchaînait login et refresh dans la même seconde.
-  return jwt.sign(payload, env.JWT_REFRESH_SECRET, { expiresIn: "7d", jwtid: randomUUID() });
+  return jwt.sign(payload, env.JWT_REFRESH_SECRET, {
+    algorithm: "HS256", issuer: "erp-ageroute", audience: "erp-ageroute-refresh",
+    subject: payload.userId, jwtid: randomUUID(), expiresIn: "7d",
+  });
 }
 
 export function verifyAccess(token: string): JwtPayload {
-  return jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+  return jwt.verify(token, env.JWT_SECRET, {
+    algorithms: ["HS256"], issuer: "erp-ageroute", audience: "erp-ageroute-api",
+  }) as JwtPayload;
 }
 
 export function verifyRefresh(token: string): JwtPayload {
-  return jwt.verify(token, env.JWT_REFRESH_SECRET) as JwtPayload;
+  return jwt.verify(token, env.JWT_REFRESH_SECRET, {
+    algorithms: ["HS256"], issuer: "erp-ageroute", audience: "erp-ageroute-refresh",
+  }) as JwtPayload;
 }

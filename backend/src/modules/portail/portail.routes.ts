@@ -15,9 +15,17 @@ import { verifierEligibiliteDepot } from "../../lib/eligibilite-depot";
 import { notifyWorkflowStep } from "../notifications/notifications.service";
 import { logAudit } from "../../lib/audit";
 import { notifyNextStep } from "../../lib/mailer";
+import { access } from "node:fs/promises";
+import path from "node:path";
+import { env } from "../../config/env";
+import { checkModuleAccess } from "../../middleware/moduleAccess.middleware";
+import { getStoredFilenameFromUploadUrl, portailDecompteRequestSchema } from "./portail.decompte.schema";
+import { creerBrouillonDecomptePortail } from "./portail.decompte.service";
 
 export const portailRouter = Router();
 portailRouter.use(requireAuth);
+
+const PIECES_REQUISES_DECOMPTE = ["decompteSigné", "attachements", "facture", "rapportAvancement"] as const;
 
 // Seuls les ENTREPRISE (et ADMIN pour le support) peuvent accéder au portail
 function entrepriseOnly(req: Request, res: Response, next: NextFunction) {
@@ -121,7 +129,7 @@ portailRouter.get("/mes-decomptes", entrepriseOnly, wrap(async (req, res) => {
     nbPieces: d._count.documents,
     // Un brouillon n'est pas encore dans le circuit : l'entreprise doit pouvoir
     // l'envoyer, et l'écran doit le lui proposer.
-    peutEtreEnvoye: d.statut === "BROUILLON",
+    peutEtreEnvoye: ["BROUILLON", "EN_CORRECTION"].includes(d.statut),
   })));
 }));
 
@@ -261,9 +269,11 @@ portailRouter.get("/suivi/:decompteId", entrepriseOnly, wrap(async (req, res) =>
   // pas comme fournie : c'est l'action attendue d'elle, et elle doit la voir.
   const piecesRetournees = decompte.documents.filter((d) => d.statutValidation === "RETOURNE");
   const actionAttendue =
-    decompte.statut === "BROUILLON"
-      ? "Ce décompte est un brouillon : il n'est pas encore entré dans le circuit. Envoyez-le pour démarrer la validation."
-      : piecesRetournees.length > 0
+    decompte.statut === "EN_CORRECTION"
+      ? "Ce décompte vous a été retourné : corrigez les pièces signalées puis resoumettez le dossier."
+      : decompte.statut === "BROUILLON"
+        ? "Ce décompte est un brouillon : il n'est pas encore entré dans le circuit. Envoyez-le pour démarrer la validation."
+        : piecesRetournees.length > 0
         ? `${piecesRetournees.length} pièce(s) vous ont été retournée(s) : corrigez-les et redéposez-les.`
         : null;
 
@@ -306,8 +316,21 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
     include: { marche: true },
   });
   if (!decompte) throw new ApiError(404, "Décompte introuvable");
-  if (decompte.statut !== "BROUILLON") {
+  if (!["BROUILLON", "EN_CORRECTION"].includes(decompte.statut)) {
     throw new ApiError(400, `Ce décompte est déjà dans le circuit (statut « ${decompte.statut.replace(/_/g, " ")} »).`);
+  }
+  const [nbLignes, documentsActifs] = await Promise.all([
+    prisma.decompteLigne.count({ where: { decompteId: decompte.id } }),
+    prisma.document.findMany({
+      where: { decompteId: decompte.id, estArchive: false, statutValidation: { not: "RETOURNE" } },
+      select: { type: true },
+    }),
+  ]);
+  if (nbLignes < 1) throw new ApiError(409, "Ajoutez au moins une ligne avant de soumettre le décompte.");
+  const typesPresents = new Set(documentsActifs.map((document) => document.type));
+  const piecesManquantes = PIECES_REQUISES_DECOMPTE.filter((type) => !typesPresents.has(type));
+  if (piecesManquantes.length > 0) {
+    throw new ApiError(409, `Dossier incomplet — pièces obligatoires manquantes : ${piecesManquantes.join(", ")}.`);
   }
 
   const { checkEligibilite } = await import("../entreprises/entreprises.service");
@@ -315,7 +338,10 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
     checkEligibilite(entrepriseId),
     prisma.garantie.findMany({ where: { marcheId: decompte.marcheId }, select: { type: true, active: true, dateExpiration: true } }),
     prisma.attachement.count({ where: { decompte: { marcheId: decompte.marcheId, deletedAt: null } } }),
-    prisma.workflowInstance.findFirst({ where: { decompteId: decompte.id }, select: { id: true } }),
+    prisma.workflowInstance.findFirst({
+      where: { decompteId: decompte.id, statut: { in: ["EN_ATTENTE", "EN_COURS", "APPROUVE"] } },
+      select: { id: true },
+    }),
   ]);
   if (dejaOuvert) throw new ApiError(409, "Un circuit est déjà ouvert pour ce décompte.");
 
@@ -368,123 +394,62 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
   });
 }));
 
-// ─── POST /api/portail/deposer-decompte — soumettre un décompte ───────────────
-portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) => {
-  const entrepriseId = await getEntrepriseId(req.user!.id);
-  if (!entrepriseId) throw new ApiError(404, "Aucune entreprise liée");
+// ─── POST /api/portail/deposer-decompte — enregistrer un brouillon ────────────
+portailRouter.post("/deposer-decompte", checkModuleAccess("decomptes"), entrepriseOnly, async (req, res, next) => {
+  try {
+    const entrepriseId = await getEntrepriseId(req.user!.id);
+    if (!entrepriseId) return res.status(404).json({ error: "Aucune entreprise liée" });
 
-  const { marcheId, type, numero, observations, lignes } = req.body;
-  if (!marcheId || !type) throw new ApiError(400, "marcheId et type sont requis");
-
-  // Le marché doit appartenir à cette entreprise et être actif
-  const marche = await prisma.marche.findFirst({
-    where: { id: marcheId, entrepriseId, deletedAt: null },
-  });
-  if (!marche) throw new ApiError(403, "Marché non trouvé ou non accessible");
-
-  // ── Verrou de dépôt (lib/eligibilite-depot.ts) ────────────────────────────
-  // La condition précédente exigeait `statut === "ACTIF"`. Or AUCUN marché ne
-  // porte ce statut — ACTIF est un alias historique. Le dépôt échouait donc
-  // pour 100 % des marchés. Et la régularité des garanties n'était contrôlée
-  // nulle part : une caution de bonne exécution expirée depuis trois semaines
-  // n'empêchait rien.
-  const { checkEligibilite } = await import("../entreprises/entreprises.service");
-  const [{ raisons }, garanties, nbAttachements] = await Promise.all([
-    checkEligibilite(entrepriseId),
-    prisma.garantie.findMany({
-      where: { marcheId },
-      select: { type: true, active: true, dateExpiration: true },
-    }),
-    prisma.attachement.count({ where: { decompte: { marcheId, deletedAt: null } } }),
-  ]);
-
-  const controle = verifierEligibiliteDepot({
-    blocagesEntreprise: raisons,
-    statutMarche: marche.statut,
-    garanties,
-    // Toute garantie de bonne exécution déjà enregistrée sur le marché rend
-    // son maintien obligatoire : on n'autorise pas un dépôt sur un marché dont
-    // la caution a été souscrite puis laissée expirer.
-    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
-    nbAttachements,
-    maintenant: new Date(),
-  });
-
-  if (!controle.autorise) {
-    throw new ApiError(403, `Dépôt bloqué — ${controle.blocages.join(" ")}`);
-  }
-
-  // Référence à partir du nombre de décomptes existants du marché
-  const nbExistants = await prisma.decompte.count({ where: { marcheId } });
-  const numStr = String(nbExistants + 1).padStart(2, "0");
-  const typeCode = type === "PARTIEL" ? "DP" : type === "FINAL" ? "DF" : type === "AVANCE" ? "DA" : "DI";
-  const reference = `${marche.reference}-${typeCode}-${numStr}`;
-
-  // Montants depuis les lignes si fournies (sinon valeurs transmises)
-  let montantHtGnf = BigInt((req.body.montantHtGnf ?? 0) as string | number);
-  let montantTtcGnf = BigInt((req.body.montantTtcGnf ?? 0) as string | number);
-  let montantNetGnf = BigInt((req.body.netAPayer ?? 0) as string | number);
-
-  if (lignes && Array.isArray(lignes) && lignes.length > 0) {
-    const ht = lignes.reduce((s: number, l: { montantBrut?: number }) => s + (l.montantBrut ?? 0), 0);
-    montantHtGnf = BigInt(Math.round(ht));
-    const tva = Math.round(ht * 0.18);
-    const armp = Math.round(ht * 0.006);
-    const ttc = ht + tva + armp;
-    const precompte = Math.round(ttc * 9 / 118);
-    const rg = Math.round(ttc * 0.05);
-    montantTtcGnf = BigInt(Math.round(ttc));
-    montantNetGnf = BigInt(Math.round(ttc - precompte - rg - armp));
-  }
-
-  const decompte = await prisma.decompte.create({
-    data: {
-      reference,
-      type: type as never,
-      statut: "SOUMIS" as never,
-      marcheId,
-      entrepriseId,
-      observations,
-      montantPeriodeHtGnf: montantHtGnf,
-      montantTtcGnf,
-      netAPayer: montantNetGnf,
-    },
-  });
-  await logAudit({ userId: req.user!.id, action: "CREATE", entityType: "Decompte", entityId: decompte.id, after: { via: "portail", reference } });
-
-  // Lancer le circuit BPMN automatiquement
-  const [defRows] = await prisma.$queryRaw<[{ id: string }]>`
-    SELECT id FROM bpmn_definitions WHERE module_type = 'DECOMPTE' AND actif = TRUE LIMIT 1
-  `;
-  if (defRows?.id) {
-    const instanceId = crypto.randomUUID();
-    await prisma.$executeRaw`
-      INSERT INTO bpmn_instances (id, definition_id, module_type, entity_id, soumetteur_id)
-      VALUES (${instanceId}, ${defRows.id}, 'DECOMPTE', ${decompte.id}, ${req.user!.id})
-      ON CONFLICT (module_type, entity_id) DO NOTHING
-    `;
-
-    // Notifier les MISSION (première étape réelle après la vérification système)
-    const missionEmails = await prisma.user.findMany({
-      where: { role: "MISSION", actif: true },
-      select: { email: true },
-    });
-    if (missionEmails.length > 0) {
-      const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { nomComplet: true } });
-      void notifyNextStep({
-        to: missionEmails.map(u => u.email),
-        moduleType: "DECOMPTE",
-        entityRef: reference,
-        stepNom: "Vérification mission contrôle",
-        roleRequis: "MISSION",
-        soumetteurNom: user?.nomComplet ?? req.user!.email,
-        entityId: decompte.id,
+    const payloadResult = portailDecompteRequestSchema.safeParse(req.body);
+    if (!payloadResult.success) {
+      return res.status(400).json({
+        error: payloadResult.error.issues[0]?.message ?? "Données du brouillon invalides",
       });
     }
-  }
+    const data = payloadResult.data;
+    const filenames = data.pieces.map((piece) => getStoredFilenameFromUploadUrl(piece.cheminFichier)!);
+    const [presencePieces, ownedUploads] = await Promise.all([
+      Promise.all(data.pieces.map(async (piece) => {
+        const filename = getStoredFilenameFromUploadUrl(piece.cheminFichier);
+        if (!filename) return false;
+        try {
+          await access(path.resolve(env.UPLOAD_DIR, filename));
+          return true;
+        } catch {
+          return false;
+        }
+      })),
+      prisma.auditLog.count({
+        where: {
+          userId: req.user!.id,
+          action: "CREATE",
+          entityType: "Upload",
+          entityId: { in: filenames },
+        },
+      }),
+    ]);
+    if (presencePieces.some((isPresent) => !isPresent)) {
+      return res.status(400).json({ error: "Une pi\u00e8ce du dossier n\u2019a pas \u00e9t\u00e9 t\u00e9l\u00e9vers\u00e9e" });
+    }
+    if (ownedUploads !== filenames.length) {
+      return res.status(403).json({ error: "Une pièce du dossier ne vous appartient pas" });
+    }
 
-  res.status(201).json({ message: "Décompte déposé et circuit lancé", decompte });
-}));
+    const decompte = await creerBrouillonDecomptePortail({
+      data,
+      entrepriseId,
+      userId: req.user!.id,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({
+      message: "Brouillon enregistré. Faites valider l’attachement métier avant de soumettre le décompte au circuit.",
+      decompte,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ─── GET /api/portail/mes-attachements — attachements de mes marchés ──────────
 // (les attachements sont rattachés aux décomptes, eux-mêmes rattachés aux marchés)

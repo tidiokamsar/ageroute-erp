@@ -10,12 +10,13 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
+import { requireBpmnSubmissionScope } from "../../middleware/resourceAccess.middleware";
 import { notifyNextStep, notifyDecision, notifyApprouve } from "../../lib/mailer";
 import { rolesEffectifs } from "../../lib/delegations";
-import { entrepriseIdOf } from "../../lib/scope";
 import { etapesCircuitFinancier } from "../../lib/circuit-definitions";
 import { z } from "zod";
 import { getMarchesAffectes } from "../../lib/affectations";
+import { canAccessWorkflowResource, isHumanBpmnStep, type WorkflowResourceScope } from "../workflow/workflow.access";
 
 export const bpmnRouter = Router();
 bpmnRouter.use(requireAuth);
@@ -26,6 +27,7 @@ interface BpmnDef { id: string; module_type: string; nom: string; description: s
 interface BpmnStep { id: string; definition_id: string; ordre: number; nom: string; type_tache: string; role_requis: string | null; description: string; sla_jours: number; is_optional: boolean; is_system: boolean; }
 interface BpmnInstance { id: string; definition_id: string; module_type: string; entity_id: string; etape_actuelle: number; statut: string; suspended: boolean; audit_requis: boolean; created_at: Date; updated_at: Date; }
 interface BpmnAction { id: string; instance_id: string; step_id: string; user_id: string | null; decision: string; commentaire: string | null; created_at: Date; }
+type BpmnTask = BpmnInstance & { def_nom: string; step_nom: string; step_role: string | null; step_ordre: number; step_type: string; step_is_system: boolean; };
 
 const DECISIONS = ["APPROUVE","REJETE","DEMANDE_CORRECTION","DEMANDE_COMPLEMENT","SUSPENDRE","AUDIT"] as const;
 const ROLES_SUPERV = ["DG","ADMIN"];
@@ -56,6 +58,79 @@ async function getInstance(moduleType: string, entityId: string): Promise<BpmnIn
 async function getInstanceById(id: string): Promise<BpmnInstance | null> {
   const rows = await prisma.$queryRaw<BpmnInstance[]>`SELECT * FROM bpmn_instances WHERE id = ${id} LIMIT 1`;
   return rows[0] ?? null;
+}
+
+async function getBpmnResourceScope(moduleType: string, entityId: string): Promise<WorkflowResourceScope | null> {
+  if (moduleType === "MARCHE") {
+    const marche = await prisma.marche.findFirst({
+      where: { id: entityId, deletedAt: null },
+      select: { id: true, entrepriseId: true },
+    });
+    return marche ? { entrepriseId: marche.entrepriseId, marcheIds: [marche.id] } : null;
+  }
+
+  if (moduleType === "DECOMPTE") {
+    const decompte = await prisma.decompte.findFirst({
+      where: { id: entityId, deletedAt: null, marche: { deletedAt: null } },
+      select: { marcheId: true, entrepriseId: true },
+    });
+    return decompte ? { entrepriseId: decompte.entrepriseId, marcheIds: [decompte.marcheId] } : null;
+  }
+
+  if (moduleType === "ATTACHEMENT") {
+    const attachement = await prisma.attachement.findFirst({
+      where: { id: entityId, decompte: { deletedAt: null, marche: { deletedAt: null } } },
+      select: { decompte: { select: { marcheId: true, entrepriseId: true } } },
+    });
+    return attachement
+      ? { entrepriseId: attachement.decompte.entrepriseId, marcheIds: [attachement.decompte.marcheId] }
+      : null;
+  }
+
+  if (moduleType === "PROJET") {
+    const projet = await prisma.projet.findFirst({
+      where: { id: entityId, deletedAt: null },
+      select: {
+        marches: {
+          where: { deletedAt: null },
+          select: { id: true },
+        },
+      },
+    });
+    return projet ? { entrepriseId: null, marcheIds: projet.marches.map((marche) => marche.id) } : null;
+  }
+
+  if (moduleType === "CONFORMITE") {
+    const entreprise = await prisma.entreprise.findFirst({
+      where: { id: entityId, deletedAt: null },
+      select: {
+        id: true,
+        marches: {
+          where: { deletedAt: null },
+          select: { id: true },
+        },
+      },
+    });
+    return entreprise
+      ? { entrepriseId: entreprise.id, marcheIds: entreprise.marches.map((marche) => marche.id) }
+      : null;
+  }
+
+  return null;
+}
+
+async function isBpmnResourceInScope(req: Request, instance: BpmnInstance): Promise<boolean> {
+  if (!req.user) return false;
+  const resource = await getBpmnResourceScope(instance.module_type, instance.entity_id);
+  if (!resource) return false;
+  const effectiveRoles = await rolesEffectifs(req.user.id, req.user.role);
+  const isSupervisor = req.user.role === "ADMIN" || effectiveRoles.includes("DG");
+  const marchesAffectes = isSupervisor ? null : await getMarchesAffectes(req.user.id, req.user.role);
+  return canAccessWorkflowResource(
+    { role: req.user.role, entrepriseId: req.user.entrepriseId },
+    resource,
+    marchesAffectes,
+  );
 }
 
 async function getActions(instanceId: string): Promise<(BpmnAction & { user_nom: string; user_role: string; step_nom: string; step_ordre: number })[]> {
@@ -148,12 +223,16 @@ bpmnRouter.get("/definition/:moduleType", async (req: Request, res: Response, ne
 });
 
 // ─── POST /api/bpmn/soumettre/:moduleType/:entityId ──────────────────────────
-bpmnRouter.post("/soumettre/:moduleType/:entityId", async (req: Request, res: Response, next: NextFunction) => {
+bpmnRouter.post("/soumettre/:moduleType/:entityId", requireBpmnSubmissionScope, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const { moduleType, entityId } = req.params;
     const mt = moduleType.toUpperCase();
-
+    const resource = await getBpmnResourceScope(mt, entityId);
+    const marchesAffectes = await getMarchesAffectes(req.user.id, req.user.role);
+    if (!resource || !canAccessWorkflowResource(
+      { role: req.user.role, entrepriseId: req.user.entrepriseId }, resource, marchesAffectes,
+    )) throw new ApiError(404, "Ressource introuvable");
     const existing = await getInstance(mt, entityId);
     if (existing) throw new ApiError(409, `Instance BPMN déjà existante pour cette entité (statut: ${existing.statut})`);
 
@@ -189,18 +268,9 @@ bpmnRouter.get("/instance/:moduleType/:entityId", async (req: Request, res: Resp
   try {
     const mt = req.params.moduleType.toUpperCase();
 
-    // Isolation entreprise : un compte ENTREPRISE ne voit que les instances
-    // BPMN des décomptes de sa propre entreprise (les autres modules sont
-    // internes — pas de visibilité).
-    if (req.user?.role === "ENTREPRISE") {
-      if (mt !== "DECOMPTE") return res.json(null);
-      const monEntreprise = await entrepriseIdOf(req.user.id);
-      const dec = await prisma.decompte.findUnique({ where: { id: req.params.entityId }, select: { entrepriseId: true } });
-      if (!dec || dec.entrepriseId !== monEntreprise) return res.json(null);
-    }
-
     const instance = await getInstance(mt, req.params.entityId);
     if (!instance) return res.json(null);
+    if (!await isBpmnResourceInScope(req, instance)) throw new ApiError(404, "Instance BPMN introuvable");
 
     const [def, steps, actions] = await Promise.all([
       getDefinition(mt),
@@ -234,11 +304,15 @@ bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next:
 
     const instance = await getInstanceById(req.params.instanceId);
     if (!instance) throw new ApiError(404, "Instance BPMN introuvable");
+    if (!await isBpmnResourceInScope(req, instance)) throw new ApiError(404, "Instance BPMN introuvable");
     if (instance.statut !== "EN_COURS") throw new ApiError(400, `Instance déjà terminée (statut: ${instance.statut})`);
 
     const steps = await getSteps(instance.definition_id);
     const etapeCourante = steps[instance.etape_actuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante");
+    if (!isHumanBpmnStep(etapeCourante.type_tache, etapeCourante.is_system)) {
+      throw new ApiError(403, "Une tâche système ne peut pas être exécutée par un utilisateur");
+    }
 
     // Rôles effectifs : rôle propre + rôles délégués actifs (délégation d'intérim)
     const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
@@ -426,74 +500,64 @@ bpmnRouter.patch("/:instanceId/lever-suspension", async (req: Request, res: Resp
 bpmnRouter.get("/mes-taches", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
+    if (req.user.role === "ENTREPRISE") return res.json([]);
+
     const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
     const isSuperv = req.user.role === "ADMIN" || mesRoles.includes("DG");
+    const marchesAffectes = isSuperv ? null : await getMarchesAffectes(req.user.id, req.user.role);
+    if (marchesAffectes !== null && marchesAffectes.length === 0) return res.json([]);
 
-    let instances: (BpmnInstance & { def_nom: string; step_nom: string; step_role: string; step_ordre: number })[];
-
+    let instances: BpmnTask[];
     if (isSuperv) {
-      instances = await prisma.$queryRaw`
-        SELECT bi.*, bd.nom as def_nom, bs.nom as step_nom, bs.role_requis as step_role, bs.ordre as step_ordre
+      instances = await prisma.$queryRaw<BpmnTask[]>`
+        SELECT bi.*, bd.nom as def_nom, bs.nom as step_nom, bs.role_requis as step_role, bs.ordre as step_ordre,
+               bs.type_tache as step_type, bs.is_system as step_is_system
         FROM bpmn_instances bi
         JOIN bpmn_definitions bd ON bd.id = bi.definition_id
-        LEFT JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle + 1
+        JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle + 1
         WHERE bi.statut = 'EN_COURS'
-        ORDER BY bi.created_at ASC
-      `;
+          AND bs.type_tache <> 'SERVICE_TASK' AND COALESCE(bs.is_system, false) = false
+        ORDER BY bi.created_at ASC`;
     } else {
-      // Étapes courantes dont le rôle requis est porté par l'utilisateur
-      // (rôle propre ou rôle délégué actif) — requête paramétrée.
-      instances = await prisma.$queryRaw`
-        SELECT bi.*, bd.nom as def_nom, bs.nom as step_nom, bs.role_requis as step_role, bs.ordre as step_ordre
+      instances = await prisma.$queryRaw<BpmnTask[]>`
+        SELECT bi.*, bd.nom as def_nom, bs.nom as step_nom, bs.role_requis as step_role, bs.ordre as step_ordre,
+               bs.type_tache as step_type, bs.is_system as step_is_system
         FROM bpmn_instances bi
         JOIN bpmn_definitions bd ON bd.id = bi.definition_id
         JOIN bpmn_steps bs ON bs.definition_id = bi.definition_id AND bs.ordre = bi.etape_actuelle + 1
         WHERE bi.statut = 'EN_COURS' AND bs.role_requis IN (${Prisma.join(mesRoles)})
-        ORDER BY bi.created_at ASC
-      `;
+          AND bs.type_tache <> 'SERVICE_TASK' AND COALESCE(bs.is_system, false) = false
+        ORDER BY bi.created_at ASC`;
     }
 
-    // Périmètre d'affectation — même règle que les listes et que le workflow
-    // classique. Sans ce filtre, un agent scopé voyait les tâches de marchés
-    // qui ne lui sont pas confiés dès lors que l'étape requérait son rôle.
-    // Les instances portent `entity_id` : pour le module DECOMPTE il s'agit de
-    // l'identifiant du décompte, que l'on rattache à son marché.
-    const marchesAffectes = isSuperv ? null : await getMarchesAffectes(req.user.id, req.user.role);
-    if (marchesAffectes !== null) {
-      const [decomptes, attachements] = await Promise.all([
-        prisma.decompte.findMany({
-          where: { marcheId: { in: marchesAffectes }, deletedAt: null },
-          select: { id: true },
-        }),
-        prisma.attachement.findMany({
-          where: { decompte: { marcheId: { in: marchesAffectes } } },
-          select: { id: true },
-        }),
-      ]);
-      const autorises: Record<string, Set<string>> = {
-        DECOMPTE: new Set(decomptes.map((d) => d.id)),
-        ATTACHEMENT: new Set(attachements.map((a) => a.id)),
-        MARCHE: new Set(marchesAffectes),
-      };
-      // PROJET et CONFORMITE ne se rattachent à aucun marché : un rôle scopé
-      // n'y a pas d'étape à traiter, on refuse plutôt que d'ouvrir par défaut.
-      instances = instances.filter((inst) => autorises[inst.module_type]?.has(inst.entity_id) ?? false);
-    }
+    const instancesDansPerimetre = (await Promise.all(instances.map(async (inst) => {
+      const resource = await getBpmnResourceScope(inst.module_type, inst.entity_id);
+      const resourceInScope = resource !== null && canAccessWorkflowResource(
+        { role: req.user!.role, entrepriseId: req.user!.entrepriseId },
+        resource,
+        marchesAffectes,
+      );
+      const roleAutorise = isSuperv || Boolean(inst.step_role && mesRoles.includes(inst.step_role));
+      return resourceInScope && roleAutorise ? inst : null;
+    }))).filter((inst): inst is BpmnTask => inst !== null);
 
-    // Enrichir avec les jours en cours
-    const enriched = await Promise.all(instances.map(async (inst) => {
+    const enriched = await Promise.all(instancesDansPerimetre.map(async (inst) => {
       const lastAction = await prisma.$queryRaw<{ created_at: Date }[]>`
         SELECT created_at FROM bpmn_actions WHERE instance_id = ${inst.id} ORDER BY created_at DESC LIMIT 1
       `;
       const debut = lastAction[0] ? new Date(lastAction[0].created_at) : new Date(inst.created_at);
       const joursEnCours = Math.floor((Date.now() - debut.getTime()) / 86400000);
-      return { ...inst, joursEnCours, peutAgir: isSuperv || mesRoles.includes(inst.step_role) };
+      return {
+        ...inst,
+        joursEnCours,
+        peutAgir: isHumanBpmnStep(inst.step_type, inst.step_is_system)
+          && (isSuperv || Boolean(inst.step_role && mesRoles.includes(inst.step_role))),
+      };
     }));
 
     res.json(enriched);
   } catch (err) { next(err); }
 });
-
 // ─── GET /api/bpmn/supervision ────────────────────────────────────────────────
 bpmnRouter.get("/supervision", async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -534,6 +598,10 @@ bpmnRouter.get("/supervision", async (req: Request, res: Response, next: NextFun
 // ─── GET /api/bpmn/audit/:instanceId ─────────────────────────────────────────
 bpmnRouter.get("/audit/:instanceId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const instance = await getInstanceById(req.params.instanceId);
+    if (!instance || !await isBpmnResourceInScope(req, instance)) {
+      throw new ApiError(404, "Instance BPMN introuvable");
+    }
     const actions = await getActions(req.params.instanceId);
     res.json(actions);
   } catch (err) { next(err); }

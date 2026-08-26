@@ -10,7 +10,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:sql": "bash -c 'for f in prisma/sql/*.sql; do [ -e \"$f\" ] || continue; echo \"-- $f\"; psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f \"$f\"; done'",
-    "db:seed": "tsx src/lib/seed.ts"
+    "db:seed": "tsx src/lib/seed.ts",
+    "security:revoke-tokens": "node dist/scripts/revoke-refresh-tokens.js",
+    "security:revoke-tokens:dev": "tsx src/scripts/revoke-refresh-tokens.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -23,12 +25,11 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
-    "nodemailer": "^6.9.15",
+    "nodemailer": "^9.0.5",
     "pdfkit": "^0.19.1",
     "prisma": "^5.22.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^10.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -41,7 +42,6 @@
     "@types/node": "^22.5.4",
     "@types/nodemailer": "^6.4.16",
     "@types/pdfkit": "^0.17.6",
-    "@types/uuid": "^10.0.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2"
   }

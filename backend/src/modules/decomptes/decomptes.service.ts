@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
@@ -156,14 +157,14 @@ async function decompteIdsATraiterPour(role: string): Promise<string[]> {
 }
 
 export const decomptesService = {
-  async list(params: { page?: number; pageSize?: number; marcheId?: string; statut?: string; entrepriseId?: string; aTraiter?: boolean; role?: string; marcheIds?: string[] }) {
+  async list(params: { page?: number; pageSize?: number; marcheId?: string; statut?: string; entrepriseId?: string; aTraiter?: boolean; role?: string; marcheIds?: string[]; scopeWhere?: Prisma.DecompteWhereInput }) {
     const page     = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(100, params.pageSize ?? 20);
-    const where: Record<string, unknown> = { deletedAt: null };
-    if (params.marcheId)    where.marcheId    = params.marcheId;
-    if (params.marcheIds)   where.marcheId    = { in: params.marcheIds }; // périmètre d'affectation
-    if (params.statut)      where.statut      = params.statut;
-    if (params.entrepriseId) where.entrepriseId = params.entrepriseId;
+    const filters: Prisma.DecompteWhereInput = params.scopeWhere ? {} : { deletedAt: null };
+    if (params.marcheId)    filters.marcheId    = params.marcheId;
+    if (params.marcheIds)   filters.marcheId    = { in: params.marcheIds }; // périmètre d'affectation
+    if (params.statut)      filters.statut      = params.statut as never;
+    if (params.entrepriseId) filters.entrepriseId = params.entrepriseId;
 
     // Vue "À traiter" : uniquement les dossiers en attente d'une action de CE rôle.
     // DG désormais filtré comme les autres (il voit les dossiers à SON étape,
@@ -175,8 +176,11 @@ export const decomptesService = {
       if (["DMC", "MISSION", "ENTREPRISE"].includes(params.role)) {
         orClauses.push({ statut: "BROUILLON" });
       }
-      where.OR = orClauses;
+      filters.OR = orClauses;
     }
+    const where: Prisma.DecompteWhereInput = params.scopeWhere
+      ? { AND: [params.scopeWhere, filters] }
+      : filters;
     const [data, total] = await Promise.all([
       prisma.decompte.findMany({
         where,
@@ -389,18 +393,18 @@ export const decomptesService = {
    * 11,7 Md GNF payés » sur l'ensemble de l'agence : le cloisonnement était
    * contredit par les chiffres affichés juste au-dessus.
    */
-  async stats(portee?: { entrepriseId?: string | null; marcheIds?: string[] | null }) {
-    const base: Record<string, unknown> = { deletedAt: null };
-    if (portee?.entrepriseId) base.entrepriseId = portee.entrepriseId;
-    if (portee?.marcheIds) base.marcheId = { in: portee.marcheIds };
+  async stats(scopeWhere: Prisma.DecompteWhereInput) {
+    const scoped = (where: Prisma.DecompteWhereInput = {}): Prisma.DecompteWhereInput => ({
+      AND: [scopeWhere, where],
+    });
 
     const [total, enAttente, valides, payes, montantEngageRaw, montantPayeRaw] = await Promise.all([
-      prisma.decompte.count({ where: base }),
-      prisma.decompte.count({ where: { ...base, statut: { in: ["DEPOSE","EN_CONTROLE","EN_VALIDATION"] } } }),
-      prisma.decompte.count({ where: { ...base, statut: "VALIDE" } }),
-      prisma.decompte.count({ where: { ...base, statut: "PAYE" } }),
-      prisma.decompte.aggregate({ where: base, _sum: { netAPayer: true } }),
-      prisma.decompte.aggregate({ where: { ...base, statut: "PAYE" }, _sum: { netAPayer: true } }),
+      prisma.decompte.count({ where: scoped() }),
+      prisma.decompte.count({ where: scoped({ statut: { in: ["DEPOSE","EN_CONTROLE","EN_VALIDATION"] } }) }),
+      prisma.decompte.count({ where: scoped({ statut: "VALIDE" }) }),
+      prisma.decompte.count({ where: scoped({ statut: "PAYE" }) }),
+      prisma.decompte.aggregate({ where: scoped(), _sum: { netAPayer: true } }),
+      prisma.decompte.aggregate({ where: scoped({ statut: "PAYE" }), _sum: { netAPayer: true } }),
     ]);
     return {
       total, enAttente, valides, payes,

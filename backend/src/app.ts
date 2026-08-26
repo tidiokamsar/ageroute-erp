@@ -49,7 +49,9 @@ import { logAudit } from "./lib/audit";
 
 export function createApp() {
   const app = express();
-  app.set("trust proxy", 1);
+  // Traefik termine TLS puis nginx relaie /api vers Express : deux proxys
+  // contrôlés séparent le client de l'application.
+  app.set("trust proxy", 2);
 
   app.use(helmet({ crossOriginEmbedderPolicy: false }));
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
@@ -67,6 +69,15 @@ export function createApp() {
   }));
 
   app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: "Trop de tentatives" } }));
+
+  const publicApiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Trop de requêtes" },
+  });
+  app.use("/api/public", publicApiLimiter);
 
   app.get("/api/health", (_req, res) => res.json({ status: "ok", service: "ERP AGEROUTE", timestamp: new Date().toISOString() }));
 

@@ -11,10 +11,8 @@
  *                                     DOCUMENT (module, isolation entreprise,
  *                                     affectations) puis délivrance d'une URL
  *                                     signée HMAC-SHA-256 valable 15 minutes ;
- *   3. GET  /api/uploads/files/:f   — accessible sans en-tête Authorization
- *                                     (le frontend ouvre par navigation :
- *                                     window.open / <a> / <img>) mais token
- *                                     HMAC + expiration obligatoires.
+ *   3. GET  /api/uploads/files/:f   — session authentifiée, périmètre revérifié,
+ *                                     token HMAC et expiration obligatoires.
  *
  * Le périmètre est contrôlé à la SIGNATURE : c'est le moment où l'utilisateur
  * est authentifié. Pendant les 15 minutes de validité du lien, le fichier
@@ -26,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import multer from "multer";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../../lib/prisma";
 import { env } from "../../config/env";
 import { requireAuth } from "../../middleware/auth.middleware";
@@ -37,9 +36,8 @@ import { entrepriseIdOf } from "../../lib/scope";
 import { ALLOWED_MIME_TYPES, buildStoredFilename, isSafeStoredFilename, peutLireReference, signerLienFichier, verifierLienFichier } from "./uploads.security";
 
 export const uploadsRouter = Router();
-// Pas de requireAuth au niveau du routeur : /files/:filename doit rester
-// joignable par navigation (sans en-tête Authorization) — sa protection est
-// le token HMAC ; les deux autres routes portent requireAuth individuellement.
+// Les trois routes portent requireAuth individuellement afin que leur contrat
+// d'accès reste explicite ; le téléchargement exige aussi le lien HMAC court.
 
 const DOCUMENT_MODULES = ["attachements", "decomptes", "receptions", "entreprises", "financements"];
 mkdirSync(env.UPLOAD_DIR, { recursive: true });
@@ -66,6 +64,14 @@ const upload = multer({
   }),
   limits: { fileSize: 20 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, callback) => callback(null, ALLOWED_MIME_TYPES.has(file.mimetype)),
+});
+
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Quota de téléversement atteint. Réessayez plus tard." },
 });
 
 // Signatures magiques — le contenu doit correspondre au type déclaré
@@ -108,8 +114,8 @@ function verifyToken(filename: string, expires: number, token: string): boolean 
 }
 
 // ─── POST /api/uploads — dépôt d'une pièce jointe ─────────────────────────────
-uploadsRouter.post("/", requireAuth, requireDocumentModule, (req: Request, res: Response, next: NextFunction) => {
-  upload.single("file")(req, res, (err) => {
+uploadsRouter.post("/", requireAuth, requireDocumentModule, uploadLimiter, (req: Request, res: Response, next: NextFunction) => {
+  upload.single("file")(req, res, async (err) => {
     if (err) {
       if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
         return next(new ApiError(400, "Fichier trop volumineux — maximum 20 Mo"));
@@ -122,21 +128,26 @@ uploadsRouter.post("/", requireAuth, requireDocumentModule, (req: Request, res: 
       try { fs.unlinkSync(file.path); } catch { /* ignore */ }
       return next(new ApiError(400, "Le contenu du fichier ne correspond pas à son type déclaré"));
     }
-    // Journalisation non bloquante — ne doit jamais faire échouer le dépôt
-    logAudit({
-      userId: req.user!.id,
-      action: "CREATE",
-      entityType: "Upload",
-      entityId: file.filename,
-      after: { originalName: file.originalname, mimeType: file.mimetype, size: file.size },
-    }).catch(() => {});
-    res.status(201).json({
-      url: "/api/uploads/files/" + file.filename,
-      filename: file.filename,
-      originalName: file.originalname,
-      mimeType: file.mimetype,
-      size: file.size,
-    });
+    try {
+      await logAudit({
+        userId: req.user!.id,
+        action: "CREATE",
+        entityType: "Upload",
+        entityId: file.filename,
+        after: { originalName: file.originalname, mimeType: file.mimetype, size: file.size },
+        ipAddress: req.ip,
+      });
+      res.status(201).json({
+        url: "/api/uploads/files/" + file.filename,
+        filename: file.filename,
+        originalName: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+      });
+    } catch (error) {
+      try { fs.unlinkSync(file.path); } catch { /* ignore */ }
+      next(error);
+    }
   });
 });
 

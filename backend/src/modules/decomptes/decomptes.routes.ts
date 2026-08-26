@@ -5,13 +5,13 @@ import { decompteCreateSchema, decompteUpdateSchema } from "./decomptes.schema";
 import { decomptesService } from "./decomptes.service";
 import { ApiError } from "../../middleware/error.middleware";
 import { entrepriseIdOf } from "../../lib/scope";
-import { getMarchesAffectes } from "../../lib/affectations";
 import { chargerRegles, nombreRegles } from "../../lib/regles";
 import { calcDecompteRegles } from "./decomptes.calc.regles";
 import { construireSnapshot, rejouerCalcul, lireSnapshot } from "./decomptes.regles.audit";
 import { z } from "zod";
 import type { StatutDecompte } from "@prisma/client";
 import { decompteDocumentsRouter } from "./decomptes.documents.routes";
+import { getDecompteScopeWhere, requireBodyMarcheScope, requireDecompteScope } from "../../middleware/resourceAccess.middleware";
 
 export const decomptesRouter = Router();
 decomptesRouter.use(requireAuth);
@@ -31,54 +31,31 @@ decomptesRouter.use(requireAuth);
  * passent pas ici. Refus en 404, jamais 403 : un 403 confirmerait l'existence
  * du dossier à quelqu'un qui n'a pas à la connaître.
  */
-decomptesRouter.param("id", async (req: Request, _res: Response, next: NextFunction, id: string) => {
-  try {
-    if (!req.user) throw new ApiError(401, "Non authentifié");
-    const d = await (await import("../../lib/prisma")).prisma.decompte.findFirst({
-      where: { id, deletedAt: null },
-      select: { marcheId: true, entrepriseId: true },
-    });
-    if (!d) throw new ApiError(404, "Décompte introuvable");
-    if (req.user.role === "ENTREPRISE") {
-      if (d.entrepriseId !== (await entrepriseIdOf(req.user.id))) throw new ApiError(404, "Décompte introuvable");
-    } else {
-      const affectes = await getMarchesAffectes(req.user.id, req.user.role);
-      if (affectes !== null && !affectes.includes(d.marcheId)) throw new ApiError(404, "Décompte introuvable");
-    }
-    next();
-  } catch (err) { next(err); }
-});
+decomptesRouter.param("id", requireDecompteScope);
 
 // Pièces justificatives réelles (fichiers) — voir decomptes.documents.routes.ts
 decomptesRouter.use("/:id/documents", decompteDocumentsRouter);
 
 decomptesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Périmètres : isolation des comptes ENTREPRISE + affectations terrain
-    const entrepriseScope = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
-    const affectes = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
+    const scopeWhere = await getDecompteScopeWhere(req);
     res.json(await decomptesService.list({
       page: Number(req.query.page) || 1,
       pageSize: Number(req.query.pageSize) || 20,
       marcheId: req.query.marcheId as string,
       statut: req.query.statut as string,
-      entrepriseId: entrepriseScope ?? (req.query.entrepriseId as string),
-      marcheIds: affectes ?? undefined,
+      entrepriseId: req.query.entrepriseId as string,
+      scopeWhere,
       aTraiter: req.query.aTraiter === "1" || req.query.aTraiter === "true",
       role: req.user?.role,
     }));
   } catch (err) { next(err); }
 });
-
 decomptesRouter.get("/stats", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Mêmes règles que la liste : isolation ENTREPRISE + affectations terrain.
-    const entrepriseId = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
-    const marcheIds = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
-    res.json(await decomptesService.stats({ entrepriseId, marcheIds }));
+    res.json(await decomptesService.stats(await getDecompteScopeWhere(req)));
   } catch (err) { next(err); }
 });
-
 decomptesRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const d = await decomptesService.getById(req.params.id);
@@ -91,7 +68,7 @@ decomptesRouter.get("/:id", async (req: Request, res: Response, next: NextFuncti
 });
 
 // §5 CDC — dépôt du décompte — VÉRIFICATION CONFORMITÉ ENTREPRISE AVANT CRÉATION
-decomptesRouter.post("/", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
+decomptesRouter.post("/", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), requireBodyMarcheScope, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const body = decompteCreateSchema.parse(req.body);
@@ -340,7 +317,12 @@ decomptesRouter.put("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC", "MISSION
 decomptesRouter.delete("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { prisma } = await import("../../lib/prisma");
-    await prisma.decompteLigne.delete({ where: { id: req.params.ligneId } });
+    const ligne = await prisma.decompteLigne.findFirst({
+      where: { id: req.params.ligneId, decompteId: req.params.id },
+      select: { id: true },
+    });
+    if (!ligne) throw new ApiError(404, "Ligne introuvable");
+    await prisma.decompteLigne.delete({ where: { id: ligne.id } });
     res.status(204).send();
   } catch (err) { next(err); }
 });
@@ -590,11 +572,8 @@ decomptesRouter.get("/stats/enrichis", async (req: Request, res: Response, next:
     // C'est CET endpoint que l'écran interroge (celui de /stats ne sert que de
     // repli). Sans périmètre, un agent dont la liste ne montrait que ses deux
     // marchés lisait « Total 8 » et le montant payé de toute l'agence.
-    const entrepriseId = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
-    const marcheIds = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
-    const base: Record<string, unknown> = { deletedAt: null };
-    if (entrepriseId) base.entrepriseId = entrepriseId;
-    if (marcheIds) base.marcheId = { in: marcheIds };
+    const base = await getDecompteScopeWhere(req);
+
 
     const [total, brouillons, soumis, enControle, valides, payes, rejetes,
       montantAttenteRaw, montantPayeRaw] = await Promise.all([

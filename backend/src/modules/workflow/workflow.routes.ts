@@ -7,6 +7,8 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { Prisma } from "@prisma/client";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { requireRole } from "../../middleware/rbac.middleware";
+import { requireDecompteParamScope } from "../../middleware/resourceAccess.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
@@ -25,6 +27,7 @@ import {
 import { chargerRegles, booleenRegles } from "../../lib/regles";
 import { motifStatutMarche } from "../../lib/eligibilite-depot";
 import { getMarchesAffectes } from "../../lib/affectations";
+import { canAccessWorkflowResource } from "./workflow.access";
 
 export const workflowRouter = Router();
 workflowRouter.use(requireAuth);
@@ -55,8 +58,23 @@ const includeInstance = {
   },
 };
 
+async function assertWorkflowScope(req: Request, decompte: { marcheId: string; entrepriseId: string } | null) {
+  if (!req.user) throw new ApiError(401, "Non authentifié");
+  const effectiveRoles = await rolesEffectifs(req.user.id, req.user.role);
+  const isSupervisor = req.user.role === "ADMIN" || effectiveRoles.includes("DG");
+  if (!decompte) {
+    if (!isSupervisor) throw new ApiError(404, "Instance introuvable");
+    return;
+  }
+  const marchesAffectes = isSupervisor ? null : await getMarchesAffectes(req.user.id, req.user.role);
+  if (!canAccessWorkflowResource(
+    { role: req.user.role, entrepriseId: req.user.entrepriseId },
+    { entrepriseId: decompte.entrepriseId, marcheIds: [decompte.marcheId] },
+    marchesAffectes,
+  )) throw new ApiError(404, "Instance introuvable");
+}
 // ─── Soumettre un décompte au workflow ────────────────────────────────────────
-workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
+workflowRouter.post("/soumettre/:decompteId", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), requireDecompteParamScope("decompteId"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const decompte = await prisma.decompte.findFirst({
@@ -143,6 +161,7 @@ workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response
 workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
+    if (req.user.role === "ENTREPRISE") throw new ApiError(403, "Le traitement du workflow est réservé aux services AGEROUTE");
 
     const { decision, commentaire } = z.object({
       decision: z.enum(DECISIONS),
@@ -161,6 +180,7 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
       },
     });
     if (!instance) throw new ApiError(404, "Instance introuvable ou déjà terminée");
+    await assertWorkflowScope(req, instance.decompte);
 
     const etapeCourante = instance.definition.etapes[instance.etapeActuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante trouvée");
@@ -349,34 +369,37 @@ workflowRouter.post("/:instanceId/lever-suspension", async (req: Request, res: R
 workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const isSuperv = (await rolesEffectifs(req.user.id, req.user.role)).includes("DG") || req.user.role === "ADMIN";
+    if (req.user.role === "ENTREPRISE") return res.json([]);
 
-    // Périmètre d'affectation — même règle que les listes (marchés, décomptes,
-    // attachements). Sans ce filtre, un agent MISSION voyait les tâches de TOUS
-    // les marchés dès lors que l'étape courante requérait son rôle, y compris
-    // ceux d'une autre équipe de contrôle : les listes étaient cloisonnées, les
-    // tâches ne l'étaient pas.
+    const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
+    const isSuperv = mesRoles.includes("DG") || req.user.role === "ADMIN";
     const marchesAffectes = isSuperv ? null : await getMarchesAffectes(req.user.id, req.user.role);
+    if (marchesAffectes !== null && marchesAffectes.length === 0) return res.json([]);
 
     const instances = await prisma.workflowInstance.findMany({
       where: {
         statut: "EN_COURS" as const,
-        ...(marchesAffectes !== null ? { decompte: { marcheId: { in: marchesAffectes } } } : {}),
+        decompte: {
+          is: {
+            deletedAt: null,
+            marche: { deletedAt: null },
+            ...(marchesAffectes !== null ? { marcheId: { in: marchesAffectes } } : {}),
+          },
+        },
       },
       include: includeInstance,
       orderBy: { createdAt: "asc" },
     });
 
-    // Pour non-superviseurs : filtrer sur l'étape courante qui leur appartient
-    // (rôle propre ou rôle délégué actif)
-    const mesRoles = isSuperv ? [] : await rolesEffectifs(req.user.id, req.user.role);
-    const taches = isSuperv
-      ? instances
-      : instances.filter((inst) => {
-          const etape = (inst as unknown as { definition: { etapes: Array<{ roleRequis: string }> } }).definition.etapes[inst.etapeActuelle];
-          return etape && mesRoles.includes(etape.roleRequis);
-        });
-
+    const taches = instances.filter((inst) => {
+      const etape = (inst as unknown as { definition: { etapes: Array<{ roleRequis: string }> } }).definition.etapes[inst.etapeActuelle];
+      const resourceInScope = inst.decompte !== null && canAccessWorkflowResource(
+        { role: req.user!.role, entrepriseId: req.user!.entrepriseId },
+        { entrepriseId: inst.decompte.entrepriseId, marcheIds: [inst.decompte.marcheId] },
+        marchesAffectes,
+      );
+      return resourceInScope && (isSuperv || Boolean(etape && mesRoles.includes(etape.roleRequis)));
+    });
     // Enrichir avec metadata
     const enriched = taches.map((inst) => {
       const def = (inst as unknown as { definition: { etapes: Array<{ slaJours?: number; roleRequis: string; nom: string; ordre: number }> }; actions: Array<{ createdAt: Date }> });
@@ -417,9 +440,9 @@ workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: Next
 
       if (lignes.length > 0) {
         const decomptes = await prisma.decompte.findMany({
-          where: { id: { in: lignes.map((l) => l.entity_id) } },
+          where: { id: { in: lignes.map((l) => l.entity_id) }, deletedAt: null, marche: { deletedAt: null } },
           select: {
-            id: true, reference: true, statut: true, createdAt: true,
+            id: true, reference: true, statut: true, createdAt: true, marcheId: true, entrepriseId: true,
             marche: { select: { reference: true, intitule: true, financement: true } },
             entreprise: { select: { raisonSociale: true } },
           },
@@ -428,6 +451,11 @@ workflowRouter.get("/mes-taches", async (req: Request, res: Response, next: Next
         for (const l of lignes) {
           const d = parId.get(l.entity_id);
           if (!d) continue;
+          if (!canAccessWorkflowResource(
+            { role: req.user.role, entrepriseId: req.user.entrepriseId },
+            { entrepriseId: d.entrepriseId, marcheIds: [d.marcheId] },
+            marchesAffectes,
+          )) continue;
           const jours = Math.floor((Date.now() - new Date(l.created_at).getTime()) / 86400000);
           enriched.push({
             id: l.id,
@@ -485,6 +513,7 @@ workflowRouter.get("/instance/:id", async (req: Request, res: Response, next: Ne
       include: includeInstance,
     });
     if (!instance) throw new ApiError(404, "Instance introuvable");
+    await assertWorkflowScope(req, instance.decompte);
     res.json(instance);
   } catch (err) { next(err); }
 });
@@ -503,7 +532,7 @@ workflowRouter.get("/instance/:id", async (req: Request, res: Response, next: Ne
  * a posteriori fabriquerait un historique qui n'a pas eu lieu. On les qualifie
  * plutôt, et l'écran le dit.
  */
-workflowRouter.get("/decompte/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
+workflowRouter.get("/decompte/:decompteId", requireDecompteParamScope("decompteId"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const instance = await prisma.workflowInstance.findFirst({
       where: { decompteId: req.params.decompteId },
@@ -549,6 +578,12 @@ workflowRouter.get("/definitions", async (_req: Request, res: Response, next: Ne
 // ─── Audit trail d'une instance ───────────────────────────────────────────────
 workflowRouter.get("/:instanceId/audit", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const instance = await prisma.workflowInstance.findUnique({
+      where: { id: req.params.instanceId },
+      select: { decompte: { select: { marcheId: true, entrepriseId: true } } },
+    });
+    if (!instance) throw new ApiError(404, "Instance introuvable");
+    await assertWorkflowScope(req, instance.decompte);
     const actions = await prisma.workflowAction.findMany({
       where: { instanceId: req.params.instanceId },
       include: {

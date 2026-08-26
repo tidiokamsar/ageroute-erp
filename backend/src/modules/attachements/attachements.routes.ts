@@ -9,12 +9,20 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
+import {
+  getDecompteScopeWhere,
+  requireAttachementLigneScope,
+  requireAttachementScope,
+  requireBodyDecompteScope,
+} from "../../middleware/resourceAccess.middleware";
+import type { Prisma } from "@prisma/client";
 import { entrepriseIdOf } from "../../lib/scope";
-import { getMarchesAffectes } from "../../lib/affectations";
 import { z } from "zod";
 
 export const attachementsRouter = Router();
 attachementsRouter.use(requireAuth);
+attachementsRouter.param("id", requireAttachementScope);
+attachementsRouter.param("ligneId", requireAttachementLigneScope);
 
 // ===== HELPERS =====
 
@@ -43,21 +51,30 @@ const includeAll = {
 
 // ===== KPIs / STATS =====
 
-attachementsRouter.get("/stats", async (_req: Request, res: Response, next: NextFunction) => {
+attachementsRouter.get("/stats", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const attachementScope: Prisma.AttachementWhereInput = {
+      decompte: await getDecompteScopeWhere(req),
+    };
+    const scopedAttachements = (where: Prisma.AttachementWhereInput = {}): Prisma.AttachementWhereInput => ({
+      AND: [attachementScope, where],
+    });
+    const scopedLignes = (where: Prisma.AttachementLigneWhereInput = {}): Prisma.AttachementLigneWhereInput => ({
+      AND: [{ attachement: attachementScope }, where],
+    });
     const [total, brouillon, soumis, enControle, valides, rejetes, depassements] = await Promise.all([
-      prisma.attachement.count(),
-      prisma.attachement.count({ where: { statut: "BROUILLON" } }),
-      prisma.attachement.count({ where: { statut: "SOUMIS" } }),
-      prisma.attachement.count({ where: { statut: { in: ["EN_CONTROLE_MISSION", "EN_CONTROLE_TECHNIQUE"] } } }),
-      prisma.attachement.count({ where: { statut: "VALIDE" } }),
-      prisma.attachement.count({ where: { statut: "REJETE" } }),
-      prisma.attachementLigne.count({ where: { depassement: true } }),
+      prisma.attachement.count({ where: scopedAttachements() }),
+      prisma.attachement.count({ where: scopedAttachements({ statut: "BROUILLON" }) }),
+      prisma.attachement.count({ where: scopedAttachements({ statut: "SOUMIS" }) }),
+      prisma.attachement.count({ where: scopedAttachements({ statut: { in: ["EN_CONTROLE_MISSION", "EN_CONTROLE_TECHNIQUE"] } }) }),
+      prisma.attachement.count({ where: scopedAttachements({ statut: "VALIDE" }) }),
+      prisma.attachement.count({ where: scopedAttachements({ statut: "REJETE" }) }),
+      prisma.attachementLigne.count({ where: scopedLignes({ depassement: true }) }),
     ]);
 
     // Délai moyen de validation (soumisAt → valideAt)
     const valideesAvecDelai = await prisma.attachement.findMany({
-      where: { statut: "VALIDE", soumisAt: { not: null }, valideAt: { not: null } },
+      where: scopedAttachements({ statut: "VALIDE", soumisAt: { not: null }, valideAt: { not: null } }),
       select: { soumisAt: true, valideAt: true },
     });
     const delaiMoyen = valideesAvecDelai.length
@@ -66,8 +83,8 @@ attachementsRouter.get("/stats", async (_req: Request, res: Response, next: Next
 
     // Nombre total de photos et GPS
     const [totalMedias, totalGPS] = await Promise.all([
-      prisma.attachementMedia.count(),
-      prisma.attachementGPS.count(),
+      prisma.attachementMedia.count({ where: { attachement: attachementScope } }),
+      prisma.attachementGPS.count({ where: { attachement: attachementScope } }),
     ]);
 
     res.json({
@@ -88,35 +105,20 @@ attachementsRouter.get("/", async (req: Request, res: Response, next: NextFuncti
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
     const skip = (page - 1) * pageSize;
 
-    const where: Record<string, unknown> = {};
-    if (decompteId) where.decompteId = decompteId;
-    // `saufDecompteId` sert à lister les attachements ANTÉRIEURS d'un marché :
-    // ceux des autres décomptes, pour donner le cumul sans répéter le décompte
-    // en cours de consultation.
-    if (saufDecompteId) where.decompteId = { not: saufDecompteId };
-    if (statut) where.statut = statut;
-    if (typeAttachement) where.typeAttachement = typeAttachement;
+    const filters: Prisma.AttachementWhereInput = {};
+    if (decompteId) filters.decompteId = decompteId;
+    if (saufDecompteId) filters.decompteId = { not: saufDecompteId };
+    if (statut) filters.statut = statut as never;
+    if (typeAttachement) filters.typeAttachement = typeAttachement as never;
 
-    // Filtres portés par le décompte parent. Ils se cumulent avec le périmètre
-    // ci-dessous : on compose au lieu d'écraser, sinon un filtre métier
-    // supprimerait silencieusement la restriction d'accès.
-    const filtresDecompte: Record<string, unknown> = {};
-    if (marcheId) filtresDecompte.marcheId = marcheId;
-
-    // Périmètres : isolation ENTREPRISE + affectations terrain (via le décompte)
-    if (req.user?.role === "ENTREPRISE") {
-      Object.assign(filtresDecompte, { entrepriseId: await entrepriseIdOf(req.user.id), deletedAt: null });
-    } else if (req.user) {
-      const affectes = await getMarchesAffectes(req.user.id, req.user.role);
-      if (affectes) {
-        // Un marché demandé hors périmètre ne doit rien renvoyer.
-        Object.assign(filtresDecompte, {
-          marcheId: marcheId && !affectes.includes(marcheId) ? "__hors_perimetre__" : (marcheId ?? { in: affectes }),
-          deletedAt: null,
-        });
-      }
-    }
-    if (Object.keys(filtresDecompte).length > 0) where.decompte = filtresDecompte;
+    const decompteFilters: Prisma.DecompteWhereInput = {};
+    if (marcheId) decompteFilters.marcheId = marcheId;
+    const where: Prisma.AttachementWhereInput = {
+      AND: [
+        filters,
+        { decompte: { AND: [await getDecompteScopeWhere(req), decompteFilters] } },
+      ],
+    };
 
     const [data, total] = await Promise.all([
       prisma.attachement.findMany({
@@ -139,7 +141,6 @@ attachementsRouter.get("/", async (req: Request, res: Response, next: NextFuncti
     res.json({ data, total, page, pageSize });
   } catch (err) { next(err); }
 });
-
 // ===== GET ONE =====
 
 attachementsRouter.get("/:id", async (req: Request, res: Response, next: NextFunction) => {
@@ -178,7 +179,7 @@ const createSchema = z.object({
   observations: z.string().optional(),
 });
 
-attachementsRouter.post("/", requireRole("ADMIN", "DMC", "MISSION", "TECHNIQUE", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
+attachementsRouter.post("/", requireRole("ADMIN", "DMC", "MISSION", "TECHNIQUE", "ENTREPRISE"), requireBodyDecompteScope, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
 
