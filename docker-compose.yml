@@ -44,7 +44,18 @@ services:
         condition: service_healthy
     networks:
       - erp-net
-      - proxy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     labels:
       - "traefik.enable=false"
 
@@ -53,10 +64,16 @@ services:
     container_name: erp-frontend
     restart: unless-stopped
     depends_on:
-      - erp-backend
+      erp-backend:
+        condition: service_healthy
     networks:
       - erp-net
       - proxy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.erp.rule=Host(`gestion.ageroute.gov.gn`)"

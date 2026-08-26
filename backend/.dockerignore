@@ -14,3 +14,4 @@ uploads
 scripts/run-tests.mjs
 coverage
 .git
+*.log
