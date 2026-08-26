@@ -449,11 +449,13 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
   if (!definition) throw new ApiError(400, `Aucun circuit défini pour le financement ${marche.financement}.`);
 
   // Montant HT : somme des lignes si fournies, sinon montant déclaré.
-  // Arrondi au franc par ligne — aucune multiplication flottante.
-  const htSaisi = (lignes && lignes.length > 0)
+  // Arrondi au franc par ligne — aucune multiplication flottante. Un montant
+  // non numérique est REFUSÉ (400), jamais silencieusement converti en 0.
+  const htBrut = (lignes && lignes.length > 0)
     ? lignes.reduce((s, l) => s + Math.round(l.montantBrut), 0)
-    : Math.round(Number(req.body.montantHtGnf ?? 0)) || 0;
-  if (!Number.isFinite(htSaisi) || htSaisi < 0) throw new ApiError(400, "Montant invalide");
+    : Math.round(Number(req.body.montantHtGnf ?? 0));
+  if (!Number.isFinite(htBrut) || htBrut < 0) throw new ApiError(400, "Montant HT invalide (GNF) — nombre entier requis");
+  const htSaisi = htBrut;
 
   // Cascade fiscale par le moteur de règles officiel (A1-A7) : mêmes taux que
   // le marché, mêmes formules que la saisie interne, snapshot figé pour rejeu.

@@ -212,10 +212,16 @@ dashboardRouter.get("/dg", requireRole("ADMIN", "DG"), async (_req: Request, res
 });
 
 // §21 — Vue UGP : demandes décaissement bailleurs
-dashboardRouter.get("/ugp", requireRole("ADMIN", "UGP", "DG"), async (_req: Request, res: Response, next: NextFunction) => {
+dashboardRouter.get("/ugp", requireRole("ADMIN", "UGP", "DG"), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètre d'affectation (revue 20/08/2026) : UGP est un rôle scopé —
+    // sans ce filtre, il voyait les circuits de décaissement de toute l'agence.
+    const affectesUgp = await getMarchesAffectes(req.user!.id, req.user!.role);
     const circuitsBailleur = await prisma.circuitFinancier.findMany({
-      where: { type: "BAILLEUR", statut: "EN_COURS" },
+      where: {
+        type: "BAILLEUR", statut: "EN_COURS",
+        ...(affectesUgp ? { decompte: { marcheId: { in: affectesUgp } } } : {}),
+      },
       include: {
         etapes: { orderBy: { ordre: "asc" } },
         decompte: { include: { marche: { select: { reference: true, intitule: true, financement: true, bailleur: true } }, entreprise: { select: { raisonSociale: true } } } },

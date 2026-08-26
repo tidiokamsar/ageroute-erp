@@ -13,7 +13,7 @@ import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
-import { z } from "zod";
+import { z } from "zod";
 import { assertMarcheAutorise } from "../../lib/perimetre";
 
 export const revisionRouter = Router();
@@ -22,6 +22,9 @@ revisionRouter.use(requireAuth);
 // ── Formule d'un marché ──────────────────────────────────────────────────────
 revisionRouter.get("/marches/:marcheId/formule", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètre d'affectation (revue 20/08/2026) : l'import existait, la
+    // vérification n'était jamais faite — formule et calcul ouverts.
+    await assertMarcheAutorise(req, req.params.marcheId);
     const formule = await prisma.formuleRevision.findUnique({
       where: { marcheId: req.params.marcheId },
       include: { composantes: { orderBy: { nom: "asc" } } },
