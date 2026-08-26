@@ -132,6 +132,36 @@ async function main() {
 
   const marches = await prisma.marche.findMany({ where: { deletedAt: null } });
   const parRef = Object.fromEntries(marches.map((m) => [m.reference, m]));
+
+  // ── Garanties de bonne exécution ──────────────────────────────────────────
+  // Décision DAF du 26/08/2026 : l'exigence est INCONDITIONNELLE — le portail
+  // refuse tout dépôt sur un marché sans caution de bonne exécution valide
+  // (lib/eligibilite-depot.ts). Le jeu de démonstration doit montrer la règle
+  // en vigueur, pas la contourner : chaque marché reçoit une caution valide
+  // (sauf MCHE-2025-002, qui illustre le blocage sur caution expirée).
+  console.log("── Garanties de bonne exécution ──");
+  for (const m of marches) {
+    const existante = await prisma.garantie.findFirst({ where: { marcheId: m.id, type: "BONNE_EXECUTION" } });
+    if (existante) continue;
+    const expiree = m.reference === "MCHE-2025-002";
+    const dansUnAn = new Date(); dansUnAn.setFullYear(dansUnAn.getFullYear() + 1);
+    const expiration = expiree ? new Date("2026-07-30") : dansUnAn;
+    await prisma.garantie.create({
+      data: {
+        marcheId: m.id,
+        type: "BONNE_EXECUTION",
+        montantGnf: (m.montantActualiseGnf ?? m.montantInitialGnf ?? 0n) / 10n,
+        dateEmission: new Date("2025-06-15"),
+        dateExpiration: expiration,
+        banque: expiree ? "BCI" : "BICIGUI",
+        reference: `CAUTION-BE-${m.reference}`,
+        active: true,
+        observations: expiree ? "Expirée le 30/07/2026 — dépôt bloqué (décision DAF 26/08/2026)" : null,
+      },
+    });
+    console.log(`  ${m.reference} : caution ${expiree ? "EXPIRÉE (blocage illustré)" : "valide"}`);
+  }
+
   const users = await prisma.user.findMany({ select: { id: true, email: true, role: true, nomComplet: true } });
   const parRole = (r) => users.find((u) => u.role === r);
   const definitions = await prisma.workflowDefinition.findMany({

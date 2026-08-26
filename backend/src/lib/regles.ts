@@ -13,19 +13,30 @@
  */
 import { prisma } from "./prisma";
 
-// ─── Registre des clés et de leurs valeurs par défaut (= comportement actuel) ─
+// ─── Registre des clés et de leurs valeurs par défaut ──────────────────────
+// Historiquement, ces défauts reproduisaient EXACTEMENT le comportement du
+// code d'origine. Deux arbitrages DAF les font désormais évoluer en tant que
+// décisions officielles (chaque date ci-dessous fait foi) ; un réglage
+// explicite dans regle_gestion peut toujours sursurcharger.
 export const REGLES_DEFAUT = {
   // A1 — Assiette et taux de la retenue de garantie
-  RG_ASSIETTE_RETENUE_GARANTIE: "TTC", // actuel : retenue calculée sur le TTC
+  // Validé DAF le 26/08/2026 : la retenue se calcule sur le TTC (TVA et ARMP
+  // incluses), conformément à la pratique actuelle.
+  RG_ASSIETTE_RETENUE_GARANTIE: "TTC",
   // A2 — Formule du précompte TVA
-  RG_FORMULE_PRECOMPTE_TVA: "PRORATA_9_118", // actuel : TTC × 9/118 (= 9 % du HT)
+  // Validé DAF le 26/08/2026 : précompte = TTC × 9/118 (= 9 % du HT).
+  RG_FORMULE_PRECOMPTE_TVA: "PRORATA_9_118",
   RG_TAUX_PRECOMPTE_HT: "9",
   // A3 — Redevance ARMP
   RG_TAUX_ARMP: "0.6",
   RG_ARMP_ASSIETTE: "HT",
-  RG_ARMP_INCLUSE_TTC: "true", // actuel : ajoutée au TTC puis déduite du net
+  RG_ARMP_INCLUSE_TTC: "true", // ajoutée au TTC puis déduite du net
   // A4 — Bornage du net à payer
-  RG_NET_PLANCHER_ZERO: "false",
+  // Décision DAF du 26/08/2026 : le net à payer est BORNÉ À ZÉRO — des
+  // pénalités supérieures au montant ne produisent plus de net négatif.
+  // L'excédent de pénalités n'est ni reporté ni payé (la règle de report
+  // reste à arbitrer — RG_REPORT_PENALITES inactif ci-dessous).
+  RG_NET_PLANCHER_ZERO: "true",
   RG_REPORT_PENALITES: "false",
   // A5 — Pénalités de retard
   RG_PENALITE_MODE: "SAISIE", // actuel : montant saisi par ligne, pas de formule

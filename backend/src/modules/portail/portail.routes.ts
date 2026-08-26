@@ -196,7 +196,8 @@ portailRouter.get("/eligibilite/:marcheId", entrepriseOnly, wrap(async (req, res
     blocagesEntreprise: raisons,
     statutMarche: marche.statut,
     garanties,
-    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    // Décision DAF du 26/08/2026 : exigence inconditionnelle (voir /eligibilite).
+    exigeBonneExecution: true,
     nbAttachements,
     maintenant: new Date(),
   });
@@ -326,7 +327,8 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
     blocagesEntreprise: raisons,
     statutMarche: decompte.marche.statut,
     garanties,
-    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    // Décision DAF du 26/08/2026 : exigence inconditionnelle (voir /eligibilite).
+    exigeBonneExecution: true,
     nbAttachements,
     maintenant: new Date(),
   });
@@ -418,10 +420,11 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
     blocagesEntreprise: raisons,
     statutMarche: marche.statut,
     garanties,
-    // Toute garantie de bonne exécution déjà enregistrée sur le marché rend
-    // son maintien obligatoire : on n'autorise pas un dépôt sur un marché dont
-    // la caution a été souscrite puis laissée expirer.
-    exigeBonneExecution: garanties.some((g) => g.type === "BONNE_EXECUTION"),
+    // Décision DAF du 26/08/2026 : l'exigence est INCONDITIONNELLE — un marché
+    // sans aucune caution de bonne exécution enregistrée n'autorise AUCUN
+    // dépôt (l'ancien exigence dérivée de garanties.some(...) laissait passer
+    // les marchés où la caution n'avait jamais été saisie).
+    exigeBonneExecution: true,
     nbAttachements,
     maintenant: new Date(),
   });

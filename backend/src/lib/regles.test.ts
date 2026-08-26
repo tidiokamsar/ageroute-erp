@@ -19,12 +19,13 @@ function rec(partial: Partial<RegleRecord>): RegleRecord {
   };
 }
 
-test("invariant du programme — sans règles, les défauts reproduisent le comportement actuel", () => {
+test("invariant du programme — sans règles, les défauts s'appliquent (dont les décisions DAF du 26/08/2026)", () => {
   const r = resoudreRegles([], {}, J2);
   assert.equal(r.RG_ASSIETTE_RETENUE_GARANTIE, "TTC");
   assert.equal(r.RG_FORMULE_PRECOMPTE_TVA, "PRORATA_9_118");
   assert.equal(r.RG_TAUX_ARMP, "0.6");
-  assert.equal(r.RG_NET_PLANCHER_ZERO, "false");
+  // Décision DAF 26/08/2026 : net borné à zéro par défaut.
+  assert.equal(r.RG_NET_PLANCHER_ZERO, "true");
   assert.equal(r.RG_PENALITE_MODE, "SAISIE");
   assert.equal(r.RG_AVANCE_MODE, "UNIQUE");
   assert.equal(r.RG_ARRONDI_MODE, "FRANC_PROCHE");
@@ -92,7 +93,8 @@ test("clé inconnue — ignorée sans erreur", () => {
 test("accès typé — nombre et booléen avec repli sur le défaut", () => {
   const r = resoudreRegles([], {}, J2);
   assert.equal(nombreRegles(r, "RG_TAUX_ARMP"), 0.6);
-  assert.equal(booleenRegles(r, "RG_NET_PLANCHER_ZERO"), false);
+  // Décision DAF 26/08/2026 : plancher du net actif par défaut.
+  assert.equal(booleenRegles(r, "RG_NET_PLANCHER_ZERO"), true);
   assert.equal(booleenRegles(r, "RG_ARMP_INCLUSE_TTC"), true);
   // valeur numérique corrompue → repli sur le défaut, jamais de NaN silencieux
   const corrompu = { ...r, RG_TAUX_ARMP: "pas-un-nombre" } as typeof r;
