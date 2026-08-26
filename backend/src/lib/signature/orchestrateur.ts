@@ -106,12 +106,14 @@ async function etapeActivePour(userId: string, role: string, decompteId: string)
   return { instance, etape };
 }
 
-/** RG9 sur les deux registres, comme dans le moteur de validation. */
-async function verifierRg9(instanceId: string, decompteId: string, userId: string, marcheId: string | null) {
+/** RG9 sur les deux registres, comme dans le moteur de validation — bornés au
+ *  circuit COURANT : les validations d'un circuit arrêté (correction demandée)
+ *  ne bloquent pas la revalidation par les mêmes personnes. */
+async function verifierRg9(instance: { id: string; createdAt: Date }, decompteId: string, userId: string, marcheId: string | null) {
   const regles = await chargerRegles({ marcheId: marcheId ?? undefined });
   const [actions, validations] = await Promise.all([
-    prisma.workflowAction.findMany({ where: { instanceId }, select: { userId: true } }),
-    prisma.decompteValidation.findMany({ where: { decompteId }, select: { validePar: true } }),
+    prisma.workflowAction.findMany({ where: { instanceId: instance.id }, select: { userId: true } }),
+    prisma.decompteValidation.findMany({ where: { decompteId, createdAt: { gte: instance.createdAt } }, select: { validePar: true } }),
   ]);
   const rg9 = verifierSeparationTaches({
     utilisateurId: userId,
@@ -131,7 +133,7 @@ export async function preparerSignatureDecompte(req: Request, decompteId: string
   const signataire = await signataireNominatif(req.user.id);
   const { instance, etape } = await etapeActivePour(signataire.id, signataire.role, decompteId);
   const marcheId = (await prisma.decompte.findUnique({ where: { id: decompteId }, select: { marcheId: true } }))?.marcheId ?? null;
-  await verifierRg9(instance.id, decompteId, signataire.id, marcheId);
+  await verifierRg9(instance, decompteId, signataire.id, marcheId);
 
   // §11 — aucun processus concurrent : une demande vivante bloque les autres.
   const enCours = await prisma.sigDemandeSignature.findFirst({
@@ -147,7 +149,15 @@ export async function preparerSignatureDecompte(req: Request, decompteId: string
 
   // §6–§7 — base de la signature : le DERNIER PDF SIGNÉ de la chaîne s'il
   // existe (immutabilité + incrémental), sinon le dossier généré et GELÉ.
-  const precedent = await prisma.sigDocumentFinalise.findFirst({ where: { decompteId }, orderBy: { rang: "desc" } });
+  // Chaîne bornée au CIRCUIT COURANT : après une demande de correction, le
+  // dossier corrigé repart d'un nouveau circuit — signer par-dessus le PDF de
+  // l'ancien circuit apposerait une signature sur des montants périmés. Les
+  // signatures de l'ancien circuit restent en base (historique), le rang
+  // continue de croître (jamais réutilisé).
+  const precedent = await prisma.sigDocumentFinalise.findFirst({
+    where: { decompteId, createdAt: { gte: instance.createdAt } },
+    orderBy: { rang: "desc" },
+  });
   let cheminGele: string;
   let empreinte: string;
   let rang: number;
@@ -187,7 +197,10 @@ export async function preparerSignatureDecompte(req: Request, decompteId: string
     fs.writeFileSync(path.join(repertoire("geles"), nom), dossier.pdf);
     cheminGele = path.join(SOUS_DOSSIER, "geles", nom);
     empreinte = sha256(dossier.pdf);
-    rang = 1;
+    // Rang global au décompte, jamais réutilisé : un circuit relancé après
+    // correction continue la numérotation au-dessus de l'ancienne chaîne.
+    const dernierRang = await prisma.sigDocumentFinalise.aggregate({ where: { decompteId }, _max: { rang: true } });
+    rang = (dernierRang._max.rang ?? 0) + 1;
   }
 
   const demande = await prisma.sigDemandeSignature.create({
@@ -274,7 +287,7 @@ export async function confirmerSignature(req: Request, demandeId: string, corps:
   });
   if (etape.nom !== demande.etape) return annuler("etape_changee", "L'étape du circuit a changé depuis la consultation. Aucune signature n'a été apposée.");
   const marcheId = (await prisma.decompte.findUnique({ where: { id: demande.decompteId }, select: { marcheId: true } }))?.marcheId ?? null;
-  await verifierRg9(instance.id, demande.decompteId, signataire.id, marcheId).catch(async (e) => {
+  await verifierRg9(instance, demande.decompteId, signataire.id, marcheId).catch(async (e) => {
     await prisma.sigDemandeSignature.update({ where: { id: demande.id }, data: { statut: "ANNULEE", motifAnnulation: "rg9" } });
     throw e;
   });
@@ -418,7 +431,7 @@ export async function eligibiliteSignature(req: Request, decompteId: string) {
     const { etape, instance } = await etapeActivePour(req.user.id, req.user.role, decompteId);
     etapeNom = etape.nom;
     const marcheId = (await prisma.decompte.findUnique({ where: { id: decompteId }, select: { marcheId: true } }))?.marcheId ?? null;
-    await verifierRg9(instance.id, decompteId, req.user.id, marcheId);
+    await verifierRg9(instance, decompteId, req.user.id, marcheId);
   } catch (e) { motifs.push((e as ApiError).message); }
   return { autorise: motifs.length === 0, etape: etapeNom, etapeCourante, niveau: cfg.niveau, mode: cfg.mode, motifs };
 }

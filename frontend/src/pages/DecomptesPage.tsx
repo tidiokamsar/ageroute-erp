@@ -102,6 +102,7 @@ const STATUT_CFG: Record<string, { label: string; color: string; bg: string }> =
   VALIDE:         { label: "Validé",          color: "#16A34A", bg: "#DCFCE7" },
   PAYE:           { label: "Payé",            color: "#0F766E", bg: "#CCFBF1" },
   REJETE:         { label: "Rejeté",          color: "#DC2626", bg: "#FEE2E2" },
+  EN_CORRECTION:  { label: "En correction",   color: "#B45309", bg: "#FEF3C7" },
 };
 
 const BPMN_STEPS = [
@@ -632,10 +633,10 @@ export function DecomptesPage() {
                     <Check className="h-3.5 w-3.5" /> Signer ce document
                   </button>
                 )}
-                {canWrite(role) && det.statut === "BROUILLON" && (
+                {canWrite(role) && (det.statut === "BROUILLON" || det.statut === "EN_CORRECTION") && (
                   <button className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded-lg flex items-center gap-1.5"
                     onClick={() => soumettreWf.mutate(det.id)}>
-                    <Send className="h-3.5 w-3.5" /> Soumettre
+                    <Send className="h-3.5 w-3.5" /> {det.statut === "EN_CORRECTION" ? "Resoumettre après correction" : "Soumettre"}
                   </button>
                 )}
                 {peutValider && (
@@ -1082,9 +1083,9 @@ export function DecomptesPage() {
                   <div className="text-center py-6 text-gray-400">
                     <GitBranch className="h-8 w-8 mx-auto mb-2 opacity-30" />
                     <p className="text-sm">Aucune instance workflow active</p>
-                    {canWrite(role) && det.statut === "BROUILLON" && (
+                    {canWrite(role) && (det.statut === "BROUILLON" || det.statut === "EN_CORRECTION") && (
                       <Button className="mt-3" onClick={() => soumettreWf.mutate(det.id)}>
-                        <Send className="h-4 w-4" /> Soumettre au circuit
+                        <Send className="h-4 w-4" /> {det.statut === "EN_CORRECTION" ? "Resoumettre au circuit (corrigé)" : "Soumettre au circuit"}
                       </Button>
                     )}
                   </div>

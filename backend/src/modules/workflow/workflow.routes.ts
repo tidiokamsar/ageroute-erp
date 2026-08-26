@@ -64,7 +64,9 @@ workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response
       include: { marche: true, entreprise: true },
     });
     if (!decompte) throw new ApiError(404, "Décompte introuvable");
-    if (decompte.statut !== "BROUILLON") throw new ApiError(400, "Seul un décompte BROUILLON peut être soumis");
+    if (!["BROUILLON", "EN_CORRECTION"].includes(decompte.statut)) {
+      throw new ApiError(400, "Seul un décompte BROUILLON ou EN_CORRECTION peut être soumis");
+    }
 
     await assertEntrepriseConforme(decompte.entrepriseId);
     // `ACTIF` est un alias historique : AUCUN marché ne le porte en base (trois
@@ -97,8 +99,18 @@ workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response
     });
     if (!wfDef) throw new ApiError(400, `Aucun circuit défini pour ${decompte.marche.financement}`);
 
-    const existingInstance = await prisma.workflowInstance.findFirst({ where: { decompteId: decompte.id } });
-    if (existingInstance) throw new ApiError(409, "Une instance de workflow existe déjà pour ce décompte");
+    // Un circuit VIVANT (en cours) ou ABOUTI (approuvé) interdit la resoumission.
+    // Un circuit arrêté (REJETE — rejet ou demande de correction) ne l'interdit
+    // pas : le dossier corrigé repart au début d'un NOUVEAU circuit, l'historique
+    // de l'ancien reste intact (actions, validations, chaîne de signature).
+    const instanceVivante = await prisma.workflowInstance.findFirst({
+      where: { decompteId: decompte.id, statut: { in: ["EN_ATTENTE", "EN_COURS", "APPROUVE"] } },
+    });
+    if (instanceVivante) {
+      throw new ApiError(409, instanceVivante.statut === "APPROUVE"
+        ? "Le circuit de ce décompte est déjà approuvé — resoumission impossible"
+        : "Un circuit est déjà en cours pour ce décompte");
+    }
 
     // Soumission ATOMIQUE, et TRACÉE comme une action de circuit.
     // Constat A2 de la revue du 20/08/2026 : la soumission n'écrivait ni dans
@@ -184,7 +196,14 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
     const [actionsAnterieures, validationsAnterieures] = await Promise.all([
       prisma.workflowAction.findMany({ where: { instanceId: instance.id }, select: { userId: true } }),
       instance.decompteId
-        ? prisma.decompteValidation.findMany({ where: { decompteId: instance.decompteId }, select: { validePar: true } })
+        // Bornées au CIRCUIT COURANT (createdAt ≥ démarrage de l'instance) :
+        // après une demande de correction, le dossier repart au début d'un
+        // nouveau circuit et les MÊMES personnes revalident — les validations
+        // du circuit arrêté ne doivent pas les bloquer au titre de RG9.
+        ? prisma.decompteValidation.findMany({
+            where: { decompteId: instance.decompteId, createdAt: { gte: instance.createdAt } },
+            select: { validePar: true },
+          })
         : Promise.resolve([] as Array<{ validePar: string }>),
     ]);
     const intervenantsAnterieurs = [
@@ -225,8 +244,13 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
         reponse = { statut: "REJETE", message: `Décompte rejeté à l'étape "${etapeCourante.nom}"` };
         break;
       case "DEMANDE_CORRECTION":
-        majDecompte = { statut: "REJETE" };
-        reponse = { statut: "CORRECTION_REQUISE", message: `Correction demandée par ${etapeCourante.nom} : ${commentaire}` };
+        // Le dossier REPART D'OÙ IL VIENT : ce circuit s'arrête (l'étape ne
+        // reste plus « à traiter » chez le demandeur de la correction) et le
+        // décompte retourne au déposant en EN_CORRECTION (§10 CDC — éditable,
+        // resoumissible). La resoumission démarrera un NOUVEAU circuit complet.
+        majInstance = { statut: "REJETE" };
+        majDecompte = { statut: "EN_CORRECTION" };
+        reponse = { statut: "CORRECTION_REQUISE", message: `Correction demandée par ${etapeCourante.nom} — dossier renvoyé au déposant : ${commentaire}` };
         break;
       case "DEMANDE_COMPLEMENT":
         majDecompte = { statut: "EN_VALIDATION" };

@@ -77,7 +77,7 @@ export async function genererDossierDecompte(
     }
     await assertDecompteAutorise(req, d.id, async () => d.marcheId);
 
-    const [instance, auditLogs, attachementsDecompte, attachementsMarche, chaineSignatures] = await Promise.all([
+    const [instance, auditLogs, attachementsDecompte, attachementsMarche] = await Promise.all([
       prisma.workflowInstance.findFirst({
         where: { decompteId: d.id },
         include: {
@@ -101,8 +101,15 @@ export async function genererDossierDecompte(
         where: { decompte: { marcheId: d.marcheId }, NOT: { decompteId: d.id } },
         orderBy: { createdAt: "asc" as const },
       }),
-      prisma.sigDocumentFinalise.findMany({ where: { decompteId: d.id }, orderBy: { rang: "asc" as const } }),
     ]);
+    // Chaîne bornée au DERNIER circuit : après une demande de correction, les
+    // signatures de l'ancien circuit portent sur des montants périmés — elles
+    // restent en base (historique) mais n'apparaissent pas dans les cartouches
+    // du dossier regénéré.
+    const chaineSignatures = await prisma.sigDocumentFinalise.findMany({
+      where: { decompteId: d.id, ...(instance ? { createdAt: { gte: instance.createdAt } } : {}) },
+      orderBy: { rang: "asc" as const },
+    });
 
     const doc = creerDocumentOfficiel({
       titre: "Dossier complet de décompte",
