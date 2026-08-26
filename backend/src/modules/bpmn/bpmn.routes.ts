@@ -240,6 +240,28 @@ bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next:
     if (!instance) throw new ApiError(404, "Instance BPMN introuvable");
     if (instance.statut !== "EN_COURS") throw new ApiError(400, `Instance déjà terminée (statut: ${instance.statut})`);
 
+    // Périmètre d'affectation (revue du 20/08/2026, complément) : le rôle de
+    // l'étape autorise la FONCTION, l'affectation autorise le MARCHÉ. Pour
+    // les modules rattachables à un marché (DECOMPTE, MARCHE, ATTACHEMENT),
+    // un agent scopé non affecté n'agit pas hors de son périmètre — même
+    // règle que le moteur workflow. Refus en 404.
+    const affectesBpmn = await getMarchesAffectes(req.user.id, req.user.role);
+    if (affectesBpmn !== null) {
+      let marcheIdBpmn: string | null = null;
+      if (instance.module_type === "MARCHE") {
+        marcheIdBpmn = instance.entity_id;
+      } else if (instance.module_type === "DECOMPTE") {
+        const d = await prisma.decompte.findUnique({ where: { id: instance.entity_id }, select: { marcheId: true } });
+        marcheIdBpmn = d?.marcheId ?? null;
+      } else if (instance.module_type === "ATTACHEMENT") {
+        const a = await prisma.attachement.findUnique({ where: { id: instance.entity_id }, select: { decompte: { select: { marcheId: true } } } });
+        marcheIdBpmn = a?.decompte.marcheId ?? null;
+      }
+      if (marcheIdBpmn === null || !affectesBpmn.includes(marcheIdBpmn)) {
+        throw new ApiError(404, "Instance BPMN introuvable");
+      }
+    }
+
     const steps = await getSteps(instance.definition_id);
     const etapeCourante = steps[instance.etape_actuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante");

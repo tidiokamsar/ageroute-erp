@@ -335,6 +335,9 @@ attachementsRouter.post("/:id/valider-mission", requireRole("ADMIN", "DMC", "MIS
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id } });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    // Périmètre d'affectation (revue 20/08/2026, complément) : valider une
+    // étape de contrôle exige d'être affecté au marché du décompte parent.
+    await assertAccesAttachement(req, att.decompteId);
     if (att.statut !== "SOUMIS") throw new ApiError(400, `Statut ${att.statut} — seul SOUMIS peut être validé mission`);
 
     // RG8 — l'auteur de la validation ne peut pas être le créateur
@@ -372,6 +375,7 @@ attachementsRouter.post("/:id/valider-technique", requireRole("ADMIN", "DMC", "T
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id } });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    await assertAccesAttachement(req, att.decompteId);
     if (att.statut !== "EN_CONTROLE_TECHNIQUE") throw new ApiError(400, `Statut ${att.statut} — seul EN_CONTROLE_TECHNIQUE peut être validé technique`);
 
     const { commentaire } = z.object({ commentaire: z.string().min(5) }).parse(req.body);
@@ -411,6 +415,7 @@ attachementsRouter.post("/:id/corriger", requireRole("ADMIN", "DMC", "MISSION", 
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id } });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    await assertAccesAttachement(req, att.decompteId);
     if (!["SOUMIS", "EN_CONTROLE_MISSION", "EN_CONTROLE_TECHNIQUE"].includes(att.statut)) {
       throw new ApiError(400, `Statut ${att.statut} — correction impossible`);
     }
@@ -458,6 +463,7 @@ attachementsRouter.post("/:id/rejeter", requireRole("ADMIN", "DMC", "TECHNIQUE")
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id } });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    await assertAccesAttachement(req, att.decompteId);
 
     const { motif } = z.object({ motif: z.string().min(10) }).parse(req.body);
 
@@ -497,6 +503,9 @@ attachementsRouter.put("/:id/valider", requireRole("ADMIN", "DMC", "TECHNIQUE"),
 attachementsRouter.put("/:id/rejeter", requireRole("ADMIN", "DMC", "TECHNIQUE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
+    const attRejet = await prisma.attachement.findUnique({ where: { id: req.params.id }, select: { decompteId: true } });
+    if (!attRejet) throw new ApiError(404, "Attachement non trouvé");
+    await assertAccesAttachement(req, attRejet.decompteId);
     const { motif } = z.object({ motif: z.string().min(1) }).parse(req.body);
     const updated = await prisma.attachement.update({ where: { id: req.params.id }, data: { valide: false, motifRejet: motif } });
     await logAudit({ userId: req.user.id, action: "REJECT", entityType: "Attachement", entityId: req.params.id });

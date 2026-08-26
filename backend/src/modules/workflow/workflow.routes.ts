@@ -168,6 +168,17 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
     });
     if (!instance) throw new ApiError(404, "Instance introuvable ou déjà terminée");
 
+    // Périmètre d'affectation (revue du 20/08/2026, complément) : le rôle
+    // d'étape autorise la FONCTION, l'affectation autorise le MARCHÉ. Sans ce
+    // contrôle, un agent TECHNIQUE non affecté validait l'étape TECHNIQUE
+    // d'un marché hors de son périmètre — exactement ce que « Mes tâches »
+    // filtre et que l'action contournait. Rôles centraux non concernés
+    // (getMarchesAffectes renvoie null pour eux). Refus en 404, comme partout.
+    const affectesAction = await getMarchesAffectes(req.user.id, req.user.role);
+    if (affectesAction !== null && (!instance.decompte || !affectesAction.includes(instance.decompte.marcheId))) {
+      throw new ApiError(404, "Instance introuvable");
+    }
+
     const etapeCourante = instance.definition.etapes[instance.etapeActuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante trouvée");
 

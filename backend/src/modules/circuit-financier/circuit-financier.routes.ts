@@ -10,6 +10,7 @@ import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { rolesEffectifs } from "../../lib/delegations";
+import { getMarchesAffectes } from "../../lib/affectations";
 import { z } from "zod";
 
 export const circuitFinancierRouter = Router();
@@ -88,6 +89,16 @@ circuitFinancierRouter.post("/:circuitId/etape", async (req: Request, res: Respo
 
     const etapeCourante = circuit.etapes[circuit.etapeActuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante");
+
+    // Périmètre d'affectation (revue du 20/08/2026, complément) : le service
+    // de l'étape autorise la FONCTION, l'affectation autorise le MARCHÉ —
+    // un agent scopé non affecté ne valide pas l'étape financière d'un
+    // marché hors de son périmètre. Refus en 404.
+    const affectesEtape = await getMarchesAffectes(req.user.id, req.user.role);
+    if (affectesEtape !== null) {
+      const d = await prisma.decompte.findUnique({ where: { id: circuit.decompteId }, select: { marcheId: true } });
+      if (!d || !affectesEtape.includes(d.marcheId)) throw new ApiError(404, "Circuit introuvable");
+    }
 
     // Vérifier que l'utilisateur a le bon rôle (ou ADMIN) — délégations actives incluses
     const mesRoles = await rolesEffectifs(req.user.id, req.user.role);
