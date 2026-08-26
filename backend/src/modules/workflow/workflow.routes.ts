@@ -7,6 +7,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { Prisma } from "@prisma/client";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
@@ -56,7 +57,12 @@ const includeInstance = {
 };
 
 // ─── Soumettre un décompte au workflow ────────────────────────────────────────
-workflowRouter.post("/soumettre/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
+// Revue 20/08/2026 : aucun rôle n'était exigé — tout compte authentifié
+// (entreprise concurrente, bailleur) pouvait soumettre le BROUILLON d'autrui
+// et le faire entrer en circuit. La soumission entreprise passe par le
+// portail, qui vérifie l'appartenance ; côté circuit, seuls les rôles
+// internes créateurs de décomptes restent admis.
+workflowRouter.post("/soumettre/:decompteId", requireRole("ADMIN","DMC","MISSION"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const decompte = await prisma.decompte.findFirst({

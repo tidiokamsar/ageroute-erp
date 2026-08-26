@@ -7,6 +7,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { Prisma } from "@prisma/client";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
@@ -148,7 +149,10 @@ bpmnRouter.get("/definition/:moduleType", async (req: Request, res: Response, ne
 });
 
 // ─── POST /api/bpmn/soumettre/:moduleType/:entityId ──────────────────────────
-bpmnRouter.post("/soumettre/:moduleType/:entityId", async (req: Request, res: Response, next: NextFunction) => {
+// Revue 20/08/2026 : cette soumission générique était ouverte à tout compte
+// authentifié et modifiait le statut de l'entité visée. Réservée à
+// l'administration du système.
+bpmnRouter.post("/soumettre/:moduleType/:entityId", requireRole("ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const { moduleType, entityId } = req.params;

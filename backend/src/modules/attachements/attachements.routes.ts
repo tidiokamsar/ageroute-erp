@@ -11,12 +11,32 @@ import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { entrepriseIdOf } from "../../lib/scope";
 import { getMarchesAffectes } from "../../lib/affectations";
+import { assertMarcheAutorise, entrepriseDuCompte } from "../../lib/perimetre";
 import { z } from "zod";
 
 export const attachementsRouter = Router();
 attachementsRouter.use(requireAuth);
 
 // ===== HELPERS =====
+
+/**
+ * Cloisonnement d'une écriture d'attachement par son décompte (revue du
+ * 20/08/2026). Les LECTURES étaient isolées (GET /:id, /:id/soumettre) mais
+ * pas les écritures : une entreprise pouvait créer des lignes sur
+ * l'attachement d'un concurrent. Mêmes règles que le reste du domaine :
+ * périmètre d'affectation pour les rôles scopés, isolation ENTREPRISE pour
+ * les comptes externes, refus en 404 (doctrine lib/perimetre.ts).
+ */
+async function assertAccesAttachement(req: Request, decompteId: string): Promise<void> {
+  const decompte = await prisma.decompte.findUnique({
+    where: { id: decompteId },
+    select: { entrepriseId: true, marcheId: true },
+  });
+  if (!decompte) throw new ApiError(404, "Décompte introuvable");
+  await assertMarcheAutorise(req, decompte.marcheId);
+  const mienne = await entrepriseDuCompte(req);
+  if (mienne && decompte.entrepriseId !== mienne) throw new ApiError(404, "Décompte introuvable");
+}
 
 function genCode(seq: number): string {
   const year = new Date().getFullYear();
@@ -184,6 +204,8 @@ attachementsRouter.post("/", requireRole("ADMIN", "DMC", "MISSION", "TECHNIQUE",
 
     // RG1 — vérifier que le marché lié est actif
     const data = createSchema.parse(req.body);
+    // Appartenance du décompte parent avant toute écriture (voir helper).
+    await assertAccesAttachement(req, data.decompteId);
     const decompte = await prisma.decompte.findUnique({
       where: { id: data.decompteId },
       include: { marche: { select: { statut: true } } },
@@ -227,6 +249,7 @@ attachementsRouter.put("/:id", requireRole("ADMIN", "DMC", "MISSION", "TECHNIQUE
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id } });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    await assertAccesAttachement(req, att.decompteId);
     if (att.statut !== "BROUILLON" && att.statut !== "DEMANDE_CORRECTION") {
       throw new ApiError(400, "Seuls les attachements BROUILLON ou DEMANDE_CORRECTION peuvent être modifiés");
     }
@@ -499,6 +522,7 @@ attachementsRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "T
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const att = await prisma.attachement.findUnique({ where: { id: req.params.id } });
     if (!att) throw new ApiError(404, "Attachement non trouvé");
+    await assertAccesAttachement(req, att.decompteId);
     if (!["BROUILLON", "DEMANDE_CORRECTION"].includes(att.statut)) {
       throw new ApiError(400, "Lignes modifiables seulement à l'état BROUILLON ou DEMANDE_CORRECTION");
     }
@@ -554,6 +578,8 @@ attachementsRouter.put("/lignes/:ligneId", requireRole("ADMIN", "DMC", "MISSION"
 
     const ligne = await prisma.attachementLigne.findUnique({ where: { id: req.params.ligneId } });
     if (!ligne) throw new ApiError(404, "Ligne non trouvée");
+    const parent = await prisma.attachement.findUnique({ where: { id: ligne.attachementId }, select: { decompteId: true } });
+    if (parent) await assertAccesAttachement(req, parent.decompteId);
 
     const qCourante = data.quantiteCourante ?? Number(ligne.quantiteCourante);
     const qCumulee = Number(ligne.quantitePrecedent) + qCourante;
