@@ -38,6 +38,8 @@ export interface CalcReglesResult {
   retenueGarantie: bigint;
   avanceRecuperee: bigint;
   netAPayer: bigint;
+  /** A4 — excédent de pénalités reporté sur le décompte suivant (DAF 26/08/2026). */
+  penalitesReporteesGnf: bigint;
 }
 
 /** Arrondi entier : FRANC_PROCHE (demi vers le haut), FRANC_INF, FRANC_SUP. */
@@ -121,7 +123,20 @@ export function calcDecompteRegles(data: CalcReglesInput, regles: ReglesEffectiv
 
   // Net à payer — ARMP déduite seulement si elle a été incluse dans le TTC
   let netAPayer = ttc - precompte - retenueGarantie - (armpIncluse ? armp : 0n) - avanceRecuperee - penalites + (data.revisionPrix ?? 0n);
-  if (regles.RG_NET_PLANCHER_ZERO === "true" && netAPayer < 0n) netAPayer = 0n;
+  // A4 — plancher à zéro et REPORT de l'excédent de pénalités (décisions DAF
+  // du 26/08/2026) : la part des pénalités que le net de la période ne peut
+  // pas absorber n'est ni perdue ni payée négativement — elle est reportée
+  // sur le décompte suivant. Le report est BORNÉ au montant des pénalités :
+  // un solde négatif dû aux autres déductions (avance, retenue) n'est pas une
+  // pénalité reportable. Sans plancher actif, rien n'est ni écrêté ni reporté.
+  let penalitesReporteesGnf = 0n;
+  if (netAPayer < 0n && regles.RG_NET_PLANCHER_ZERO === "true") {
+    const excedent = -netAPayer;
+    if (regles.RG_REPORT_PENALITES === "true") {
+      penalitesReporteesGnf = excedent > penalites ? penalites : excedent;
+    }
+    netAPayer = 0n;
+  }
 
   return {
     cumulActuelHtGnf: cumulActuel,
@@ -132,5 +147,6 @@ export function calcDecompteRegles(data: CalcReglesInput, regles: ReglesEffectiv
     retenueGarantie,
     avanceRecuperee,
     netAPayer,
+    penalitesReporteesGnf,
   };
 }

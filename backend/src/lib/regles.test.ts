@@ -24,8 +24,9 @@ test("invariant du programme — sans règles, les défauts s'appliquent (dont l
   assert.equal(r.RG_ASSIETTE_RETENUE_GARANTIE, "TTC");
   assert.equal(r.RG_FORMULE_PRECOMPTE_TVA, "PRORATA_9_118");
   assert.equal(r.RG_TAUX_ARMP, "0.6");
-  // Décision DAF 26/08/2026 : net borné à zéro par défaut.
+  // Décision DAF 26/08/2026 : net borné à zéro, excédent de pénalités reporté.
   assert.equal(r.RG_NET_PLANCHER_ZERO, "true");
+  assert.equal(r.RG_REPORT_PENALITES, "true");
   assert.equal(r.RG_PENALITE_MODE, "SAISIE");
   assert.equal(r.RG_AVANCE_MODE, "UNIQUE");
   assert.equal(r.RG_ARRONDI_MODE, "FRANC_PROCHE");

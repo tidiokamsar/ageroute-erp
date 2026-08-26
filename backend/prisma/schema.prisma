@@ -797,6 +797,8 @@ model Decompte {
   retenueGarantie       BigInt         @default(0)  // Retenue = TTC × 5%
   avanceRecuperee       BigInt         @default(0)
   penalites             BigInt         @default(0)
+  // A4 — excédent de pénalités reporté sur le décompte suivant (DAF 26/08/2026)
+  penalitesReporteesGnf BigInt         @default(0)
   revisionPrix          BigInt         @default(0)
   netAPayer             BigInt         @default(0)  // TTC − PrécompteTVA − Retenue − ARMP − Avance − Pénalités
   // L1.2 — règles effectives figées au dernier calcul (rejouabilité audit)

@@ -132,6 +132,36 @@ test("A4 — plancher à zéro du net à payer (décision DAF du 26/08/2026 : ac
   assert.ok(calcDecompteRegles(entree, avecRegles({ RG_NET_PLANCHER_ZERO: "false" })).netAPayer < 0n, "plancher désactivé explicitement : net négatif");
 });
 
+test("A4 — report de l'excédent de pénalités sur le décompte suivant (décision DAF du 26/08/2026)", () => {
+  const base = { tauxTva: 18, tauxRetenueGarantie: 5, tauxAvance: 20 } as const;
+  // Cas de référence : HT 100 000 → net avant pénalités = 83 024 GNF.
+  // Pénalités 200 000 : excédent 116 976, entièrement reportable (< pénalités).
+  const r1 = calcDecompteRegles({ montantPeriodeHtGnf: 100_000n, penalites: 200_000n, ...base }, DEFAUTS);
+  assert.equal(r1.netAPayer, 0n);
+  assert.equal(r1.penalitesReporteesGnf, 116_976n, "excédent intégralement reporté");
+  // Pénalités 90 000 : seule la part non absorbable (6 976) est reportée.
+  const r2 = calcDecompteRegles({ montantPeriodeHtGnf: 100_000n, penalites: 90_000n, ...base }, DEFAUTS);
+  assert.equal(r2.netAPayer, 0n);
+  assert.equal(r2.penalitesReporteesGnf, 6_976n, "seule la part non absorbable est reportée");
+  // Pénalités absorbables : rien à reporter.
+  const r3 = calcDecompteRegles({ montantPeriodeHtGnf: 100_000n, penalites: 10_000n, ...base }, DEFAUTS);
+  assert.ok(r3.netAPayer > 0n);
+  assert.equal(r3.penalitesReporteesGnf, 0n, "rien à reporter quand le net reste positif");
+  // Borne : le report ne dépasse jamais le montant des pénalités — un solde
+  // négatif dû aux autres déductions (avance 200 %) n'est pas reportable.
+  const r4 = calcDecompteRegles({ montantPeriodeHtGnf: 100_000n, penalites: 50_000n, tauxTva: 18, tauxRetenueGarantie: 5, tauxAvance: 200 }, DEFAUTS);
+  assert.equal(r4.netAPayer, 0n);
+  assert.equal(r4.penalitesReporteesGnf, 50_000n, "report borné au montant des pénalités");
+  // Report désactivé explicitement : l'excédent est écrêté puis perdu.
+  const r5 = calcDecompteRegles({ montantPeriodeHtGnf: 100_000n, penalites: 200_000n, ...base }, avecRegles({ RG_REPORT_PENALITES: "false" }));
+  assert.equal(r5.netAPayer, 0n);
+  assert.equal(r5.penalitesReporteesGnf, 0n, "report inactif : excédent non reporté");
+  // Sans plancher : net négatif, rien n'est reporté (règle inchangée).
+  const r6 = calcDecompteRegles({ montantPeriodeHtGnf: 100_000n, penalites: 200_000n, ...base }, avecRegles({ RG_NET_PLANCHER_ZERO: "false" }));
+  assert.ok(r6.netAPayer < 0n);
+  assert.equal(r6.penalitesReporteesGnf, 0n);
+});
+
 test("A5 — mode FORMULE : pénalités au 1/3000e plafonnées à 10 % de l'assiette", () => {
   const base = { montantPeriodeHtGnf: 3_000_000n, tauxTva: 18, tauxRetenueGarantie: 5, tauxAvance: 20 };
   const reglesFormule = avecRegles({ RG_PENALITE_MODE: "FORMULE", RG_PENALITE_PLAFOND_PCT: "10" });
@@ -180,6 +210,6 @@ test("nommage — le résultat porte EXACTEMENT les colonnes du modèle Decompte
   const r = calcDecompteRegles({ montantPeriodeHtGnf: 1_000_000n }, DEFAUTS);
   assert.deepEqual(Object.keys(r).sort(), [
     "avanceRecuperee", "cumulActuelHtGnf", "montantArmpGnf", "montantTtcGnf",
-    "netAPayer", "precompteTvaGnf", "retenueGarantie", "tva",
+    "netAPayer", "penalitesReporteesGnf", "precompteTvaGnf", "retenueGarantie", "tva",
   ]);
 });

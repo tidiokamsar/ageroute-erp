@@ -150,14 +150,18 @@ test("A4 — le plancher ne modifie pas un net déjà positif", () => {
   assert.equal(avecPlancher.netAPayer, sans.netAPayer);
 });
 
-test("A4 — LACUNE CONNUE : RG_REPORT_PENALITES est déclarée mais sans effet", () => {
-  // La règle existe dans REGLES_DEFAUT et dans le catalogue de saisie (L0.2),
-  // mais aucun code ne la consomme : activer le report ne change rien. Ce test
-  // fige le comportement réel pour qu'il soit visible, et échouera le jour où
-  // le report sera implémenté — ce qui obligera à le documenter.
+test("A4 — le report de l'excédent est EFFECTIF (décision DAF du 26/08/2026)", () => {
+  // Ce test figeait autrefois une LACUNE : la règle était déclarée sans
+  // effet. La décision DAF du 26/08/2026 l'implémente : le reliquat non
+  // absorbé est reporté sur le décompte suivant, borné aux pénalités.
   const sans = calc(1_000_000n, avec({ RG_REPORT_PENALITES: "false", RG_NET_PLANCHER_ZERO: "true" }), { penalites: 5_000_000n });
   const avecReport = calc(1_000_000n, avec({ RG_REPORT_PENALITES: "true", RG_NET_PLANCHER_ZERO: "true" }), { penalites: 5_000_000n });
-  assert.deepEqual(avecReport, sans, "aucun reliquat n'est reporté aujourd'hui");
+  assert.equal(sans.penalitesReporteesGnf, 0n, "report inactif : aucun reliquat");
+  // Net avant pénalités = 830 242 GNF ; pénalités 5 000 000 → excédent
+  // 4 169 758 (inférieur aux pénalités : intégralement reporté, sans borne).
+  assert.equal(avecReport.penalitesReporteesGnf, 4_169_758n, "l'excédent non absorbé est reporté");
+  assert.equal(avecReport.netAPayer, 0n);
+  assert.equal(avecReport.netAPayer, sans.netAPayer);
 });
 
 // ═══ A5 — pénalités de retard ═══════════════════════════════════════════════

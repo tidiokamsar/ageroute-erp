@@ -459,9 +459,17 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
 
   // Cascade fiscale par le moteur de règles officiel (A1-A7) : mêmes taux que
   // le marché, mêmes formules que la saisie interne, snapshot figé pour rejeu.
+  // A4 — report de l'excédent de pénalités (décision DAF du 26/08/2026) : le
+  // dépôt absorbe le report en attente du décompte précédent du marché.
+  const reportPrecedent = await prisma.decompte.findFirst({
+    where: { marcheId, deletedAt: null, penalitesReporteesGnf: { gt: 0n } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, penalitesReporteesGnf: true },
+  });
   const regles = await chargerRegles({ marcheId, bailleur: marche.financement, typeMarche: marche.type });
   const calc = calcDecompteRegles({
     montantPeriodeHtGnf: BigInt(htSaisi),
+    penalites: reportPrecedent?.penalitesReporteesGnf ?? 0n,
     tauxTva: marche.tauxTva ?? undefined,
     tauxRetenueGarantie: marche.tauxRetenueGarantie ?? undefined,
     tauxAvance: marche.tauxAvance ?? undefined,
@@ -485,9 +493,14 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
     const instance = await tx.workflowInstance.create({
       data: { definitionId: definition.id, decompteId: d.id, etapeActuelle: 0, statut: "EN_COURS" },
     });
+    // Consommer le report absorbé : la créance reportable passe au dépôt
+    // courant (calc.penalitesReporteesGnf).
+    if (reportPrecedent) {
+      await tx.decompte.update({ where: { id: reportPrecedent.id }, data: { penalitesReporteesGnf: 0n } });
+    }
     await logAudit({
       userId: req.user!.id, action: "CREATE", entityType: "Decompte", entityId: d.id,
-      after: { via: "portail", reference, statut: "DEPOSE", origine: "portail-entreprise", wfInstanceId: instance.id }, tx,
+      after: { via: "portail", reference, statut: "DEPOSE", origine: "portail-entreprise", wfInstanceId: instance.id, reportPenalitesAbsorbeGnf: (reportPrecedent?.penalitesReporteesGnf ?? 0n).toString() }, tx,
     });
     return { d, instance };
   });

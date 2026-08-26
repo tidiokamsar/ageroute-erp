@@ -255,16 +255,37 @@ export const decomptesService = {
       rapportAvancement: false, photosChantier: false, pvContradictoire: false,
     };
 
+    // A4 — report de l'excédent de pénalités (décision DAF du 26/08/2026) :
+    // ce décompte absorbe d'abord le report en attente du décompte précédent
+    // du marché (une seule créance reportable par marché) ; son propre
+    // excédent, s'il en reste, devient le nouveau report.
+    const reportPrecedent = await prisma.decompte.findFirst({
+      where: { marcheId: marche.id, deletedAt: null, penalitesReporteesGnf: { gt: 0n } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, penalitesReporteesGnf: true },
+    });
+
     const { result: calculated, snapshot } = await calculerDecompte({
       ...(data as object),
+      // Pénalités saisies + report entrant : la colonne `penalites` porte le
+      // total imputé, pour que le rejeu d'audit concorde avec le calcul.
+      penalites: ((data.penalites as bigint | undefined) ?? 0n) + (reportPrecedent?.penalitesReporteesGnf ?? 0n),
       tauxTva: marche.tauxTva,
       tauxRetenueGarantie: marche.tauxRetenueGarantie,
       tauxAvance: marche.tauxAvance,
     } as CalcReglesInput, marche);
 
-    const created = await prisma.decompte.create({
-      data: { ...(data as object), reference, numeroDossier, dateDepot, piecesObligatoires, ...calculated, reglesSnapshot: snapshot as never } as never,
-      include,
+    const created = await prisma.$transaction(async (tx) => {
+      const c = await tx.decompte.create({
+        data: { ...(data as object), reference, numeroDossier, dateDepot, piecesObligatoires, ...calculated, reglesSnapshot: snapshot as never } as never,
+        include,
+      });
+      // Consommer le report absorbé : la créance reportable passe au
+      // décompte courant (calculated.penalitesReporteesGnf).
+      if (reportPrecedent) {
+        await tx.decompte.update({ where: { id: reportPrecedent.id }, data: { penalitesReporteesGnf: 0n } });
+      }
+      return c;
     });
 
     // §10 CDC — contrôles auto

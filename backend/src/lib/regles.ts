@@ -34,10 +34,11 @@ export const REGLES_DEFAUT = {
   // A4 — Bornage du net à payer
   // Décision DAF du 26/08/2026 : le net à payer est BORNÉ À ZÉRO — des
   // pénalités supérieures au montant ne produisent plus de net négatif.
-  // L'excédent de pénalités n'est ni reporté ni payé (la règle de report
-  // reste à arbitrer — RG_REPORT_PENALITES inactif ci-dessous).
   RG_NET_PLANCHER_ZERO: "true",
-  RG_REPORT_PENALITES: "false",
+  // Décision DAF du 26/08/2026 : l'excédent de pénalités est REPORTÉ sur le
+  // décompte suivant du même marché (borné au montant des pénalités saisies ;
+  // consommé au calcul du décompte suivant).
+  RG_REPORT_PENALITES: "true",
   // A5 — Pénalités de retard
   RG_PENALITE_MODE: "SAISIE", // actuel : montant saisi par ligne, pas de formule
   RG_PENALITE_ASSIETTE: "HT", // assiette du calcul au mode FORMULE (HT ou TTC)
