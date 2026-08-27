@@ -16,7 +16,15 @@ export const LIBELLES_STATUTS: Record<string, string> = {
   VISA_DAF: "Visa DAF",
   VISA_DG: "Visa DG",
   VALIDE_DG: "Validé DG",
-  EN_CIRCUIT_FINANCIER: "En circuit financier",
+  // Ce statut couvre DEUX phases, et son ancien libellé n'en nommait qu'une :
+  // le dossier arrivé sur une étape à rôle financier du circuit de VALIDATION
+  // (bailleur, budget, trésor, FER, BCRG — voir statutPourRoleEtape), puis le
+  // circuit de PAIEMENT proprement dit, une fois la validation achevée.
+  // « En circuit financier » laissait croire à la seconde alors que le dossier
+  // était encore dans la première : l'écran Financier restait vide pendant que
+  // l'écran Décomptes annonçait le contraire, et l'agent du Budget cherchait
+  // son dossier au mauvais endroit.
+  EN_CIRCUIT_FINANCIER: "Validation financière",
   ORDONNANCE: "Ordonnancé",
   VALIDE: "Validé",
   REJETE: "Rejeté",

@@ -57,7 +57,7 @@ const DECOMPTE_STATUT_CFG: Record<string, {label:string;color:string;bg:string}>
   VISA_DAF:            { label:"Visa DAF",         color:"#D97706", bg:"#FEF3C7" },
   VISA_DG:             { label:"Visa DG",          color:"#B45309", bg:"#FEF9C3" },
   VALIDE_DG:           { label:"Validé DG",        color:"#16A34A", bg:"#DCFCE7" },
-  EN_CIRCUIT_FINANCIER:{ label:"Circuit financier",color:"#0369A1", bg:"#BAE6FD" },
+  EN_CIRCUIT_FINANCIER:{ label:"Validation financière",color:"#0369A1", bg:"#BAE6FD" },
   ORDONNANCE:          { label:"Ordonnancé",       color:"#0369A1", bg:"#BAE6FD" },
   PAYE:                { label:"Payé",             color:"#15803D", bg:"#DCFCE7" },
   REJETE:              { label:"Rejeté",           color:"#DC2626", bg:"#FEE2E2" },

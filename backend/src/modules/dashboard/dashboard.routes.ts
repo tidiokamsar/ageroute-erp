@@ -278,7 +278,7 @@ dashboardRouter.get("/statut/:decompteId", async (req: Request, res: Response, n
       EN_CORRECTION:"En correction — voir observations",
       EN_VALIDATION:"En validation (DMC / DAF / DG)",
       VALIDE_DG:"Validé Direction Générale",
-      EN_CIRCUIT_FINANCIER:"En circuit de paiement",
+      EN_CIRCUIT_FINANCIER:"Validation financière",
       ORDONNANCE:"Ordonnancé",
       VALIDE:"Validé",
       REJETE:"Rejeté",

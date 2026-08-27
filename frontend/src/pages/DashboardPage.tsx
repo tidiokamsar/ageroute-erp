@@ -383,7 +383,7 @@ function DashboardGeneral({ data }: {
   const statuts = Object.entries(d.byStatut ?? {}).map(([statut, count]) => ({ statut, count }));
   const STATUT_LABELS: Record<string, string> = {
     BROUILLON: "Brouillon", DEPOSE: "Déposé", EN_CONTROLE: "En contrôle", EN_CORRECTION: "Correction",
-    EN_VALIDATION: "Validation", VALIDE_DG: "Validé DG", EN_CIRCUIT_FINANCIER: "Circuit paiement",
+    EN_VALIDATION: "Validation", VALIDE_DG: "Validé DG", EN_CIRCUIT_FINANCIER: "Validation financière",
     ORDONNANCE: "Ordonnancé", VALIDE: "Validé", REJETE: "Rejeté", PAYE: "Payé",
   };
   return (
@@ -423,7 +423,12 @@ function DashboardGeneral({ data }: {
             {([
               ["Taux de rejet",      `${data.workflow.tauxRejet}%`,      data.workflow.tauxRejet > 20 ? "text-red-600" : "text-green-700"],
               ["Taux de correction", `${data.workflow.tauxCorrection}%`, data.workflow.tauxCorrection > 30 ? "text-amber-600" : "text-green-700"],
-              ["Circuits financiers en cours", data.workflow.circuitsFinanciersEnCours, "text-blue-700"],
+              // Compte les objets CircuitFinancier ouverts — donc les dossiers
+              // dont la VALIDATION est achevée et qui sont passés au paiement.
+              // Un dossier au statut « Validation financière » n'y figure pas
+              // encore : il est à une étape à rôle financier du circuit de
+              // validation. Les deux chiffres ne sont pas censés coïncider.
+              ["Circuits de paiement ouverts", data.workflow.circuitsFinanciersEnCours, "text-blue-700"],
             ] as [string, string | number, string][]).map(([k, v, c]) => (
               <div key={k} className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">{k}</span>

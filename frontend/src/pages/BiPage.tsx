@@ -11,7 +11,7 @@ import { Button } from "../components/ui/Button";
 
 const STATUT_LABELS: Record<string,string> = {
   BROUILLON:"Brouillon", DEPOSE:"Déposé", EN_CONTROLE:"En contrôle", EN_CORRECTION:"En correction",
-  EN_VALIDATION:"En validation", VALIDE_DG:"Validé DG", EN_CIRCUIT_FINANCIER:"Circuit financier",
+  EN_VALIDATION:"En validation", VALIDE_DG:"Validé DG", EN_CIRCUIT_FINANCIER:"Validation financière",
   ORDONNANCE:"Ordonnancé", VALIDE:"Validé", REJETE:"Rejeté", PAYE:"Payé",
 };
 
@@ -68,7 +68,7 @@ export function BiPage() {
   const kpis = [
     { label: "Total décomptes",         value: general?.decomptes?.total ?? "—",                   sub: "depuis le démarrage" },
     { label: "En attente traitement",   value: general?.decomptes?.enAttente ?? "—",               sub: "déposés / contrôle" },
-    { label: "Circuits financiers",     value: general?.workflow?.circuitsFinanciersEnCours ?? "—", sub: "en cours de paiement" },
+    { label: "Circuits de paiement",    value: general?.workflow?.circuitsFinanciersEnCours ?? "—", sub: "validation achevée" },
     { label: "Montant engagé",          value: fmtGnf(general?.decomptes?.montantEngageGnf),        sub: "net total" },
     { label: "Montant décaissé",        value: fmtGnf(general?.decomptes?.montantPayeGnf),          sub: "payés" },
     { label: "Taux de rejet",           value: `${general?.workflow?.tauxRejet ?? 0}%`,             sub: "30 derniers jours" },
