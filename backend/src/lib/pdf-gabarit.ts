@@ -60,6 +60,42 @@ export interface OptionsGabarit {
    * Voir `paginer()` dans pdf-dossier.ts.
    */
   bufferPages?: boolean;
+  /**
+   * Statut du dossier imprimé. Il commande la mention portée par le document.
+   *
+   * Sans lui, TOUT décompte s'imprimait sous l'apparence d'un acte officiel —
+   * en-tête, logo, net à payer en évidence, cinq cartouches prêts à signer et
+   * la mention « Document officiel » en pied — y compris un brouillon ou un
+   * dossier rejeté. Rien ne permettait à une banque, un bailleur ou une
+   * entreprise de savoir que le dossier n'avait pas franchi le circuit.
+   */
+  statut?: string;
+}
+
+/**
+ * Statuts pour lesquels le dossier a réellement franchi son circuit et où le
+ * document engage l'Agence. En deçà, le document est PROVISOIRE et le dit.
+ *
+ * La liste couvre les trois documents officiels émis par ce module — décompte,
+ * attachement, PV de réception. Aucune de ces valeurs n'est ambiguë d'un
+ * domaine à l'autre ; en ajouter une, c'est déclarer qu'un document de plus
+ * peut sortir sous la mention « Document officiel ».
+ *
+ * VISA_DAF et VISA_DG n'en font PAS partie : `statutPourRoleEtape()` porte le
+ * statut du rôle DE L'ÉTAPE COURANTE — le dossier est encore À viser, pas visé.
+ */
+const STATUTS_DEFINITIFS = [
+  // Décompte
+  "VALIDE_DG", "VALIDE", "EN_CIRCUIT_FINANCIER", "ORDONNANCE", "PAYE",
+  // Réception (statut libre, cf. modules/receptions)
+  "REALISE", "AVEC_RESERVES", "CLOTURE",
+];
+
+/** Statuts de refus : le document le porte en clair, il ne se contente pas d'être « provisoire ». */
+const STATUTS_REJET = ["REJETE", "REFUSE"];
+
+export function documentEstDefinitif(statut?: string): boolean {
+  return !!statut && STATUTS_DEFINITIFS.includes(statut);
 }
 
 export interface Signataire {
@@ -84,6 +120,24 @@ export function creerDocumentOfficiel(opts: OptionsGabarit): PDFKit.PDFDocument 
       Creator: "ERP AGEROUTE",
     },
   });
+
+  // ── Filigrane des documents non définitifs ──
+  // Posé AVANT le contenu pour rester en arrière-plan. Un dossier rejeté le
+  // dit ; un dossier encore en circuit porte « PROVISOIRE » et son statut.
+  if (opts.statut && !documentEstDefinitif(opts.statut)) {
+    const l = opts.landscape ? 842 : 595;
+    const h = opts.landscape ? 595 : 842;
+    const texte = STATUTS_REJET.includes(opts.statut) ? "REJETÉ" : "PROVISOIRE";
+    doc.save();
+    doc.rotate(-45, { origin: [l / 2, h / 2] });
+    doc.fontSize(64).font("Helvetica-Bold").fillColor("#c0392b").opacity(0.13)
+      .text(texte, 0, h / 2 - 40, { width: l, align: "center", lineBreak: false });
+    doc.fontSize(13).opacity(0.16)
+      .text(`document non validé — statut ${opts.statut.replace(/_/g, " ")}`, 0, h / 2 + 40,
+        { width: l, align: "center", lineBreak: false });
+    doc.restore();
+    doc.opacity(1).fillColor("#000");
+  }
 
   // ── Bande supérieure bleue ──
   const largeur = opts.landscape ? 842 : 595;
@@ -140,7 +194,7 @@ export function creerDocumentOfficiel(opts: OptionsGabarit): PDFKit.PDFDocument 
 /**
  * Ajoute le pied de page officiel avec espaces de signature.
  */
-export function ajouterPiedDePage(doc: PDFKit.PDFDocument, signataires: Signataire[]): void {
+export function ajouterPiedDePage(doc: PDFKit.PDFDocument, signataires: Signataire[], statut?: string): void {
   const largeur = doc.page.width;
   const hauteur = doc.page.height;
   const nb = signataires.length;
@@ -165,9 +219,16 @@ export function ajouterPiedDePage(doc: PDFKit.PDFDocument, signataires: Signatai
     doc.fontSize(5).text("Nom et signature", x - espacement / 2 + 10, hauteur - 35, { width: espacement - 20, align: "center", lineBreak: false });
   });
 
-  // Horodatage
-  doc.fontSize(5).fillColor("#999").font("Helvetica")
-    .text(`Généré le ${new Date().toLocaleString("fr-FR")} par ERP AGEROUTE — Document officiel`, 40, hauteur - 15, { width: largeur - 80, align: "center", lineBreak: false });
+  // Horodatage. La mention « Document officiel » était portée SANS CONDITION :
+  // un brouillon l'affichait comme un dossier validé. Elle n'est désormais
+  // écrite que si le dossier a réellement franchi le circuit ; sinon le
+  // document déclare lui-même qu'il n'engage rien.
+  const definitif = statut === undefined || documentEstDefinitif(statut);
+  const mention = definitif
+    ? "Document officiel"
+    : `DOCUMENT PROVISOIRE — dossier au statut « ${statut!.replace(/_/g, " ")} », non validé, sans valeur d'engagement`;
+  doc.fontSize(5).fillColor(definitif ? "#999" : "#c0392b").font(definitif ? "Helvetica" : "Helvetica-Bold")
+    .text(`Généré le ${new Date().toLocaleString("fr-FR")} par ERP AGEROUTE — ${mention}`, 40, hauteur - 15, { width: largeur - 80, align: "center", lineBreak: false });
 
   doc.page.margins.bottom = margeBasse;
 }

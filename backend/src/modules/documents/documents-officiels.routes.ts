@@ -49,6 +49,7 @@ documentsOfficielsRouter.get("/decompte/:id/pdf", async (req: Request, res: Resp
       titre: "Décompte Officiel",
       sousTitre: `${d.type.replace(/_/g, " ")} — ${d.marche.reference}`,
       reference: d.reference,
+      statut: d.statut,
     });
 
     // ── Identification ──
@@ -120,7 +121,7 @@ documentsOfficielsRouter.get("/decompte/:id/pdf", async (req: Request, res: Resp
       { role: "DMC" },
       { role: "DAF" },
       { role: "DG" },
-    ]);
+    ], d.statut);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="decompte-${d.reference}.pdf"`);
@@ -160,6 +161,7 @@ documentsOfficielsRouter.get("/attachement/:id/pdf", async (req: Request, res: R
       titre: "Attachement contradictoire",
       sousTitre: `${a.typeAttachement} — ${a.decompte?.marche.reference ?? ""}`,
       reference: a.code ?? a.id.slice(0, 8),
+      statut: a.statut,
     });
 
     let y = ajouterEncadreSynthese(doc, [
@@ -248,7 +250,7 @@ documentsOfficielsRouter.get("/attachement/:id/pdf", async (req: Request, res: R
       { role: "Représentant Entreprise" },
       { role: "Mission de contrôle" },
       { role: "Direction Technique" },
-    ]);
+    ], a.statut);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="attachement-${a.code ?? a.id.slice(0, 8)}.pdf"`);
@@ -286,6 +288,7 @@ documentsOfficielsRouter.get("/reception/:id/pdf", async (req: Request, res: Res
       titre: "Procès-Verbal de Réception",
       sousTitre: TYPE_LABEL[r.type] ?? r.type,
       reference: r.pvNumero ?? r.id.slice(0, 8),
+      statut: r.statut,
     });
 
     let y = ajouterEncadreSynthese(doc, [
@@ -334,7 +337,7 @@ documentsOfficielsRouter.get("/reception/:id/pdf", async (req: Request, res: Res
       { role: "Direction Technique" },
       { role: "Mission de contrôle" },
       { role: "DG (si définitive)" },
-    ]);
+    ], r.statut);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="pv-reception-${r.pvNumero ?? r.id.slice(0, 8)}.pdf"`);
