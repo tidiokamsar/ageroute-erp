@@ -1,4 +1,6 @@
 import { prisma } from "../../lib/prisma";
+import { verifierPlafondAvenant } from "../../lib/avenants.regles";
+import { chargerRegles } from "../../lib/regles";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 
@@ -123,17 +125,40 @@ export const marchesService = {
     await logAudit({ userId, action: "DELETE", entityType: "Marche", entityId: id, before });
   },
 
-  async addAvenant(marcheId: string, data: { objet: string; montantSupplementaireGnf?: number; prolongationJours?: number; dateSignature?: Date; observations?: string }, userId: string) {
+  async addAvenant(marcheId: string, data: { objet: string; montantSupplementaireGnf?: number; prolongationJours?: number; dateSignature?: Date; observations?: string; approbationArmpRef?: string }, userId: string) {
     const marche = await prisma.marche.findFirst({ where: { id: marcheId, deletedAt: null }, include: { avenants: true } });
     if (!marche) throw new ApiError(404, "Marché introuvable");
+
+    // ── Plafond réglementaire (revue du 27/08/2026) ───────────────────────────
+    // La règle RG_PLAFOND_AVENANTS_PCT existait et était testée, mais RIEN ne
+    // la consultait ici : un avenant portant le marché à +30 % était créé sans
+    // un mot. Le contrôle est désormais celui d'une fonction pure, la même que
+    // celle que les tests exercent.
+    const montantSupp = BigInt(data.montantSupplementaireGnf ?? 0);
+    const verdict = verifierPlafondAvenant({
+      montantInitialGnf: marche.montantInitialGnf,
+      avenantsExistants: marche.avenants.map((a) => ({ montantSupplementaireGnf: a.montantSupplementaireGnf, statut: a.statut })),
+      montantSupplementaireGnf: montantSupp,
+      approbationArmpRef: data.approbationArmpRef,
+      regles: await chargerRegles({ marcheId, bailleur: marche.bailleur ?? undefined, typeMarche: marche.type ?? undefined }),
+    });
+    if (!verdict.autorise) throw new ApiError(400, verdict.motif ?? "Avenant refusé");
+
     const numero = marche.avenants.length + 1;
     const avenant = await prisma.avenant.create({
-      data: { marcheId, numero, ...data, montantSupplementaireGnf: BigInt(data.montantSupplementaireGnf ?? 0) },
+      data: { marcheId, numero, ...data, montantSupplementaireGnf: montantSupp },
     });
-    // Recalcule montant actualisé
-    const totalAvenants = [...marche.avenants, avenant].reduce((s, a) => s + Number(a.montantSupplementaireGnf), 0);
-    await prisma.marche.update({ where: { id: marcheId }, data: { montantActualiseGnf: BigInt(Number(marche.montantInitialGnf) + totalAvenants) } });
-    await logAudit({ userId, action: "UPDATE", entityType: "Avenant", entityId: avenant.id, after: avenant });
+    // Recalcul du montant actualisé, en arithmétique ENTIÈRE : la version
+    // précédente passait par Number() — au-delà de 9 007 milliards de francs,
+    // le cumul aurait été arrondi sur le montant d'un marché.
+    const totalAvenants = [...marche.avenants, avenant]
+      .filter((a) => a.statut !== "ANNULE")
+      .reduce((s, a) => s + a.montantSupplementaireGnf, 0n);
+    await prisma.marche.update({ where: { id: marcheId }, data: { montantActualiseGnf: marche.montantInitialGnf + totalAvenants } });
+    await logAudit({
+      userId, action: "UPDATE", entityType: "Avenant", entityId: avenant.id,
+      after: { ...avenant, plafondGnf: verdict.plafondGnf.toString(), cumulApresGnf: verdict.cumulApresGnf.toString(), derogation: verdict.code ?? null },
+    });
     return avenant;
   },
 

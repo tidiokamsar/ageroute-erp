@@ -377,6 +377,10 @@ marchesRouter.post("/:id/avenants", requireRole("ADMIN","DMC"), async (req: Requ
       impactPerimetre:          z.string().optional(),
       montantSupplementaireGnf: z.number().optional(),
       prolongationJours:        z.number().int().optional(),
+      // Seule voie de dépassement du plafond réglementaire : la référence de
+      // l'approbation ARMP. Le champ existait au modèle avec le commentaire
+      // « obligatoire au-delà du seuil » — il n'était simplement jamais reçu.
+      approbationArmpRef:       z.string().min(1).optional(),
       dateSignature:            z.coerce.date().optional(),
       observations:             z.string().optional(),
     }).parse(req.body);
