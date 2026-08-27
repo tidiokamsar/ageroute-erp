@@ -53,6 +53,72 @@ marchesRouter.get("/stats", async (_req: Request, res: Response, next: NextFunct
   try { res.json(await marchesService.stats()); } catch (err) { next(err); }
 });
 
+// ─── F-MA1 (fin) — Échéancier contractuel et alertes de dérive calendaire ────
+/**
+ * Le cycle de vie du marché avait statuts, OS et réceptions, mais AUCUNE vue
+ * de la DÉRIVE CALENDAIRE : délai contractuel (delaiMois/delaiJours ou
+ * dateFinPrevue), prolongations cumulées des avenants, échéance révisée,
+ * retard au jour près. C'est la vue que la DMC réclame pour piloter les
+ * prorogations AVANT l'échéance, pas après.
+ *
+ * périmètre : rôles scopés → marchés affectés ; ENTREPRISE → ses marchés.
+ */
+marchesRouter.get("/echeancier", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Non authentifié");
+    const affectes = await getMarchesAffectes(req.user.id, req.user.role);
+    const mienne = await entrepriseDuCompte(req);
+
+    const marches = await prisma.marche.findMany({
+      where: {
+        deletedAt: null,
+        ...(affectes ? { id: { in: affectes } } : {}),
+        ...(mienne ? { entrepriseId: mienne } : {}),
+        statut: { in: ["EN_EXECUTION", "EN_AVENANT", "SUSPENDU", "EN_RECEPTION_PROVISOIRE"] },
+      },
+      select: {
+        id: true, reference: true, intitule: true, statut: true,
+        dateOs: true, dateDebutPrevue: true, dateFinPrevue: true,
+        delaiMois: true, delaiJours: true,
+        avenants: { where: { statut: "ACTIF" }, select: { prolongationJours: true } },
+      },
+      orderBy: { reference: "asc" },
+    });
+
+    const JOUR = 86_400_000;
+    const maintenant = Date.now();
+    const lignes = marches.map((m) => {
+      const prolongationJours = m.avenants.reduce((s, a) => s + a.prolongationJours, 0);
+      // Échéance contractuelle : dateFinPrevue si saisie, sinon OS/début + délai
+      // contractuel + prolongations d'avenants.
+      const base = m.dateDebutPrevue ?? m.dateOs ?? null;
+      const delaiContractuelJours = (m.delaiJours ?? (m.delaiMois ? m.delaiMois * 30 : null));
+      let echeance: number | null = m.dateFinPrevue ? new Date(m.dateFinPrevue).getTime() : null;
+      if (echeance === null && base && delaiContractuelJours !== null) {
+        echeance = new Date(base).getTime() + (delaiContractuelJours + prolongationJours) * JOUR;
+      } else if (echeance !== null) {
+        echeance += prolongationJours * JOUR;
+      }
+      const joursRestants = echeance !== null ? Math.ceil((echeance - maintenant) / JOUR) : null;
+      return {
+        id: m.id, reference: m.reference, intitule: m.intitule, statut: m.statut,
+        dateOs: m.dateOs, dateFinPrevue: m.dateFinPrevue,
+        delaiContractuelJours, prolongationJours,
+        echeanceRevue: echeance !== null ? new Date(echeance).toISOString().slice(0, 10) : null,
+        joursRestants,
+        // Seuils de dérive : passé (<0), critique (≤30 j), proche (≤90 j)
+        derive: joursRestants === null ? "INDETERMINE" : joursRestants < 0 ? "DEPASSE" : joursRestants <= 30 ? "CRITIQUE" : joursRestants <= 90 ? "PROCHE" : "DANS_LES_DELAIS",
+      };
+    }).sort((a, b) => (a.joursRestants ?? 1e9) - (b.joursRestants ?? 1e9)); // les plus urgents d'abord
+
+    res.json({
+      generation: new Date().toISOString(),
+      repartition: lignes.reduce((acc: Record<string, number>, l) => { acc[l.derive] = (acc[l.derive] ?? 0) + 1; return acc; }, {}),
+      marches: lignes,
+    });
+  } catch (err) { next(err); }
+});
+
 marchesRouter.get("/by-contrat/:numContrat", async (req: Request, res: Response, next: NextFunction) => {
   try {
     const m = await marchesService.getByNumContrat(req.params.numContrat);
