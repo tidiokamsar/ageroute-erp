@@ -453,7 +453,7 @@ dossierDecompteRouter.get("/decompte/:id/dossier/pdf", async (req: Request, res:
     res.send(r.pdf);
 
     await logAudit({
-      userId: req.user.id, action: "UPDATE", entityType: "Decompte", entityId: r.decompteId,
+      userId: req.user.id, action: "EXPORT", entityType: "Decompte", entityId: r.decompteId,
       after: { document: "dossier-complet-pdf", sections: 11 },
     });
   } catch (err) { next(err); }

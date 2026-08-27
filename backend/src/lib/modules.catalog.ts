@@ -37,7 +37,7 @@ export const MODULES: ModuleDef[] = [
   // de TOUS les circuits, mais le catalogue fail-closed lui fermait le module
   // — constaté lors de la preuve de bout en bout : le signataire MISSION
   // passait, le signataire TECHNIQUE recevait 403 avant même la route.
-  { key: "signatures",   label: "Signature électronique",roles: ["ADMIN","DG","DAF","DMC","UGP","MISSION","TECHNIQUE"] },
+  { key: "signatures",   label: "Signature électronique",roles: ["ADMIN","DG","DAF","DMC","UGP","MISSION","AUDITEUR","TECHNIQUE"] },
   { key: "utilisateurs", label: "Utilisateurs",          roles: ["ADMIN"] },
   { key: "parametrage",  label: "Paramétrage",           roles: ["ADMIN"] },
 ];

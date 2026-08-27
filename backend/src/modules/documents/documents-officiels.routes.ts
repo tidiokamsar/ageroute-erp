@@ -12,6 +12,7 @@ import { entrepriseIdOf } from "../../lib/scope";
 import { assertMarcheAutorise } from "../../lib/perimetre";
 import { creerDocumentOfficiel, ajouterPiedDePage, ajouterEncadreSynthese, ajouterTableau } from "../../lib/pdf-gabarit";
 import { formaterMontant } from "../../lib/montants";
+import { assainirTexte, tronquer } from "../../lib/pdf-dossier";
 
 export const documentsOfficielsRouter = Router();
 documentsOfficielsRouter.use(requireAuth);
@@ -68,10 +69,10 @@ documentsOfficielsRouter.get("/decompte/:id/pdf", async (req: Request, res: Resp
       ["TVA", `${fmtGnf(d.tva)} GNF`],
       ["ARMP (0,6 %)", `${fmtGnf(d.montantArmpGnf)} GNF`],
       ["Total TTC", `${fmtGnf(d.montantTtcGnf)} GNF`],
-      ["Précompte TVA", `− ${fmtGnf(d.precompteTvaGnf)} GNF`],
-      ["Retenue de garantie", `− ${fmtGnf(d.retenueGarantie)} GNF`],
-      ["Avance récupérée", `− ${fmtGnf(d.avanceRecuperee)} GNF`],
-      ["Pénalités", `− ${fmtGnf(d.penalites)} GNF`],
+      ["Précompte TVA", `${assainirTexte("−")} ${fmtGnf(d.precompteTvaGnf)} GNF`],
+      ["Retenue de garantie", `${assainirTexte("−")} ${fmtGnf(d.retenueGarantie)} GNF`],
+      ["Avance récupérée", `${assainirTexte("−")} ${fmtGnf(d.avanceRecuperee)} GNF`],
+      ["Pénalités", `${assainirTexte("−")} ${fmtGnf(d.penalites)} GNF`],
       ["Révision des prix", `+ ${fmtGnf(d.revisionPrix)} GNF`],
     ], y + 5);
 
@@ -102,7 +103,7 @@ documentsOfficielsRouter.get("/decompte/:id/pdf", async (req: Request, res: Resp
         { label: "Net GNF", largeur: 60, align: "right" },
       ], d.lignesDecompte.map((l) => [
         l.codeArticle ?? "—",
-        (l.designation ?? "").slice(0, 22),
+        tronquer(l.designation ?? "", 22),
         l.unite ?? "—",
         String(l.quantiteCourante ?? 0),
         fmtGnf(l.prixUnitaire),
@@ -125,7 +126,7 @@ documentsOfficielsRouter.get("/decompte/:id/pdf", async (req: Request, res: Resp
     res.setHeader("Content-Disposition", `attachment; filename="decompte-${d.reference}.pdf"`);
     doc.pipe(res);
     doc.end();
-    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "Decompte", entityId: d.id, after: { document: "pdf-officiel" } });
+    await logAudit({ userId: req.user.id, action: "EXPORT", entityType: "Decompte", entityId: d.id, after: { document: "pdf-officiel" } });
   } catch (err) { next(err); }
 });
 
@@ -168,8 +169,8 @@ documentsOfficielsRouter.get("/attachement/:id/pdf", async (req: Request, res: R
       ["Nature des travaux", a.natureTravaux],
       ["Période", a.periodeDebut ? `${new Date(a.periodeDebut).toLocaleDateString("fr-FR")} → ${a.periodeFin ? new Date(a.periodeFin).toLocaleDateString("fr-FR") : "—"}` : "—"],
       ["Statut", a.statut],
-      ["Validé Mission", a.valideParMission ? "✓ Oui" : "✗ Non"],
-      ["Validé Technique", a.valideParTechnique ? "✓ Oui" : "✗ Non"],
+      ["Validé Mission", a.valideParMission ? "Oui" : "Non"],
+      ["Validé Technique", a.valideParTechnique ? "Oui" : "Non"],
     ], 100);
 
     // ── Localisation ──
@@ -197,7 +198,7 @@ documentsOfficielsRouter.get("/attachement/:id/pdf", async (req: Request, res: R
         { label: "Cumulé", largeur: 40, align: "right" },
       ], a.lignes.map((l) => [
         l.codeArticle ?? "—",
-        (l.designation ?? "").slice(0, 25),
+        tronquer(l.designation ?? "", 25),
         l.unite ?? "—",
         String(l.quantiteContrat ?? 0),
         String(l.quantitePrecedent ?? 0),
@@ -253,7 +254,7 @@ documentsOfficielsRouter.get("/attachement/:id/pdf", async (req: Request, res: R
     res.setHeader("Content-Disposition", `attachment; filename="attachement-${a.code ?? a.id.slice(0, 8)}.pdf"`);
     doc.pipe(res);
     doc.end();
-    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "Attachement", entityId: a.id, after: { document: "pdf-officiel" } });
+    await logAudit({ userId: req.user.id, action: "EXPORT", entityType: "Attachement", entityId: a.id, after: { document: "pdf-officiel" } });
   } catch (err) { next(err); }
 });
 
@@ -314,8 +315,16 @@ documentsOfficielsRouter.get("/reception/:id/pdf", async (req: Request, res: Res
         doc.fontSize(8).font("Helvetica").fillColor("#555").text("Aucune réserve — travaux conformes au marché");
       } else {
         doc.fontSize(8).font("Helvetica").fillColor("#555");
-        reserves.forEach((res, i) => doc.text(`${i + 1}. ${res}`, 55, y + 5 + i * 12));
-        y += reserves.length * 12 + 10;
+        // Assainies (glyphes WinAnsi) et PAGINÉES : à coordonnées fixes, une
+        // longue liste de réserves sortait sous le bord et se perdait.
+        const LIMITE_BASSE = doc.page.height - doc.page.margins.bottom - 30;
+        let yr = y + 5;
+        reserves.forEach((res, i) => {
+          if (yr > LIMITE_BASSE) { doc.addPage(); doc.fontSize(8).font("Helvetica").fillColor("#555"); yr = doc.page.margins.top; }
+          doc.text(`${i + 1}. ${assainirTexte(String(res))}`, 55, yr);
+          yr += 12;
+        });
+        y = Math.min(yr, LIMITE_BASSE) + 10;
       }
     }
 
@@ -331,6 +340,6 @@ documentsOfficielsRouter.get("/reception/:id/pdf", async (req: Request, res: Res
     res.setHeader("Content-Disposition", `attachment; filename="pv-reception-${r.pvNumero ?? r.id.slice(0, 8)}.pdf"`);
     doc.pipe(res);
     doc.end();
-    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "Reception", entityId: r.id, after: { document: "pdf-officiel" } });
+    await logAudit({ userId: req.user.id, action: "EXPORT", entityType: "Reception", entityId: r.id, after: { document: "pdf-officiel" } });
   } catch (err) { next(err); }
 });

@@ -15,9 +15,12 @@ const CLES_SENSIBLES = [
   "password",
   "passwordHash",
   "motDePasse",
+  "pwd",           // abréviations rencontrées dans les messages Prisma
+  "newPassword",
   "token",
   "accessToken",
   "refreshToken",
+  "jwt",
   "secret",
   "clientSecret",
   "authorization",
