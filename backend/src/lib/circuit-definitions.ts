@@ -14,48 +14,100 @@ export interface EtapeCircuit {
   slaJours?: number;
 }
 
+/**
+ * Étapes du circuit de VALIDATION, par type de financement.
+ *
+ * ⚠️ RÉFÉRENCE, PAS SOURCE D'EXÉCUTION. Le moteur lit les définitions en base
+ * (workflow_definitions / workflow_etapes) ; cette fonction sert de modèle
+ * documenté et de socle aux tests.
+ *
+ * Elle DIVERGEAIT de la production : elle s'arrêtait à la Direction Générale,
+ * alors que les onze circuits réellement définis poursuivent au-delà — vers le
+ * bailleur pour les financements extérieurs, vers le FER ou la Direction du
+ * Budget puis le Trésor pour les circuits nationaux. Un test s'appuyant sur
+ * elle pouvait donc passer au vert en décrivant un circuit qui n'existe pas.
+ * Alignée le 27/08/2026 sur les définitions relevées en base.
+ *
+ * L'UGP n'intervient que sur les financements Banque Mondiale et Union
+ * européenne, où le bailleur l'exige comme unité de gestion du projet.
+ */
 export function etapesWorkflow(financement: string): EtapeCircuit[] {
-  const base: EtapeCircuit[] = [
+  const etapes: EtapeCircuit[] = [
     { ordre: 1, nom: "Mission de contrôle",    roleOuService: "MISSION",   slaJours: 7 },
     { ordre: 2, nom: "Direction Technique",    roleOuService: "TECHNIQUE", slaJours: 5 },
   ];
-  const estBailleur = !["FER", "BUDGET_NATIONAL"].includes(financement);
-  if (estBailleur) {
-    base.push({ ordre: 3, nom: "UGP",          roleOuService: "UGP",       slaJours: 3 });
+  if (["BANQUE_MONDIALE", "UE"].includes(financement)) {
+    etapes.push({ ordre: 3, nom: "UGP",        roleOuService: "UGP",       slaJours: 3 });
   }
-  base.push(
-    { ordre: base.length + 1, nom: "DMC",       roleOuService: "DMC",       slaJours: 5 },
-    { ordre: base.length + 2, nom: "DAF",       roleOuService: "DAF",       slaJours: 3 },
-    { ordre: base.length + 3, nom: "DG",        roleOuService: "DG",        slaJours: 2 },
-  );
-  return base;
+  const suite = (nom: string, role: string, sla: number) =>
+    etapes.push({ ordre: etapes.length + 1, nom, roleOuService: role, slaJours: sla });
+
+  suite("DMC", "DMC", 5);
+  suite("DAF", "DAF", 3);
+  suite("Direction Générale", "DG", 2);
+
+  // Visa d'approbation du service payeur — l'ORDRE DE PAIEMENT, lui, est un
+  // acte distinct qui relève du circuit financier (voir plus bas).
+  if (financement === "FER") {
+    suite("FER", "FER_AGT", 5);
+    suite("Trésor Public", "TRESOR", 5);
+  } else if (financement === "BUDGET_NATIONAL") {
+    suite("Direction du Budget", "BUDGET", 5);
+    suite("Trésor Public", "TRESOR", 5);
+  } else if (financement !== "AUTRE") {
+    // Bailleurs identifiés : non-objection avant décaissement.
+    suite("Bailleur", "BAILLEUR", 10);
+  }
+  return etapes;
 }
 
+/**
+ * Étapes du circuit FINANCIER, qui suit l'achèvement du circuit de validation.
+ *
+ * ⚠️ CE N'EST PAS UNE REDONDANCE — NE PAS « CORRIGER »
+ * Trois audits successifs ont signalé comme un défaut le fait que le Trésor,
+ * le Budget ou le FER apparaissent ICI alors qu'ils figurent DÉJÀ dans les
+ * étapes du circuit de validation. Ce n'en est pas un : ce sont DEUX ACTES
+ * DISTINCTS du même service, confirmé par l'AGEROUTE le 27/08/2026.
+ *
+ *   • Circuit de VALIDATION  → le service donne son VISA D'APPROBATION :
+ *     il reconnaît la dette, il atteste que le décompte est régulier.
+ *   • Circuit FINANCIER      → le même service émet l'ORDRE DE PAIEMENT :
+ *     il engage le décaissement effectif des fonds.
+ *
+ * Un visa n'est pas un paiement. Les fusionner ferait payer un décompte du
+ * seul fait qu'il a été jugé régulier — ce que la séparation de l'ordonnateur
+ * et du comptable interdit précisément.
+ *
+ * Les libellés portent donc l'acte attendu, et non le seul nom du service :
+ * sans cela l'agent voyait « Trésor Public » à deux endroits sans savoir
+ * lequel appelait sa signature.
+ */
 export function etapesCircuitFinancier(financement: string): EtapeCircuit[] {
   if (financement === "FER") {
     return [
-      { ordre: 1, nom: "FER",              roleOuService: "FER_AGT" },
-      { ordre: 2, nom: "Budget / MEF",     roleOuService: "BUDGET" },
-      { ordre: 3, nom: "DNTCP",            roleOuService: "TRESOR" },
-      { ordre: 4, nom: "BCRG",             roleOuService: "BCRG" },
-      { ordre: 5, nom: "Paiement",         roleOuService: "BCRG" },
+      { ordre: 1, nom: "FER — ordonnancement",        roleOuService: "FER_AGT" },
+      { ordre: 2, nom: "Budget / MEF — engagement",   roleOuService: "BUDGET" },
+      { ordre: 3, nom: "DNTCP — ordre de paiement",   roleOuService: "TRESOR" },
+      { ordre: 4, nom: "BCRG — visa bancaire",        roleOuService: "BCRG" },
+      { ordre: 5, nom: "BCRG — exécution du virement", roleOuService: "BCRG" },
     ];
   }
   if (financement === "BUDGET_NATIONAL") {
     return [
-      { ordre: 1, nom: "Budget / MEF",     roleOuService: "BUDGET" },
-      { ordre: 2, nom: "DNTCP",            roleOuService: "TRESOR" },
-      { ordre: 3, nom: "BCRG",             roleOuService: "BCRG" },
-      { ordre: 4, nom: "Paiement",         roleOuService: "BCRG" },
+      { ordre: 1, nom: "Budget / MEF — engagement",   roleOuService: "BUDGET" },
+      { ordre: 2, nom: "DNTCP — ordre de paiement",   roleOuService: "TRESOR" },
+      { ordre: 3, nom: "BCRG — visa bancaire",        roleOuService: "BCRG" },
+      { ordre: 4, nom: "BCRG — exécution du virement", roleOuService: "BCRG" },
     ];
   }
   // Bailleurs (BM, BAD, UE, BOAD, BID, BADEA, AFD, KFW, AUTRE)
   return [
-    { ordre: 1, nom: "UGP",                      roleOuService: "UGP" },
-    { ordre: 2, nom: "Demande de décaissement",  roleOuService: "UGP" },
-    { ordre: 3, nom: "Non-objection bailleur",   roleOuService: "BAILLEUR" },
-    { ordre: 4, nom: "Décaissement",             roleOuService: "BAILLEUR" },
-    { ordre: 5, nom: "Paiement",                 roleOuService: "BCRG" },
+    { ordre: 1, nom: "UGP — instruction",             roleOuService: "UGP" },
+    { ordre: 2, nom: "Demande de décaissement",       roleOuService: "UGP" },
+    { ordre: 3, nom: "Non-objection bailleur",        roleOuService: "BAILLEUR" },
+    { ordre: 4, nom: "Décaissement",                  roleOuService: "BAILLEUR" },
+    { ordre: 5, nom: "BCRG — exécution du virement",  roleOuService: "BCRG" },
   ];
 }
 
