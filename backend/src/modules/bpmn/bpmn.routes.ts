@@ -148,11 +148,36 @@ bpmnRouter.get("/definition/:moduleType", async (req: Request, res: Response, ne
   } catch (err) { next(err); }
 });
 
-// ─── POST /api/bpmn/soumettre/:moduleType/:entityId ──────────────────────────
-// Revue 20/08/2026 : cette soumission générique était ouverte à tout compte
-// authentifié et modifiait le statut de l'entité visée. Réservée à
-// l'administration du système.
-bpmnRouter.post("/soumettre/:moduleType/:entityId", requireRole("ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
+/**
+ * Écritures du moteur BPMN générique — RETIRÉES.
+ *
+ * Ce moteur était le troisième registre de validation. L'unification de la
+ * revue du 20/08/2026 a fait du circuit Prisma la source unique, et les tables
+ * bpmn_* ne portent plus aucun dossier (0 instance, 0 action). Mais le CODE
+ * qui les alimente restait monté, et il écrivait hors de tout contrôle :
+ * insertion d'instance, statut du décompte forcé en SQL brut, avancement
+ * d'étape — sans séparation des tâches, sans contrôle d'affectation, et sans
+ * écrire une ligne dans l'onglet Validations.
+ *
+ * Un seul appel rouvrait donc un second circuit sur un dossier déjà engagé
+ * dans le circuit unique, et le faisait avancer par un parcours amputé du DMC
+ * et de l'étape bailleur. Les trois registres redevenaient contradictoires en
+ * une requête : l'unification n'était pas acquise, elle était seulement non
+ * encore défaite.
+ *
+ * Les LECTURES restent (définitions BPMN affichées par l'interface). Même
+ * traitement que l'ancienne signature directe — voir `legacySignatureRetired`.
+ */
+export function ecritureBpmnRetiree(_req: Request, _res: Response, next: NextFunction): void {
+  next(new ApiError(
+    410,
+    "Le moteur BPMN générique ne pilote plus aucun circuit. Utilisez le circuit unique : /api/workflow.",
+  ));
+}
+
+// Le refus est placé EN TÊTE de chaîne : le handler qui suit reste en place —
+// il documente ce que faisait ce moteur — mais il n'est plus jamais atteint.
+bpmnRouter.post("/soumettre/:moduleType/:entityId", ecritureBpmnRetiree, requireRole("ADMIN"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     const { moduleType, entityId } = req.params;
@@ -223,7 +248,7 @@ bpmnRouter.get("/instance/:moduleType/:entityId", async (req: Request, res: Resp
 });
 
 // ─── POST /api/bpmn/:instanceId/action ───────────────────────────────────────
-bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next: NextFunction) => {
+bpmnRouter.post("/:instanceId/action", ecritureBpmnRetiree, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
 
@@ -438,7 +463,7 @@ bpmnRouter.post("/:instanceId/action", async (req: Request, res: Response, next:
 });
 
 // ─── PATCH /api/bpmn/:instanceId/lever-suspension ────────────────────────────
-bpmnRouter.patch("/:instanceId/lever-suspension", async (req: Request, res: Response, next: NextFunction) => {
+bpmnRouter.patch("/:instanceId/lever-suspension", ecritureBpmnRetiree, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
     if (!ROLES_SUPERV.includes(req.user.role)) throw new ApiError(403, "Réservé à la DG/ADMIN");
