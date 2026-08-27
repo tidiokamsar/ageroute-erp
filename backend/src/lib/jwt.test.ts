@@ -24,3 +24,17 @@ test("les jetons d'acces et de renouvellement ont des usages distincts", async (
   assert.equal((decoded?.payload as jwt.JwtPayload).aud, "erp-ageroute-api");
   assert.ok((decoded?.payload as jwt.JwtPayload).jti);
 });
+
+test("empreinte refresh token — la base ne voit jamais le jeton en clair", async () => {
+  const { signRefresh, empreinteRefreshToken } = await import("./jwt");
+  const payload = { userId: "00000000-0000-0000-0000-000000000002", email: "test@ageroute.gov.gn", role: "DAF" };
+  const jeton = signRefresh(payload);
+  const empreinte = empreinteRefreshToken(jeton);
+
+  // SHA-256 hexa, jamais le jeton lui-même
+  assert.match(empreinte, /^[0-9a-f]{64}$/);
+  assert.ok(!empreinte.includes(jeton.slice(0, 20)));
+  // Déterministe (la comparaison en base doit matcher) et différenciante
+  assert.equal(empreinteRefreshToken(jeton), empreinte);
+  assert.notEqual(empreinteRefreshToken(signRefresh(payload)), empreinte);
+});

@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "../../lib/prisma";
-import { signAccess, signRefresh, verifyRefresh } from "../../lib/jwt";
+import { signAccess, signRefresh, verifyRefresh, empreinteRefreshToken } from "../../lib/jwt";
 import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 
@@ -17,8 +17,10 @@ export async function login(email: string, password: string, ip?: string) {
   }
   const accessToken = signAccess({ userId: user.id, email: user.email, role: user.role });
   const refreshToken = signRefresh({ userId: user.id, email: user.email, role: user.role });
+  // Stockage par EMPREINTE SHA-256 : la base ne conserve jamais le jeton
+  // en clair (revue du 26/08/2026 — un dump ne vaut plus des sessions).
   await prisma.refreshToken.create({
-    data: { token: refreshToken, userId: user.id, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
+    data: { token: empreinteRefreshToken(refreshToken), userId: user.id, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
   });
   await prisma.user.update({ where: { id: user.id }, data: { derniereConnexion: new Date() } });
   await logAudit({ userId: user.id, action: "LOGIN", entityType: "User", ipAddress: ip });
@@ -46,8 +48,9 @@ export async function refresh(token: string) {
   // PostgreSQL sérialise les deux UPDATE sur la même ligne ; le second voit
   // revoked = true et n'affecte rien.
   return prisma.$transaction(async (tx) => {
+    // Comparaison par EMPREINTE (le jeton clair ne vit que côté client).
     const revoque = await tx.refreshToken.updateMany({
-      where: { token, revoked: false, expiresAt: { gt: new Date() } },
+      where: { token: empreinteRefreshToken(token), revoked: false, expiresAt: { gt: new Date() } },
       data: { revoked: true },
     });
     if (revoque.count !== 1) throw new ApiError(401, "Refresh token invalide");
@@ -55,12 +58,12 @@ export async function refresh(token: string) {
     const newAccess = signAccess({ userId: user.id, email: user.email, role: user.role });
     const newRefresh = signRefresh({ userId: user.id, email: user.email, role: user.role });
     await tx.refreshToken.create({
-      data: { token: newRefresh, userId: user.id, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
+      data: { token: empreinteRefreshToken(newRefresh), userId: user.id, expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000) },
     });
     return { accessToken: newAccess, refreshToken: newRefresh };
   });
 }
 
 export async function logout(token: string) {
-  await prisma.refreshToken.updateMany({ where: { token }, data: { revoked: true } });
+  await prisma.refreshToken.updateMany({ where: { token: empreinteRefreshToken(token) }, data: { revoked: true } });
 }
