@@ -8,6 +8,8 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { prisma } from "../../lib/prisma";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../../lib/audit";
+import { chargerRegles } from "../../lib/regles";
+import { verifierDelegation } from "../../lib/delegations.regles";
 import { z } from "zod";
 
 export const delegationsRouter = Router();
@@ -56,59 +58,57 @@ delegationsRouter.post("/", async (req: Request, res: Response, next: NextFuncti
       motif: z.string().optional(),
     }).parse(req.body);
 
-    if (body.titulaireId === body.suppleantId) throw new ApiError(400, "Le suppléant doit être différent du titulaire");
     if (req.user.role !== "ADMIN" && req.user.id !== body.titulaireId) {
       throw new ApiError(403, "Seul le titulaire ou un administrateur peut créer cette délégation");
     }
-    if (new Date(body.dateFin) <= new Date(body.dateDebut)) throw new ApiError(400, "La date de fin doit être postérieure au début");
 
-    // Revue 27/08/2026 (relais Claude) — deux garde-fous manquaient :
-    //
-    // 1. DURÉE MAXIMALE : une délégation sans limite de temps permettait un
-    //    intérim perpétuité — même une année entière passait. Un intérim est
-    //    un arrangement temporaire : 90 jours glissants, renouvelable.
-    const DUREE_MAX_MS = 90 * 24 * 3600 * 1000;
-    if (new Date(body.dateFin).getTime() - new Date(body.dateDebut).getTime() > DUREE_MAX_MS) {
-      throw new ApiError(400, "Une délégation est limitée à 90 jours — renouvelez-la si l'absence se prolonge");
-    }
-    // Une délégation ne peut pas commencer dans un passé lointain (rétrodatage
-    // d'un pouvoir déjà utilisé).
-    if (new Date(body.dateDebut).getTime() < Date.now() - DUREE_MAX_MS) {
-      throw new ApiError(400, "Une délégation ne peut pas commencer plus de 90 jours dans le passé");
+    // ── Bornes de l'acte ──────────────────────────────────────────────────────
+    // Deux revues du 27/08/2026 ont porté sur ce point ; les contrôles sont
+    // désormais réunis dans lib/delegations.regles.ts — fonction PURE, testée,
+    // paramétrable — plutôt que dispersés ici en conditions successives :
+    //   durée maximale et date d'effet (WF_DELEGATION_DUREE_MAX_JOURS),
+    //   rôles non délégables et suppléant éligible
+    //   (WF_DELEGATION_ROLES_NON_DELEGABLES : un DAF ne délègue pas son visa à
+    //   l'entreprise attributaire, et ADMIN est refusé À LA CRÉATION plutôt que
+    //   neutralisé en aval, où l'acte n'était qu'un leurre),
+    //   comptes actifs, motif obligatoire, non-cumul de suppléants,
+    //   et détection de boucle par parcours du graphe des délégations actives.
+    // La route ne fait plus que rassembler les faits que la règle exige.
+    const [titulaire, suppleant] = await Promise.all([
+      prisma.user.findUnique({ where: { id: body.titulaireId }, select: { id: true, role: true, actif: true } }),
+      prisma.user.findUnique({ where: { id: body.suppleantId }, select: { id: true, role: true, actif: true } }),
+    ]);
+    if (!titulaire) throw new ApiError(404, "Titulaire introuvable");
+    if (!suppleant) throw new ApiError(404, "Suppléant introuvable");
+
+    const dateDebut = new Date(body.dateDebut);
+    const dateFin = new Date(body.dateFin);
+    if (Number.isNaN(dateDebut.getTime()) || Number.isNaN(dateFin.getTime())) {
+      throw new ApiError(400, "Dates invalides");
     }
 
-    // 2. CIRCULARITÉ : A délègue à B, B délègue à A — chaque porte faire
-    //    suivre à l'autre un pouvoir que personne ne détient à la source.
-    //    On remonte la chaîne des délégations actives : si le futur titulaire
-    //    apparaît déjà comme suppléant en aval, la chaîne se mord la queue.
-    const delegationActives = await prisma.delegation.findMany({
-      where: { actif: true, dateFin: { gte: new Date() } },
-      select: { titulaireId: true, suppleantId: true },
+    // TOUTES les délégations actives : le parcours de boucle traverse aussi
+    // celles qui ne concernent ni le titulaire ni le suppléant proposés.
+    const [regles, existantes] = await Promise.all([
+      chargerRegles({}),
+      prisma.delegation.findMany({
+        where: { actif: true },
+        select: { id: true, titulaireId: true, suppleantId: true, dateDebut: true, dateFin: true, actif: true },
+      }),
+    ]);
+
+    const verdict = verifierDelegation({
+      titulaire, suppleant, dateDebut, dateFin,
+      motif: body.motif, existantes, regles, maintenant: new Date(),
     });
-    // Graphe titulaire → suppléants ; parcours en profondeur depuis le
-    // suppléant proposé : si on retombe sur le titulaire, c'est un cycle.
-    const parTitulaire = new Map<string, string[]>();
-    for (const d of delegationActives) {
-      parTitulaire.set(d.titulaireId, [...(parTitulaire.get(d.titulaireId) ?? []), d.suppleantId]);
-    }
-    const visites = new Set<string>([body.suppleantId]);
-    const pile = [body.suppleantId];
-    while (pile.length > 0) {
-      const courant = pile.pop()!;
-      for (const suivant of parTitulaire.get(courant) ?? []) {
-        if (suivant === body.titulaireId) {
-          throw new ApiError(400, "Circularité détectée : cette délégation fermerait une boucle (le titulaire est déjà suppléant dans la chaîne)");
-        }
-        if (!visites.has(suivant)) { visites.add(suivant); pile.push(suivant); }
-      }
-    }
+    if (!verdict.autorise) throw new ApiError(400, verdict.motif ?? "Délégation refusée");
 
     const created = await prisma.delegation.create({
       data: {
         titulaireId: body.titulaireId,
         suppleantId: body.suppleantId,
-        dateDebut: new Date(body.dateDebut),
-        dateFin: new Date(body.dateFin),
+        dateDebut,
+        dateFin,
         motif: body.motif,
       },
       include: { titulaire: userSel, suppleant: userSel },
@@ -127,7 +127,9 @@ delegationsRouter.patch("/:id", async (req: Request, res: Response, next: NextFu
     if (!del) throw new ApiError(404, "Délégation introuvable");
     if (req.user.role !== "ADMIN" && req.user.id !== del.titulaireId) throw new ApiError(403, "Non autorisé");
     const updated = await prisma.delegation.update({ where: { id: req.params.id }, data: { actif: body.actif } });
-    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "Delegation", entityId: del.id, after: updated });
+    // `before` manquait : on lisait « la délégation a été modifiée » sans savoir
+    // si elle venait d'être activée ou révoquée.
+    await logAudit({ userId: req.user.id, action: "UPDATE", entityType: "Delegation", entityId: del.id, before: del, after: updated });
     res.json(updated);
   } catch (err) { next(err); }
 });

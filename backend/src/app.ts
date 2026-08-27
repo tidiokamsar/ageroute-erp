@@ -85,19 +85,45 @@ export function createApp() {
     message: { error: "Trop de requêtes — réessayez plus tard" },
   }));
 
-  // Revue 27/08/2026 (relais Claude) : la clé était req.ip seule — derrière
-  // le NAT de l'agence, TOUT le personnel partageait un seul seau de 10
-  // tentatives : deux personnes se connectant à la suite renversaient le
-  // compteur pour tout le monde. Clé = identifiant saisi + IP : le brute
-  // force par compte reste borné, les collègues ne se bloquent plus entre eux.
+  // ── Connexion : deux compteurs, et seuls les ÉCHECS consomment ────────────
+  // Le plafond d'origine était de 10 tentatives par ADRESSE : derrière le NAT
+  // de l'agence, tout le personnel partageait un seul seau — deux collègues
+  // qui se trompent bloquaient les suivants. Une première correction a porté
+  // la clé à « identifiant|adresse », ce qui règle ce point mais en rouvre un
+  // autre : le COMPTE visé n'est plus protégé du tout — 10 essais par adresse,
+  // autant d'adresses qu'on veut, et le bourrage d'identifiants redevient sans
+  // limite sur un compte donné.
+  //
+  // Deux compteurs séparés, donc : un par compte visé — que le bourrage
+  // distribué finit par heurter, quelle que soit son origine — et un par
+  // adresse, plus large, pour que l'agence entière tienne. `skipSuccessful-
+  // Requests` fait qu'une connexion réussie ne consomme rien : un usage normal
+  // ne peut plus déclencher le blocage anti-intrusion.
+  //
+  // Limite assumée : saturer le compteur d'un compte le bloque un quart
+  // d'heure. C'est borné, et chaque tentative est journalisée en LOGIN_FAILED.
+  const FENETRE_CONNEXION = 15 * 60 * 1000;
+  const compteVise = (req: express.Request): string => {
+    const brut = (req.body as { email?: unknown } | undefined)?.email;
+    return typeof brut === "string" && brut.trim() ? brut.trim().toLowerCase() : "(sans compte)";
+  };
   app.use("/api/auth/login", rateLimit({
-    windowMs: 15 * 60 * 1000,
+    windowMs: FENETRE_CONNEXION,
     limit: 10,
-    keyGenerator: (req) => {
-      const identifiant = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "anonyme";
-      return `${identifiant}|${req.ip ?? "inconnu"}`;
-    },
-    message: { error: "Trop de tentatives pour ce compte — réessayez plus tard" },
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `compte:${compteVise(req)}`,
+    message: { error: "Trop de tentatives pour ce compte — réessayez dans quelques minutes" },
+  }));
+  app.use("/api/auth/login", rateLimit({
+    windowMs: FENETRE_CONNEXION,
+    limit: 100,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `ip:${req.ip}`,
+    message: { error: "Trop de tentatives — réessayez dans quelques minutes" },
   }));
 
   // Consultation publique (Géoportail, vérification de signature) : plafond

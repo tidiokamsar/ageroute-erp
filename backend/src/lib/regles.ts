@@ -75,6 +75,18 @@ export const REGLES_DEFAUT = {
   // soumettre ET valider. Désactivable par paramétrage, mais ce doit être une
   // décision explicite et tracée.
   WF_SEPARATION_TACHES: "true",
+  // Délégation d'intérim — bornes de l'acte (revue du 27/08/2026).
+  // La création n'imposait AUCUNE limite : une « délégation temporaire » pouvait
+  // courir jusqu'en 2099, être antidatée pour couvrir des actes déjà posés, et
+  // désigner n'importe quel compte — y compris une entreprise attributaire, qui
+  // aurait alors porté le rôle DAF ou DG dans le workflow.
+  WF_DELEGATION_DUREE_MAX_JOURS: "90",
+  // Rôles dont le pouvoir ne se délègue PAS dans cet ERP : l'administrateur
+  // technique (l'hériter serait une élévation de privilèges — porteeRoles le
+  // filtrait déjà en aval, la délégation était donc un leurre), l'entreprise
+  // attributaire, et les organismes tiers du circuit financier, dont l'intérim
+  // se règle chez eux et non dans l'outil de l'Agence.
+  WF_DELEGATION_ROLES_NON_DELEGABLES: "ADMIN,ENTREPRISE,BAILLEUR,BUDGET,TRESOR,FER_AGT,BCRG",
   // A9 — Libellés d'états officiels (consommé au lot L2.2)
   ETQ_MAPPINGS: "{}",
   // A10 — Conformité entreprise (consommé au lot L3.1)
