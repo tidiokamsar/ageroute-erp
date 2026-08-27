@@ -12,6 +12,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { verifierNouvelOrdre, evaluerConfirmation, type PositionPaiement } from "./paiements.regles";
 
 const pos = (over: Partial<PositionPaiement> = {}): PositionPaiement => ({
@@ -40,3 +42,16 @@ test("F1 — la confirmation compte le montant réel, réserves comprises (fonct
   const trop = evaluerConfirmation({ netAPayerGnf: 1000n, positionAutresPaiements: pos({ confirmeGnf: 500n, reserveGnf: 100n }), montantReelGnf: 500n });
   assert.equal(trop.autorise, false);
 });
+
+test("F3 — la garde de statut reste ecrite dans le service, meme sans base", () => {
+  // La couverture de F3 a bascule dans les tests PG (paiements.service.pg.test.ts),
+  // qui sont IGNORES sans PG_TEST=1 : la suite par defaut ne verifiait plus
+  // qu'un decompte non ordonnance est impayable. A defaut de base, on relit la
+  // source : les deux points d'entree du paiement doivent exiger ORDONNANCE.
+  const source = readFileSync(path.join(__dirname, "paiements.service.ts"), "utf8");
+  const gardes = source.match(/statut !== "ORDONNANCE"/g) ?? [];
+  assert.equal(gardes.length, 2,
+    "creation d'ordre ET confirmation doivent chacune exiger ORDONNANCE ; "
+    + `or ${gardes.length} garde(s) trouvee(s)`);
+});
+
