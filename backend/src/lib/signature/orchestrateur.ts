@@ -28,6 +28,7 @@ import { env } from "../../config/env";
 import { ApiError } from "../../middleware/error.middleware";
 import { logAudit } from "../audit";
 import { rolesEffectifs } from "../delegations";
+import { getMarchesAffectes } from "../affectations";
 import { chargerRegles, booleenRegles } from "../regles";
 import { verifierSeparationTaches, statutPourRoleEtape, libelleEtapeValidation } from "../moteur-validation";
 import { etapesCircuitFinancier } from "../circuit-definitions";
@@ -92,11 +93,27 @@ async function signataireNominatif(userId: string) {
 async function etapeActivePour(userId: string, role: string, decompteId: string) {
   const instance = await prisma.workflowInstance.findFirst({
     where: { decompteId, statut: "EN_COURS" },
-    include: { definition: { include: { etapes: { orderBy: { ordre: "asc" } } } }, decompte: { select: { reference: true, traitementSuspendu: true } } },
+    include: {
+      definition: { include: { etapes: { orderBy: { ordre: "asc" } } } },
+      decompte: { select: { reference: true, traitementSuspendu: true, marcheId: true } },
+    },
     orderBy: { createdAt: "desc" },
   });
   if (!instance) throw new ApiError(409, "Ce document n'est pas dans un circuit de validation actif : rien à signer.");
   if (instance.decompte?.traitementSuspendu) throw new ApiError(409, "Traitement suspendu par la Direction Générale.");
+
+  // Périmètre d'affectation — même règle que la route d'action du circuit.
+  // Signer fait AVANCER l'étape : c'est la même décision, par une autre porte.
+  // Sans ce contrôle, un agent MISSION, TECHNIQUE, UGP ou BAILLEUR non affecté
+  // au marché se voyait refuser l'action dans l'écran Workflow (404) mais
+  // obtenait exactement le même avancement en signant le décompte. Le
+  // cloisonnement par marché se contournait donc par un chemin que rien
+  // n'interdisait — un tiers des actions du circuit passe par cette porte.
+  const affectes = await getMarchesAffectes(userId, role);
+  if (affectes !== null && (!instance.decompte || !affectes.includes(instance.decompte.marcheId))) {
+    throw new ApiError(404, "Décompte introuvable");
+  }
+
   const etape = instance.definition.etapes[instance.etapeActuelle];
   if (!etape) throw new ApiError(409, "Aucune étape courante sur ce circuit.");
   const roles = await rolesEffectifs(userId, role);
