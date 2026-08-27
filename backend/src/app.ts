@@ -167,8 +167,11 @@ export function createApp() {
   // portail entreprise : rôle contrôlé en routeur (entrepriseOnly)
   app.use("/api/portail", portailRouter);
   app.use("/api/revision", requireAuth, checkModuleAccess("revision"), revisionRouter);
-  // recherche globale : authentification + périmètre d'affectation vérifiés en handler
-  app.use("/api/search", searchRouter);
+  // Recherche globale. Le handler vérifie le périmètre d'affectation, mais il
+  // ne peut pas s'authentifier lui-même : il testait `req.user` que RIEN ne
+  // renseignait ici, et refusait donc TOUT LE MONDE — administrateurs compris.
+  // Le champ de recherche de l'en-tête était mort depuis son montage.
+  app.use("/api/search", requireAuth, searchRouter);
   // Pièces jointes : dépôt authentifié + téléchargement par URL signée éphémère (P0-2)
   app.use("/api/uploads", uploadsRouter);
 
