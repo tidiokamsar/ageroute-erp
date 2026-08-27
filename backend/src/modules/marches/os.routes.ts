@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { assertMarcheAutoriseEtPropre } from "../../lib/perimetre";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
@@ -21,6 +22,11 @@ const osSchema = z.object({
 
 osRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètre d'affectation + appartenance (revue 27/08/2026) — voir bpu.
+    await assertMarcheAutoriseEtPropre(req, req.params.marcheId, async (id) => {
+      const m = await prisma.marche.findFirst({ where: { id, deletedAt: null }, select: { entrepriseId: true } });
+      return m?.entrepriseId ?? null;
+    });
     const os = await prisma.ordreService.findMany({
       where: { marcheId: req.params.marcheId },
       orderBy: { numero: "asc" },

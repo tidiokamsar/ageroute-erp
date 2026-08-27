@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { assertMarcheAutoriseEtPropre } from "../../lib/perimetre";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
@@ -21,6 +22,14 @@ const articleSchema = z.object({
 
 bpuRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètre d'affectation + appartenance (revue 27/08/2026) : BPU
+    // contractuel et ordres de service lisibles par les rôles du module
+    // marchés — un agent scopé non affecté ou une entreprise concurrente
+    // n'y a pas accès. Refus en 404 (doctrine lib/perimetre.ts).
+    await assertMarcheAutoriseEtPropre(req, req.params.marcheId, async (id) => {
+      const m = await prisma.marche.findFirst({ where: { id, deletedAt: null }, select: { entrepriseId: true } });
+      return m?.entrepriseId ?? null;
+    });
     const articles = await prisma.bpuArticle.findMany({
       where: { marcheId: req.params.marcheId },
       include: { lot: { select: { numero: true, designation: true } } },
