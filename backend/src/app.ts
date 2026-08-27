@@ -85,7 +85,20 @@ export function createApp() {
     message: { error: "Trop de requêtes — réessayez plus tard" },
   }));
 
-  app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: "Trop de tentatives" } }));
+  // Revue 27/08/2026 (relais Claude) : la clé était req.ip seule — derrière
+  // le NAT de l'agence, TOUT le personnel partageait un seul seau de 10
+  // tentatives : deux personnes se connectant à la suite renversaient le
+  // compteur pour tout le monde. Clé = identifiant saisi + IP : le brute
+  // force par compte reste borné, les collègues ne se bloquent plus entre eux.
+  app.use("/api/auth/login", rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    keyGenerator: (req) => {
+      const identifiant = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "anonyme";
+      return `${identifiant}|${req.ip ?? "inconnu"}`;
+    },
+    message: { error: "Trop de tentatives pour ce compte — réessayez plus tard" },
+  }));
 
   // Consultation publique (Géoportail, vérification de signature) : plafond
   // anti-abus. Il s'applique par adresse, faute d'identité à cet endroit.
