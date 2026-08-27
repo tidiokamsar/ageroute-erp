@@ -389,38 +389,60 @@ decomptesRouter.delete("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC"), asyn
   } catch (err) { next(err); }
 });
 
-// POST /:id/calculate — recalcule total depuis lignes (avec taux custom)
+// POST /:id/calculate — recalcule le décompte depuis ses lignes par le MOTEUR
+// UNIQUE (revue du 26/08/2026 : cette route était le dernier double moteur —
+// arithmétique flottante sur des GNF, taux choisis par le client, formule sans
+// ARMP ni précompte ni plancher ni report, résultat persisté SANS snapshot).
+// Les taux du corps de requête sont IGNORÉS : seuls le marché et les règles
+// A1-A7 font foi, comme sur POST /:id/lignes et le dépôt portail. La réponse
+// garde la forme historique (clés) pour l'écran, les montants en chaînes.
 decomptesRouter.post("/:id/calculate", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const body = z.object({
-      applyVat:            z.boolean().default(true),
-      vatRate:             z.number().min(0).max(100).default(18),
-      retentionRate:       z.number().min(0).max(100).default(5),
-      advanceRecoveryRate: z.number().min(0).max(100).default(10),
-      penaltyAmount:       z.number().min(0).default(0),
-    }).parse(req.body);
+    // Corps toléré (compatibilité écran) mais volontairement ignoré :
+    // aucun taux fourni par le client n'atteint le calcul.
+    z.object({}).passthrough().parse(req.body);
 
     const { prisma } = await import("../../lib/prisma");
+    const decompte = await prisma.decompte.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+      include: { marche: true },
+    });
+    if (!decompte) throw new ApiError(404, "Décompte introuvable");
+
     const lignes = await prisma.decompteLigne.findMany({ where: { decompteId: req.params.id } });
-    const totalBrut = lignes.reduce((s, l) => s + Number(l.montantBrut), 0);
-    const tva       = body.applyVat ? Math.round(totalBrut * body.vatRate / 100) : 0;
-    const retenue   = Math.round(totalBrut * body.retentionRate / 100);
-    const avance    = Math.round(totalBrut * body.advanceRecoveryRate / 100);
-    const net       = totalBrut + tva - retenue - avance - body.penaltyAmount;
+    const totalBrut = lignes.reduce((s, l) => s + (l.montantBrut as bigint), 0n);
+    const penalitesLignes = lignes.reduce((s, l) => s + (l.montantPenalite as bigint), 0n);
+
+    const regles = await chargerRegles({ marcheId: decompte.marcheId, bailleur: decompte.marche.financement, typeMarche: decompte.marche.type });
+    const calc = calcDecompteRegles({
+      montantPeriodeHtGnf: totalBrut,
+      penalites: penalitesLignes,
+      tauxTva: decompte.marche.tauxTva ?? undefined,
+      tauxRetenueGarantie: decompte.marche.tauxRetenueGarantie ?? undefined,
+      tauxAvance: decompte.marche.tauxAvance ?? undefined,
+    }, regles);
 
     await prisma.decompte.update({
       where: { id: req.params.id },
       data: {
-        montantPeriodeHtGnf: BigInt(totalBrut),
-        tva:              BigInt(tva),
-        retenueGarantie:  BigInt(retenue),
-        avanceRecuperee:  BigInt(avance),
-        penalites:        BigInt(body.penaltyAmount),
-        netAPayer:        BigInt(net),
+        montantPeriodeHtGnf: totalBrut,
+        penalites: penalitesLignes,
+        ...calc,
+        // Rejouabilité d'audit : mêmes règles figées que les autres voies.
+        reglesSnapshot: construireSnapshot(regles, "GLOBAL") as never,
       },
     });
 
-    res.json({ totalBrut, tva, retenue, avance, penalites: body.penaltyAmount, netAPayer: net, lignesCount: lignes.length });
+    res.json({
+      totalBrut: totalBrut.toString(),
+      tva: calc.tva.toString(),
+      retenue: calc.retenueGarantie.toString(),
+      avance: calc.avanceRecuperee.toString(),
+      penalites: penalitesLignes.toString(),
+      netAPayer: calc.netAPayer.toString(),
+      penalitesReporteesGnf: calc.penalitesReporteesGnf.toString(),
+      lignesCount: lignes.length,
+    });
   } catch (err) { next(err); }
 });
 

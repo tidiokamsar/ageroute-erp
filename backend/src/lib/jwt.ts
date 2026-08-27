@@ -1,11 +1,22 @@
 import jwt from "jsonwebtoken";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { env } from "../config/env";
 
 export interface JwtPayload {
   userId: string;
   email: string;
   role: string;
+}
+
+/**
+ * Empreinte SHA-256 d'un refresh token — la base ne stocke JAMAIS le jeton
+ * en clair (constat « refresh tokens en clair » de la revue du 26/08/2026) :
+ * un dump de base (sauvegarde égarée, injection SQL future, accès admin
+ * plateforme) ne livre que des empreintes, sans valeur présentable à
+ * /api/auth/refresh. La rotation compare par empreinte, même transaction.
+ */
+export function empreinteRefreshToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 export function signAccess(payload: JwtPayload) {
