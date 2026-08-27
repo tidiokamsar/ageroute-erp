@@ -344,7 +344,10 @@ function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () 
           <label className="text-xs font-bold text-gray-600 mb-1.5 block">Type de décompte *</label>
           <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
             className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-            {[["PARTIEL","Décompte partiel (avancement travaux)"],["DEFINITIF","Décompte définitif"],["AVANCE","Avance de démarrage"],["REGULARISATION","Régularisation"]].map(([v,l]) => (
+            {/* Types de l'énumération TypeDecompte du serveur. Ce sélecteur
+                proposait DEFINITIF et REGULARISATION, qui n'existent pas :
+                les choisir faisait échouer le dépôt en 400. */}
+            {[["AVANCE","Avance de démarrage"],["PROVISOIRE","Décompte provisoire"],["PARTIEL","Décompte partiel (avancement travaux)"],["INTERMEDIAIRE","Décompte intermédiaire"],["FINAL","Décompte définitif"],["CLOTURE","Décompte de clôture"],["APRES_AVENANT","Décompte après avenant"]].map(([v,l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
           </select>

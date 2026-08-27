@@ -438,11 +438,22 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
     throw new ApiError(403, `Dépôt bloqué — ${controle.blocages.join(" ")}`);
   }
 
-  // Référence à partir du nombre de décomptes existants du marché
-  const nbExistants = await prisma.decompte.count({ where: { marcheId } });
+  // Référence à partir du nombre de décomptes existants du marché.
+  // `deletedAt: null` comme partout ailleurs : sans ce filtre la numérotation
+  // comptait les décomptes logiquement supprimés et divergeait de la série
+  // produite par la saisie interne, qui l'applique.
+  const nbExistants = await prisma.decompte.count({ where: { marcheId, deletedAt: null } });
   const numStr = String(nbExistants + 1).padStart(2, "0");
   const typeCode = type === "PARTIEL" ? "DP" : type === "FINAL" ? "DF" : type === "AVANCE" ? "DA" : "DI";
   const reference = `${marche.reference}-${typeCode}-${numStr}`;
+
+  // Numéro de dossier — identifiant métier employé en aval : en-tête des
+  // documents officiels, situation de marché, recherche globale. Le dépôt
+  // portail ne le posait pas : ces dossiers s'imprimaient « N° Dossier — » et
+  // restaient introuvables par leur numéro.
+  const annee = new Date().getFullYear();
+  const nbDossiers = await prisma.decompte.count({ where: { numeroDossier: { startsWith: `ED-${annee}-` } } });
+  const numeroDossier = `ED-${annee}-${String(nbDossiers + 1).padStart(4, "0")}`;
 
   // Le circuit doit exister AVANT la création : un décompte déposé sans
   // circuit est un dossier perdu (constat de la revue : dépôts SOUMIS qui
@@ -495,10 +506,21 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
   if (possedes !== fichiersPieces.length) throw new ApiError(403, "Une pièce du dossier ne vous appartient pas");
   if (dejaRattachee) throw new ApiError(409, "Une pièce du dossier est déjà rattachée à un autre décompte");
 
+  // Cumul des périodes antérieures du marché — sans lui, chaque dépôt se croit
+  // le premier : `cumulActuelHtGnf` ne portait que la période courante, et le
+  // suivi d'avancement du marché repartait de zéro à chaque décompte.
+  const anterieurs = await prisma.decompte.aggregate({
+    where: { marcheId, deletedAt: null, statut: { not: "REJETE" } },
+    _sum: { montantPeriodeHtGnf: true },
+  });
+  const cumulPrecedentHtGnf = anterieurs._sum.montantPeriodeHtGnf ?? 0n;
+  const penalitesImputees = reportPrecedent?.penalitesReporteesGnf ?? 0n;
+
   const regles = await chargerRegles({ marcheId, bailleur: marche.financement, typeMarche: marche.type });
   const calc = calcDecompteRegles({
-    montantPeriodeHtGnf: BigInt(htSaisi),
-    penalites: reportPrecedent?.penalitesReporteesGnf ?? 0n,
+    montantPeriodeHtGnf: htSaisi,
+    cumulPrecedentHtGnf,
+    penalites: penalitesImputees,
     tauxTva: marche.tauxTva ?? undefined,
     tauxRetenueGarantie: marche.tauxRetenueGarantie ?? undefined,
     tauxAvance: marche.tauxAvance ?? undefined,
@@ -515,6 +537,29 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
         marcheId,
         entrepriseId,
         observations,
+        // Champs que le moteur de calcul ne RENVOIE pas : il les reçoit en
+        // entrée. Les omettre laissait `montantPeriodeHtGnf` au défaut 0
+        // pendant que TVA, TTC et net étaient calculés dessus — décompte
+        // arithmétiquement incohérent, non rejouable par l'audit, et invisible
+        // dans la consommation du marché. `penalites` porte le total imputé
+        // (ici le report absorbé), sans quoi la créance disparaît sans trace.
+        montantPeriodeHtGnf: htSaisi,
+        cumulPrecedentHtGnf,
+        penalites: penalitesImputees,
+        // §5 CDC — horodatage et numéro de dossier, comme la saisie interne.
+        // Sans dateDepot, le dossier sort du suivi des retards de la DG (les
+        // NULL passent en dernier) et la situation de marché imprime la date
+        // du jour comme date de dépôt. Sans numéro, il est introuvable par la
+        // recherche globale, qui interroge référence OU numéro de dossier.
+        dateDepot: new Date(),
+        numeroDossier,
+        // ⚠️ LIMITE CONNUE : le détail des lignes déclarées (désignation,
+        // unité, quantité, prix unitaire) n'est PAS conservé. Le modèle
+        // DecompteLigne est bâti sur le bordereau de prix du marché — il exige
+        // codeArticle et quantiteContrat, que le portail ne demande pas à
+        // l'entreprise. Les y forcer inventerait des données. Conséquence
+        // assumée en attendant l'arbitrage : le contrôleur ne voit que le
+        // montant total et doit ouvrir les pièces jointes pour le détail.
         ...calc,
         reglesSnapshot: construireSnapshot(regles, "GLOBAL") as never,
         // Bordereau déduit des pièces réellement jointes, via le référentiel
@@ -539,10 +584,28 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
     const instance = await tx.workflowInstance.create({
       data: { definitionId: definition.id, decompteId: d.id, etapeActuelle: 0, statut: "EN_COURS" },
     });
+    // Le dépôt est TRACÉ comme une action de circuit, au même titre que les
+    // deux autres portes d'entrée. Sans cette ligne, le déposant n'apparaît
+    // dans aucun des deux registres que lit la règle de séparation des tâches
+    // (RG9) : il pourrait ensuite valider la première étape de son propre
+    // dossier sans rencontrer d'obstacle.
+    if (definition.etapes.length > 0) {
+      await tx.workflowAction.create({
+        data: {
+          instanceId: instance.id, etapeId: definition.etapes[0].id, userId: req.user!.id,
+          decision: "SOUMISSION", commentaire: "Dépôt du décompte par l'entreprise (portail)",
+        },
+      });
+    }
     // Consommer le report absorbé : la créance reportable passe au dépôt
-    // courant (calc.penalitesReporteesGnf).
+    // courant (calc.penalitesReporteesGnf). La condition `gt: 0` rend la
+    // consommation atomique : deux dépôts simultanés ne peuvent pas absorber
+    // deux fois la même créance — le second ne met à jour aucune ligne.
     if (reportPrecedent) {
-      await tx.decompte.update({ where: { id: reportPrecedent.id }, data: { penalitesReporteesGnf: 0n } });
+      await tx.decompte.updateMany({
+        where: { id: reportPrecedent.id, penalitesReporteesGnf: { gt: 0n } },
+        data: { penalitesReporteesGnf: 0n },
+      });
     }
     await logAudit({
       userId: req.user!.id, action: "CREATE", entityType: "Decompte", entityId: d.id,
