@@ -54,10 +54,25 @@ jobs:
       - name: Garde - rien du laboratoire de signature en production
         working-directory: .
         run: |
-          # Mandat signature §6 : SoftHSM2, EJBCA CE, SignServer CE ou une URL
-          # de laboratoire dans un manifeste de production = echec.
-          if grep -Eiq 'softhsm|ejbca-ce|signserver-ce|labo-signserver|labo-dss|laboratoire-signature' docker-compose.yml; then
-            echo "Le manifeste de production reference le laboratoire de signature" >&2
+          # Mandat signature §6. La garde interdit que le manifeste de
+          # production DEFINISSE ou EMBARQUE le laboratoire : image d'une AC,
+          # d'un serveur de signature ou d'un HSM logiciel, ou service du
+          # laboratoire declare ici.
+          #
+          # Elle n'interdit PAS la reference au reseau externe
+          # `laboratoire-signature`. Tant que le module de signature tourne en
+          # mode laboratoire, le backend de production doit joindre ce reseau —
+          # c'est l'objet meme de la phase. L'interdire poussait a poser le
+          # reglage a la main sur le serveur, hors de tout versionnement : il
+          # etait alors perdu a chaque livraison par archive, et la signature
+          # tombait en silence. Ce qui doit rester ferme, c'est la porte de
+          # production, verifiee juste apres.
+          if grep -Eiq 'image:.*(softhsm|ejbca|signserver|dss)' docker-compose.yml; then
+            echo "Le manifeste de production embarque une image du laboratoire de signature" >&2
+            exit 1
+          fi
+          if grep -Eiq '^\s{2}(labo-signserver|labo-dss|labo-ejbca)' docker-compose.yml; then
+            echo "Un service du laboratoire est declare dans le manifeste de production" >&2
             exit 1
           fi
           if grep -Eiq 'SIGNATURE_PRODUCTION_AUTORISEE' docker-compose.yml; then
