@@ -148,6 +148,11 @@ enum AuditAction {
   SIGN
   LOGIN
   LOGIN_FAILED
+  LOGIN_2FA
+  LOGIN_2FA_EN_ATTENTE
+  LOGIN_2FA_ENROLEMENT_REQUIS
+  LOGIN_2FA_SECOURS
+  LOGIN_2FA_ECHEC
   EXPORT
 }
 
@@ -175,6 +180,14 @@ enum TypeAttachement {
 
 model User {
   uploads         Upload[]
+
+  // F-GO1 — 2FA (TOTP RFC 6238) pour les rôles financiers. Le secret est
+  // lisible (vérification HMAC), les codes de secours sont HACHÉS. Voir
+  // lib/totp.ts. La règle RG_2FA_ROLES (défaut DAF,DG) rend l'inscription
+  // obligatoire pour ces rôles.
+  twoFactorSecret     String?  // base32, 160 bits
+  twoFactorActif      Boolean  @default(false)
+  twoFactorCodesSecours Json?  // [{ hash: string, utilise: boolean }]
   id               String    @id @default(uuid())
   email            String    @unique
   nomComplet       String

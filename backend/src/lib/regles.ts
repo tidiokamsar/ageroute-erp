@@ -44,6 +44,10 @@ export const REGLES_DEFAUT = {
   RG_PENALITE_ASSIETTE: "HT", // assiette du calcul au mode FORMULE (HT ou TTC)
   RG_PENALITE_TAUX_JOURNALIER: "3000", // 1/3000e par jour (usuel, inactif en mode SAISIE)
   RG_PENALITE_PLAFOND_PCT: "100", // 100 = illimité (= comportement actuel)
+  // F-GO1 — 2FA obligatoire pour les rôles listés (défaut : DAF et DG, les
+  // signataires financiers). Le premier login d'un rôle concerné sans 2FA
+  // actif est dirigé vers l'enrôlement ; il ne peut RIEN faire d'autre.
+  RG_2FA_ROLES: "DAF,DG",
   // A6b — Plafond d'avenants (F-MA2, Code des marchés usuel : 25 % cumulé —
   // à confirmer DMP). 100 = illimité. Une dérogation motivée reste possible
   // et tracée ; le contrôle est BLOQUANT par défaut.
