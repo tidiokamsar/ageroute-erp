@@ -182,7 +182,9 @@ interface UploadResponse {
   size: number;
 }
 
-const TYPES_PIECE_DECOMPTE: Array<{ value: TypePieceDecompte; label: string; required: boolean }> = [
+// Repli local si l'API du référentiel est indisponible — la SOURCE est
+// /api/pieces-obligatoires (lib/pieces-obligatoires.ts côté serveur).
+const TYPES_PIECE_REPLI: Array<{ value: TypePieceDecompte; label: string; required: boolean }> = [
   { value: "DECOMPTE", label: "Décompte signé", required: true },
   { value: "ATTACHEMENT", label: "Attachements validés", required: true },
   { value: "FACTURE", label: "Facture", required: true },
@@ -190,10 +192,6 @@ const TYPES_PIECE_DECOMPTE: Array<{ value: TypePieceDecompte; label: string; req
   { value: "PHOTO", label: "Photos de chantier", required: false },
   { value: "PV", label: "PV contradictoire", required: false },
 ];
-
-const REQUIRED_PIECE_TYPES = TYPES_PIECE_DECOMPTE
-  .filter((piece) => piece.required)
-  .map((piece) => piece.value);
 
 const ALLOWED_PIECE_TYPES = new Set([
   "application/pdf", "image/jpeg", "image/png",
@@ -287,6 +285,17 @@ function DeposerForm({ marches, onSuccess }: { marches: Marche[]; onSuccess: () 
   const rg = ttc * 0.05;
   const net = ttc - precompte - rg - armp;
   const marcheChoisi = marches.find(m => m.id === form.marcheId);
+  // Référentiel servi par l'API (source unique), repli local sinon.
+  const piecesRefQ = useQuery({
+    queryKey: ["pieces-obligatoires"],
+    queryFn: () => api.get("/pieces-obligatoires").then((r) => r.data as Array<{ type: string; libelle: string; requis: boolean }>),
+    staleTime: Infinity,
+  });
+  const TYPES_PIECE_DECOMPTE = piecesRefQ.data
+    ? piecesRefQ.data.map((n) => ({ value: n.type as TypePieceDecompte, label: n.libelle, required: n.requis }))
+    : TYPES_PIECE_REPLI;
+  const REQUIRED_PIECE_TYPES = TYPES_PIECE_DECOMPTE.filter((d) => d.required).map((d) => d.value);
+
   const missingRequiredPieces = TYPES_PIECE_DECOMPTE.filter((definition) =>
     definition.required && !form.pieces.some((piece) => piece.type === definition.value),
   );

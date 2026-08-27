@@ -28,7 +28,7 @@ const DEFAULTS: { cle: string; valeur: string; type: string; categorie: string; 
   { cle:"TAUX_TVA_DEFAUT",       valeur:"18",  type:"NUMBER", categorie:"CALCUL",   libelle:"Taux TVA par défaut (%)" },
   { cle:"TAUX_RG_DEFAUT",        valeur:"5",   type:"NUMBER", categorie:"CALCUL",   libelle:"Taux retenue de garantie par défaut (%)" },
   { cle:"TAUX_AVANCE_DEFAUT",    valeur:"20",  type:"NUMBER", categorie:"CALCUL",   libelle:"Taux avance de démarrage par défaut (%)" },
-  { cle:"PIECES_OBLIGATOIRES",   valeur:'["decompteSigné","attachements","facture","rapportAvancement","photosChantier"]', type:"JSON", categorie:"WORKFLOW", libelle:"Pièces obligatoires pour soumission" },
+
   { cle:"ALERTE_EMAIL_ACTIF",    valeur:"true", type:"BOOLEAN", categorie:"ALERTES", libelle:"Activer les alertes email" },
   { cle:"ALERTE_RETARD_JOURS",   valeur:"3",   type:"NUMBER", categorie:"ALERTES",  libelle:"Délai avant alerte retard de traitement (jours)" },
   { cle:"ALERTE_EXPIRATION_GARANTIE_JOURS", valeur:"30", type:"NUMBER", categorie:"ALERTES", libelle:"Préavis expiration garantie (jours)" },

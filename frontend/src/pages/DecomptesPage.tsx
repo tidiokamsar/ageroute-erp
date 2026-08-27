@@ -123,7 +123,9 @@ const PAYMENT_STEPS = [
   { key: "PAIEMENT_FINAL", label: "Paiement",         Icon: CheckCircle },
 ];
 
-const PIECES_CFG = [
+// Repli local si l'API du référentiel est indisponible — la SOURCE est
+// /api/pieces-obligatoires (lib/pieces-obligatoires.ts côté serveur).
+const PIECES_CFG_REPLI = [
   { key: "decompteSigné",     label: "Décompte signé",           requis: true },
   { key: "attachements",      label: "Attachements validés",  requis: true },
   { key: "facture",           label: "Facture de l'entreprise",  requis: true },
@@ -440,6 +442,15 @@ export function DecomptesPage() {
   const canAdmin = ["ADMIN","DMC"].includes(r);
   const canDaf   = ["ADMIN","DAF"].includes(r);
   const canDg    = ["ADMIN","DG"].includes(r);
+
+  // Référentiel des pièces servi par l'API (source unique) — repli local en cas
+  // d'indisponibilité.
+  const piecesRef = useQuery({
+    queryKey: ["pieces-obligatoires"],
+    queryFn: () => api.get("/pieces-obligatoires").then((r) => r.data as Array<{ cle: string; libelle: string; requis: boolean }>),
+    staleTime: Infinity,
+  });
+  const PIECES_CFG = piecesRef.data?.map((n) => ({ key: n.cle, label: n.libelle, requis: n.requis })) ?? PIECES_CFG_REPLI;
 
   function piecesStats(p?: Pieces) {
     const ok = PIECES_CFG.filter((c) => p?.[c.key as keyof Pieces]).length;

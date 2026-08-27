@@ -47,6 +47,7 @@ import { requireRole } from "./middleware/rbac.middleware";
 import { checkModuleAccess } from "./middleware/moduleAccess.middleware";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 import { prisma } from "./lib/prisma";
+import { NATURES_PIECES } from "./lib/pieces-obligatoires";
 import { logAudit } from "./lib/audit";
 
 export function createApp() {
@@ -261,6 +262,13 @@ export function createApp() {
       if (!decompte) return res.status(404).json({ valide: false });
       res.json({ valide: true, decompte });
     } catch (err) { next(err); }
+  });
+
+  // Référentiel des pièces obligatoires (revue 27/08/2026) : lib/pieces-obligatoires.ts
+  // est la source unique côté serveur — les ÉCRANS en dérivent désormais leurs
+  // listes par cet endpoint au lieu de copies locales qui divergent.
+  app.get("/api/pieces-obligatoires", requireAuth, (_req, res) => {
+    res.json(NATURES_PIECES.map(({ cle, type, libelle, requis }) => ({ cle, type, libelle, requis })));
   });
 
   // Audit log endpoint — filtres optionnels (action, entité, utilisateur, période)

@@ -34,6 +34,7 @@ const include = {
 // remplace la copie inline flottante (qui renvoyait des noms de champs
 // inconnus de Prisma : armp/ttc/precompteTva → erreur « Unknown arg »).
 import { chargerRegles } from "../../lib/regles";
+import { CLES_PIECES } from "../../lib/pieces-obligatoires";
 import { calcDecompteRegles, type CalcReglesInput } from "./decomptes.calc.regles";
 import { construireSnapshot } from "./decomptes.regles.audit";
 
@@ -270,11 +271,10 @@ export const decomptesService = {
     // §5 CDC — horodatage automatique
     const dateDepot = (data.dateDepot as Date | undefined) ?? new Date();
 
-    // Pièces par défaut (toutes non fournies)
-    const piecesObligatoires = {
-      decompteSigné: false, attachements: false, facture: false,
-      rapportAvancement: false, photosChantier: false, pvContradictoire: false,
-    };
+    // Pièces par défaut (toutes non fournies) — dérivées du RÉFÉRENTIEL
+    // UNIQUE (lib/pieces-obligatoires.ts) : une pièce ajoutée là s'applique
+    // ici sans copie à maintenir.
+    const piecesObligatoires = Object.fromEntries(CLES_PIECES.map((cle) => [cle, false]));
 
     // A4 — report de l'excédent de pénalités (décision DAF du 26/08/2026) :
     // ce décompte absorbe d'abord le report en attente du décompte précédent
@@ -390,8 +390,17 @@ export const decomptesService = {
 
   // §6 CDC — mettre à jour les pièces obligatoires
   async updatePieces(id: string, pieces: Record<string, boolean>, userId: string) {
-    const before = await prisma.decompte.findUnique({ where: { id } });
+    const before = await prisma.decompte.findFirst({ where: { id, deletedAt: null } });
     if (!before) throw new ApiError(404, "Décompte introuvable");
+    // Même garde que update() (revue du 27/08/2026 — complément du correctif
+    // 6 de la revue générale) : un dossier engagé est figé, bordereau compris
+    // — décocher une pièce après les visas contournerait « engagé = figé ».
+    const STATUTS_MODIFIABLES = ["BROUILLON", "EN_CORRECTION"];
+    if (!STATUTS_MODIFIABLES.includes(before.statut)) {
+      throw new ApiError(409,
+        `Ce décompte est engagé dans le circuit (statut « ${before.statut} ») — son bordereau de pièces n'est plus modifiable. `
+        + "Pour le corriger, demandez une correction depuis l'étape en cours.");
+    }
     const updated = await prisma.decompte.update({ where: { id }, data: { piecesObligatoires: pieces as never } });
     await logAudit({ userId, action: "UPDATE", entityType: "Decompte", entityId: id, before, after: { piecesObligatoires: pieces } });
     return updated;
