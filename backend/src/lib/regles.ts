@@ -44,6 +44,10 @@ export const REGLES_DEFAUT = {
   RG_PENALITE_ASSIETTE: "HT", // assiette du calcul au mode FORMULE (HT ou TTC)
   RG_PENALITE_TAUX_JOURNALIER: "3000", // 1/3000e par jour (usuel, inactif en mode SAISIE)
   RG_PENALITE_PLAFOND_PCT: "100", // 100 = illimité (= comportement actuel)
+  // A6b — Plafond d'avenants (F-MA2, Code des marchés usuel : 25 % cumulé —
+  // à confirmer DMP). 100 = illimité. Une dérogation motivée reste possible
+  // et tracée ; le contrôle est BLOQUANT par défaut.
+  RG_PLAFOND_AVENANTS_PCT: "25",
   // A6 — Avances
   RG_AVANCE_MODE: "UNIQUE",
   RG_TAUX_AVANCE: "20",

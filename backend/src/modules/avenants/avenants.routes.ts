@@ -6,6 +6,7 @@ import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { z } from "zod";
 import { assertMarcheAutorise } from "../../lib/perimetre";
+import { chargerRegles, nombreRegles } from "../../lib/regles";
 
 export const avenantsRouter = Router();
 avenantsRouter.use(requireAuth);
@@ -19,6 +20,9 @@ const avenantSchema = z.object({
   dateSignature:             z.string().optional(),
   statut:                    z.enum(["ACTIF","ANNULE","EN_ATTENTE"]).optional(),
   observations:              z.string().optional(),
+  // F-MA2 — dérogation explicite au plafond d'avenants : bloquante à défaut,
+  // tracée avec motif obligatoire.
+  derogationPlafond:         z.boolean().default(false),
 });
 
 avenantsRouter.get("/marche/:marcheId", async (req: Request, res: Response, next: NextFunction) => {
@@ -52,6 +56,31 @@ avenantsRouter.post("/", requireRole("ADMIN","DMC","DAF","DG"), async (req: Requ
     const marche = await prisma.marche.findFirst({ where: { id: data.marcheId, deletedAt: null } });
     if (!marche) throw new ApiError(404, "Marché introuvable");
 
+    // ── F-MA2 — plafond d'avenants paramétrable (Code des marchés usuel :
+    // 25 % cumulé du montant initial ; à confirmer DMP — la règle
+    // RG_PLAFOND_AVENANTS_PCT est bornée par marché/bailleur/type comme les
+    // autres règles A1-A10). Contrôle BLOQUANT ; la dérogation exige un motif
+    // (≥ 20 caractères) et reste TRACÉE dans l'audit.
+    const reglesAv = await chargerRegles({ marcheId: marche.id, bailleur: marche.financement, typeMarche: marche.type });
+    const plafondPct = nombreRegles(reglesAv, "RG_PLAFOND_AVENANTS_PCT");
+    if (plafondPct < 100) {
+      const cumulActuel = await prisma.avenant.aggregate({
+        where: { marcheId: data.marcheId, statut: "ACTIF" },
+        _sum: { montantSupplementaireGnf: true },
+      });
+      const cumulAvecCeluiCi = (cumulActuel._sum.montantSupplementaireGnf ?? 0n) + BigInt(data.montantSupplementaireGnf);
+      const plafondGnf = marche.montantInitialGnf * BigInt(Math.round(plafondPct * 100)) / 10_000n;
+      if (cumulAvecCeluiCi > plafondGnf) {
+        const detail = `cumul avenants ${cumulAvecCeluiCi} GNF > plafond ${plafondPct} % du marché initial (${plafondGnf} GNF)`;
+        if (!data.derogationPlafond) {
+          throw new ApiError(400, `Plafond d'avenants dépassé — ${detail}. Une dérogation motivée (derogationPlafond + motif) est requise ; elle sera tracée.`);
+        }
+        if (!data.observations || data.observations.trim().length < 20) {
+          throw new ApiError(400, "La dérogation au plafond d'avenants exige un motif d'au moins 20 caractères (champ observations)");
+        }
+      }
+    }
+
     const avenant = await prisma.avenant.create({
       data: {
         ...data,
@@ -68,7 +97,10 @@ avenantsRouter.post("/", requireRole("ADMIN","DMC","DAF","DG"), async (req: Requ
     const montantActualise = marche.montantInitialGnf + (totalAvenants._sum.montantSupplementaireGnf ?? 0n);
     await prisma.marche.update({ where: { id: data.marcheId }, data: { montantActualiseGnf: montantActualise } });
 
-    await logAudit({ userId: req.user.id, action: "CREATE", entityType: "Avenant", entityId: avenant.id, after: avenant });
+    await logAudit({
+      userId: req.user.id, action: "CREATE", entityType: "Avenant", entityId: avenant.id,
+      after: { ...avenant, ...(data.derogationPlafond ? { derogationPlafond: true, motifDerogation: data.observations } : {}) },
+    });
     res.status(201).json(avenant);
   } catch (err) { next(err); }
 });
