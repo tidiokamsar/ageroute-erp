@@ -155,6 +155,27 @@ async function decompteIdsATraiterPour(role: string): Promise<string[]> {
   return [...new Set([...fromWorkflow, ...fromBpmn])];
 }
 
+/**
+ * Statuts dans lesquels un décompte reste modifiable.
+ *
+ * Un dossier engagé dans le circuit ne l'est plus : ses montants ont été visés.
+ * Pour le corriger, la voie est la demande de correction, qui arrête le circuit
+ * et le renvoie au déposant en EN_CORRECTION.
+ */
+export const STATUTS_DECOMPTE_MODIFIABLES = ["BROUILLON", "EN_CORRECTION"];
+
+/** Refuse toute écriture sur un décompte engagé, et renvoie le dossier chargé. */
+export async function assertDecompteModifiable(id: string) {
+  const decompte = await prisma.decompte.findFirst({ where: { id, deletedAt: null }, include: { marche: true } });
+  if (!decompte) throw new ApiError(404, "Décompte introuvable");
+  if (!STATUTS_DECOMPTE_MODIFIABLES.includes(decompte.statut)) {
+    throw new ApiError(409,
+      `Ce décompte est engagé dans le circuit (statut « ${decompte.statut} ») et n'est plus modifiable. `
+      + "Pour le corriger, demandez une correction depuis l'étape en cours : le dossier repartira au déposant.");
+  }
+  return decompte;
+}
+
 export const decomptesService = {
   async list(params: { page?: number; pageSize?: number; marcheId?: string; statut?: string; entrepriseId?: string; aTraiter?: boolean; role?: string; marcheIds?: string[] }) {
     const page     = Math.max(1, params.page ?? 1);

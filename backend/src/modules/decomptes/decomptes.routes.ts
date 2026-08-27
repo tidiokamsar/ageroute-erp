@@ -1,9 +1,10 @@
+import { logAudit } from "../../lib/audit";
 import { entrepriseDuCompte, assertMarcheAutorise } from "../../lib/perimetre";
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { decompteCreateSchema, decompteUpdateSchema } from "./decomptes.schema";
-import { decomptesService } from "./decomptes.service";
+import { decomptesService, assertDecompteModifiable } from "./decomptes.service";
 import { ApiError } from "../../middleware/error.middleware";
 import { entrepriseIdOf } from "../../lib/scope";
 import { getMarchesAffectes } from "../../lib/affectations";
@@ -372,19 +373,37 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
 
 decomptesRouter.put("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) throw new ApiError(401, "Non authentifié");
     const body = ligneSchema.parse(req.body);
     const { prisma } = await import("../../lib/prisma");
+    // Un dossier visé ne se modifie plus, et une modification de montant se trace.
+    await assertDecompteModifiable(req.params.id);
     const ligne = await prisma.decompteLigne.findFirst({ where: { id: req.params.ligneId, decompteId: req.params.id } });
     if (!ligne) throw new ApiError(404, "Ligne introuvable");
     const updated = await prisma.decompteLigne.update({ where: { id: req.params.ligneId }, data: body as never });
+    await logAudit({
+      userId: req.user.id, action: "UPDATE", entityType: "DecompteLigne", entityId: updated.id,
+      before: ligne, after: updated,
+    });
     res.json(updated);
   } catch (err) { next(err); }
 });
 
 decomptesRouter.delete("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC"), async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (!req.user) throw new ApiError(401, "Non authentifié");
     const { prisma } = await import("../../lib/prisma");
+    await assertDecompteModifiable(req.params.id);
+    // La ligne est détruite PHYSIQUEMENT — il n'y a pas de suppression logique
+    // sur ce modèle. Sa trace d'audit est donc la seule chose qui subsistera :
+    // sans elle, une ligne de facturation disparaissait sans laisser d'empreinte.
+    const ligne = await prisma.decompteLigne.findFirst({ where: { id: req.params.ligneId, decompteId: req.params.id } });
+    if (!ligne) throw new ApiError(404, "Ligne introuvable");
     await prisma.decompteLigne.delete({ where: { id: req.params.ligneId } });
+    await logAudit({
+      userId: req.user.id, action: "DELETE", entityType: "DecompteLigne", entityId: req.params.ligneId,
+      before: ligne, after: { decompteId: req.params.id, supprimee: true },
+    });
     res.status(204).send();
   } catch (err) { next(err); }
 });
@@ -392,35 +411,54 @@ decomptesRouter.delete("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC"), asyn
 // POST /:id/calculate — recalcule total depuis lignes (avec taux custom)
 decomptesRouter.post("/:id/calculate", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const body = z.object({
-      applyVat:            z.boolean().default(true),
-      vatRate:             z.number().min(0).max(100).default(18),
-      retentionRate:       z.number().min(0).max(100).default(5),
-      advanceRecoveryRate: z.number().min(0).max(100).default(10),
-      penaltyAmount:       z.number().min(0).default(0),
-    }).parse(req.body);
-
+    if (!req.user) throw new ApiError(401, "Non authentifié");
     const { prisma } = await import("../../lib/prisma");
-    const lignes = await prisma.decompteLigne.findMany({ where: { decompteId: req.params.id } });
-    const totalBrut = lignes.reduce((s, l) => s + Number(l.montantBrut), 0);
-    const tva       = body.applyVat ? Math.round(totalBrut * body.vatRate / 100) : 0;
-    const retenue   = Math.round(totalBrut * body.retentionRate / 100);
-    const avance    = Math.round(totalBrut * body.advanceRecoveryRate / 100);
-    const net       = totalBrut + tva - retenue - avance - body.penaltyAmount;
+    const before = await assertDecompteModifiable(req.params.id);
 
-    await prisma.decompte.update({
+    // Les taux ne viennent PLUS du corps de la requête. Cette route les
+    // acceptait — vatRate, retentionRate, advanceRecoveryRate — et recalculait
+    // en virgule flottante, hors du moteur de règles : n'importe quel appelant
+    // pouvait donc imposer une TVA à 0 et réécrire le net à payer. L'écran
+    // envoyait de toute façon les taux DU MARCHÉ ; ils sont désormais lus à la
+    // source, et la cascade fiscale passe par le moteur (A1-A7), en entiers.
+    // Les pénalités déjà imputées sont conservées : le corps par défaut les
+    // remettait silencieusement à zéro à chaque clic sur « Recalculer ».
+    const lignes = await prisma.decompteLigne.findMany({ where: { decompteId: req.params.id } });
+    const totalHt = lignes.reduce((s, l) => s + l.montantBrut, 0n);
+
+    const regles = await chargerRegles({
+      marcheId: before.marcheId, bailleur: before.marche.financement, typeMarche: before.marche.type,
+    });
+    const calc = calcDecompteRegles({
+      montantPeriodeHtGnf: totalHt,
+      cumulPrecedentHtGnf: before.cumulPrecedentHtGnf,
+      penalites: before.penalites,
+      tauxTva: before.marche.tauxTva ?? undefined,
+      tauxRetenueGarantie: before.marche.tauxRetenueGarantie ?? undefined,
+      tauxAvance: before.marche.tauxAvance ?? undefined,
+    }, regles);
+
+    const updated = await prisma.decompte.update({
       where: { id: req.params.id },
-      data: {
-        montantPeriodeHtGnf: BigInt(totalBrut),
-        tva:              BigInt(tva),
-        retenueGarantie:  BigInt(retenue),
-        avanceRecuperee:  BigInt(avance),
-        penalites:        BigInt(body.penaltyAmount),
-        netAPayer:        BigInt(net),
+      data: { montantPeriodeHtGnf: totalHt, ...calc, reglesSnapshot: construireSnapshot(regles, "LIGNES") as never },
+    });
+    await logAudit({
+      userId: req.user.id, action: "UPDATE", entityType: "Decompte", entityId: req.params.id,
+      before: {
+        montantPeriodeHtGnf: before.montantPeriodeHtGnf, tva: before.tva, retenueGarantie: before.retenueGarantie,
+        avanceRecuperee: before.avanceRecuperee, penalites: before.penalites, netAPayer: before.netAPayer,
+      },
+      after: {
+        recalcul: "depuis les lignes", lignes: lignes.length,
+        montantPeriodeHtGnf: totalHt, tva: calc.tva, retenueGarantie: calc.retenueGarantie,
+        avanceRecuperee: calc.avanceRecuperee, netAPayer: calc.netAPayer,
       },
     });
 
-    res.json({ totalBrut, tva, retenue, avance, penalites: body.penaltyAmount, netAPayer: net, lignesCount: lignes.length });
+    res.json({
+      totalBrut: totalHt, tva: calc.tva, retenue: calc.retenueGarantie, avance: calc.avanceRecuperee,
+      penalites: before.penalites, netAPayer: calc.netAPayer, lignesCount: lignes.length,
+    });
   } catch (err) { next(err); }
 });
 
