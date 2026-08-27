@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { erreurJournalisable } from "./masquage";
 import { env } from "../config/env";
 
 const transporter = nodemailer.createTransport({
@@ -15,7 +16,7 @@ export async function sendMail(to: string | string[], subject: string, html: str
   try {
     await transporter.sendMail({ from: env.SMTP_FROM, to, subject, html });
   } catch (err) {
-    console.error("[MAILER] Envoi échoué:", (err as Error).message);
+    console.error("[MAILER] Envoi échoué:", erreurJournalisable(err));
   }
 }
 

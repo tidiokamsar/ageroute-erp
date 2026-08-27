@@ -17,7 +17,7 @@ import { logAudit } from "../../lib/audit";
 import { chargerRegles } from "../../lib/regles";
 import { calcDecompteRegles } from "../decomptes/decomptes.calc.regles";
 import { construireSnapshot } from "../decomptes/decomptes.regles.audit";
-import { bordereauDepuisTypes, clePourType } from "../../lib/pieces-obligatoires";
+import { bordereauDepuisTypes, clePourType, piecesRequisesManquantes } from "../../lib/pieces-obligatoires";
 import { formaterMontant } from "../../lib/montants";
 import { getStoredFilenameFromUploadUrl, portailDecompteRequestSchema } from "./portail.decompte.schema";
 import { calculerMontantLigneGnf } from "./portail.decompte.service";
@@ -364,6 +364,14 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
   });
   if (!controle.autorise) throw new ApiError(403, `Envoi bloqué — ${controle.blocages.join(" ")}`);
 
+  // Pièces requises (revue 27/08/2026) : la porte interne (workflow/soumettre)
+  // exigeait déjà le bordereau complet ; la porte portail divergeait — les
+  // deux portes appliquent désormais le même référentiel.
+  const manquantesPp = piecesRequisesManquantes(decompte.piecesObligatoires as Record<string, boolean> | null);
+  if (manquantesPp.length) {
+    throw new ApiError(400, `Pièces manquantes : ${manquantesPp.join(", ")}`);
+  }
+
   const definition = await prisma.workflowDefinition.findFirst({
     where: { financement: decompte.marche.financement, actif: true },
     include: { etapes: { orderBy: { ordre: "asc" } } },
@@ -466,10 +474,16 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
   // `deletedAt: null` comme partout ailleurs : sans ce filtre la numérotation
   // comptait les décomptes logiquement supprimés et divergeait de la série
   // produite par la saisie interne, qui l'applique.
-  const nbExistants = await prisma.decompte.count({ where: { marcheId, deletedAt: null } });
-  const numStr = String(nbExistants + 1).padStart(2, "0");
+  // count()+1 non atomique : sous dépôts simultanés, la contrainte unique
+  // refuse le second — on vérifie l'unicité AVANT la création et décale.
   const typeCode = type === "PARTIEL" ? "DP" : type === "FINAL" ? "DF" : type === "AVANCE" ? "DA" : "DI";
-  const reference = `${marche.reference}-${typeCode}-${numStr}`;
+  let reference = "";
+  for (let tentative = 0; tentative < 5; tentative++) {
+    const nbExistants = await prisma.decompte.count({ where: { marcheId, deletedAt: null } });
+    reference = `${marche.reference}-${typeCode}-${String(nbExistants + 1 + tentative).padStart(2, "0")}`;
+    const pris = await prisma.decompte.findFirst({ where: { reference }, select: { id: true } });
+    if (!pris) break;
+  }
 
   // Numéro de dossier — identifiant métier employé en aval : en-tête des
   // documents officiels, situation de marché, recherche globale. Le dépôt

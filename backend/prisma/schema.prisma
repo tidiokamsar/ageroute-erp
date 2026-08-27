@@ -148,6 +148,7 @@ enum AuditAction {
   SIGN
   LOGIN
   LOGIN_FAILED
+  EXPORT
 }
 
 // ===================== §9 CDC — ATTACHEMENTS BPMN =====================

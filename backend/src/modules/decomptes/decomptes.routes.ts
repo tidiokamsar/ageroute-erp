@@ -246,6 +246,79 @@ const ligneSchema = z.object({
   observations:      z.string().optional(),
 });
 
+/**
+ * Recalcul du décompte global depuis ses lignes — sommes en BigInt, net borné
+ * par les règles (A4), absorption/report de l'excédent de pénalités,
+ * snapshot de rejeu. Revue 27/08/2026 : vivait uniquement dans POST /lignes ;
+ * PUT et DELETE d'une ligne laissaient les TOTAUX du décompte périmés
+ * jusqu'à la prochaine création de ligne.
+ */
+async function recalculerTotauxDecompte(decompteId: string): Promise<void> {
+  const { prisma } = await import("../../lib/prisma");
+  const decomptePr = await prisma.decompte.findFirst({ where: { id: decompteId, deletedAt: null }, include: { marche: true } });
+  if (!decomptePr) throw new ApiError(404, "Décompte introuvable");
+    // Recalcul du décompte global depuis les lignes — sommes en BigInt
+    // (plus aucune conversion flottante) et net borné par les règles (A4)
+    const toutesLignes = await prisma.decompteLigne.findMany({ where: { decompteId: decompteId } });
+    const somme = (champ: "montantBrut" | "montantTva" | "montantArmp" | "montantTtc" | "precompteTva" | "montantRetenue" | "montantAvanceRecup" | "montantPenalite") =>
+      toutesLignes.reduce((s, l) => s + (l[champ] as bigint), 0n);
+    const totalBrut = somme("montantBrut"), totalTva = somme("montantTva"), totalArmp = somme("montantArmp");
+    const totalTtc = somme("montantTtc"), totalPrecomp = somme("precompteTva");
+    const totalRetenue = somme("montantRetenue"), totalAvance = somme("montantAvanceRecup"), totalPen = somme("montantPenalite");
+    const reglesTotaux = await chargerRegles({ marcheId: decomptePr.marcheId, bailleur: decomptePr.marche.financement, typeMarche: decomptePr.marche.type });
+    // A4 — report de l'excédent de pénalités (décision DAF du 26/08/2026) :
+    // absorption du report en attente du décompte précédent du marché, puis
+    // écrêtage du propre excédent, reporté sur le décompte suivant. La colonne
+    // `penalites` porte le total imputé (saisies + report entrant) pour que le
+    // rejeu d'audit concorde. Le report est borné aux pénalités imputées.
+    const reportPrecedent = await prisma.decompte.findFirst({
+      // Bornée aux décomptes ANTÉRIEURS : le filtre `id != courant` laissait
+      // un décompte ancien aspirer le report d'un décompte POSTÉRIEUR déjà en
+      // circuit, et le remettre à zéro sans que son net soit recalculé.
+      where: { marcheId: decomptePr.marcheId, deletedAt: null, penalitesReporteesGnf: { gt: 0n }, createdAt: { lt: decomptePr.createdAt } },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, penalitesReporteesGnf: true },
+    });
+    const penalitesImputees = totalPen + (reportPrecedent?.penalitesReporteesGnf ?? 0n);
+    let totalNet = totalTtc - totalPrecomp - totalRetenue - (reglesTotaux.RG_ARMP_INCLUSE_TTC === "true" ? totalArmp : 0n) - totalAvance - penalitesImputees;
+    let reportSortant = 0n;
+    if (reglesTotaux.RG_NET_PLANCHER_ZERO === "true" && totalNet < 0n) {
+      const excedent = -totalNet;
+      if (reglesTotaux.RG_REPORT_PENALITES === "true") {
+        reportSortant = excedent > penalitesImputees ? penalitesImputees : excedent;
+      }
+      totalNet = 0n;
+    }
+
+    // Totaux, nouveau report et consommation de l'ancien : une transaction.
+    await prisma.$transaction(async (tx) => {
+      await tx.decompte.update({
+        where: { id: decompteId },
+        data: {
+          montantPeriodeHtGnf: totalBrut,
+          tva:             totalTva,
+          montantArmpGnf:  totalArmp,
+          montantTtcGnf:   totalTtc,
+          precompteTvaGnf: totalPrecomp,
+          retenueGarantie: totalRetenue,
+          avanceRecuperee: totalAvance,
+          penalites:       penalitesImputees,
+          netAPayer:       totalNet,
+          penalitesReporteesGnf: reportSortant,
+          // L1.2 — règles figées ayant servi à la combinaison du net (rejeu)
+          reglesSnapshot:  construireSnapshot(reglesTotaux, "LIGNES") as never,
+        },
+      });
+      if (reportPrecedent) {
+        // Consommation ATOMIQUE : la condition `gt: 0` garantit qu'une seule
+        // écriture absorbe la créance. Sans elle, deux créations concurrentes
+        // lisaient le même report hors transaction et le déduisaient toutes
+        // deux — l'entreprise se voyait retenir deux fois la même pénalité.
+        await tx.decompte.updateMany({ where: { id: reportPrecedent.id, penalitesReporteesGnf: { gt: 0n } }, data: { penalitesReporteesGnf: 0n } });
+      }
+    });
+}
+
 decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
@@ -304,66 +377,7 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
       },
     });
 
-    // Recalcul du décompte global depuis les lignes — sommes en BigInt
-    // (plus aucune conversion flottante) et net borné par les règles (A4)
-    const toutesLignes = await prisma.decompteLigne.findMany({ where: { decompteId: req.params.id } });
-    const somme = (champ: "montantBrut" | "montantTva" | "montantArmp" | "montantTtc" | "precompteTva" | "montantRetenue" | "montantAvanceRecup" | "montantPenalite") =>
-      toutesLignes.reduce((s, l) => s + (l[champ] as bigint), 0n);
-    const totalBrut = somme("montantBrut"), totalTva = somme("montantTva"), totalArmp = somme("montantArmp");
-    const totalTtc = somme("montantTtc"), totalPrecomp = somme("precompteTva");
-    const totalRetenue = somme("montantRetenue"), totalAvance = somme("montantAvanceRecup"), totalPen = somme("montantPenalite");
-    const reglesTotaux = await chargerRegles({ marcheId: decompte.marcheId, bailleur: decompte.marche.financement, typeMarche: decompte.marche.type });
-    // A4 — report de l'excédent de pénalités (décision DAF du 26/08/2026) :
-    // absorption du report en attente du décompte précédent du marché, puis
-    // écrêtage du propre excédent, reporté sur le décompte suivant. La colonne
-    // `penalites` porte le total imputé (saisies + report entrant) pour que le
-    // rejeu d'audit concorde. Le report est borné aux pénalités imputées.
-    const reportPrecedent = await prisma.decompte.findFirst({
-      // Bornée aux décomptes ANTÉRIEURS : le filtre `id != courant` laissait
-      // un décompte ancien aspirer le report d'un décompte POSTÉRIEUR déjà en
-      // circuit, et le remettre à zéro sans que son net soit recalculé.
-      where: { marcheId: decompte.marcheId, deletedAt: null, penalitesReporteesGnf: { gt: 0n }, createdAt: { lt: decompte.createdAt } },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, penalitesReporteesGnf: true },
-    });
-    const penalitesImputees = totalPen + (reportPrecedent?.penalitesReporteesGnf ?? 0n);
-    let totalNet = totalTtc - totalPrecomp - totalRetenue - (reglesTotaux.RG_ARMP_INCLUSE_TTC === "true" ? totalArmp : 0n) - totalAvance - penalitesImputees;
-    let reportSortant = 0n;
-    if (reglesTotaux.RG_NET_PLANCHER_ZERO === "true" && totalNet < 0n) {
-      const excedent = -totalNet;
-      if (reglesTotaux.RG_REPORT_PENALITES === "true") {
-        reportSortant = excedent > penalitesImputees ? penalitesImputees : excedent;
-      }
-      totalNet = 0n;
-    }
-
-    // Totaux, nouveau report et consommation de l'ancien : une transaction.
-    await prisma.$transaction(async (tx) => {
-      await tx.decompte.update({
-        where: { id: req.params.id },
-        data: {
-          montantPeriodeHtGnf: totalBrut,
-          tva:             totalTva,
-          montantArmpGnf:  totalArmp,
-          montantTtcGnf:   totalTtc,
-          precompteTvaGnf: totalPrecomp,
-          retenueGarantie: totalRetenue,
-          avanceRecuperee: totalAvance,
-          penalites:       penalitesImputees,
-          netAPayer:       totalNet,
-          penalitesReporteesGnf: reportSortant,
-          // L1.2 — règles figées ayant servi à la combinaison du net (rejeu)
-          reglesSnapshot:  construireSnapshot(reglesTotaux, "LIGNES") as never,
-        },
-      });
-      if (reportPrecedent) {
-        // Consommation ATOMIQUE : la condition `gt: 0` garantit qu'une seule
-        // écriture absorbe la créance. Sans elle, deux créations concurrentes
-        // lisaient le même report hors transaction et le déduisaient toutes
-        // deux — l'entreprise se voyait retenir deux fois la même pénalité.
-        await tx.decompte.updateMany({ where: { id: reportPrecedent.id, penalitesReporteesGnf: { gt: 0n } }, data: { penalitesReporteesGnf: 0n } });
-      }
-    });
+    await recalculerTotauxDecompte(req.params.id);
 
     res.status(201).json({ ...ligne, prixUnitaire: ligne.prixUnitaire.toString(), montantBrut: ligne.montantBrut.toString(), montantNet: ligne.montantNet.toString() });
   } catch (err) { next(err); }
@@ -379,6 +393,7 @@ decomptesRouter.put("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC", "MISSION
     const ligne = await prisma.decompteLigne.findFirst({ where: { id: req.params.ligneId, decompteId: req.params.id } });
     if (!ligne) throw new ApiError(404, "Ligne introuvable");
     const updated = await prisma.decompteLigne.update({ where: { id: req.params.ligneId }, data: body as never });
+    await recalculerTotauxDecompte(req.params.id);
     await logAudit({
       userId: req.user.id, action: "UPDATE", entityType: "DecompteLigne", entityId: updated.id,
       before: ligne, after: updated,
@@ -398,6 +413,7 @@ decomptesRouter.delete("/:id/lignes/:ligneId", requireRole("ADMIN", "DMC"), asyn
     const ligne = await prisma.decompteLigne.findFirst({ where: { id: req.params.ligneId, decompteId: req.params.id } });
     if (!ligne) throw new ApiError(404, "Ligne introuvable");
     await prisma.decompteLigne.delete({ where: { id: req.params.ligneId } });
+    await recalculerTotauxDecompte(req.params.id);
     await logAudit({
       userId: req.user.id, action: "DELETE", entityType: "DecompteLigne", entityId: req.params.ligneId,
       before: ligne, after: { decompteId: req.params.id, supprimee: true },

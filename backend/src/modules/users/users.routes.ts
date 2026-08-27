@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 // Schéma et découpage du payload : extraits pour être testables sans express ni
 // Prisma, selon la convention de tests du dépôt.
-import { userCreateSchema, userUpdateSchema, separerMotDePasse } from "./users.payload";
+import { verifierCoherenceUtilisateur, userCreateSchema, userUpdateSchema, separerMotDePasse } from "./users.payload";
 // Source unique des rôles à périmètre. La liste était recopiée en dur ici, si
 // bien qu'ajouter un rôle scopé dans lib/affectations.ts ne suffisait pas :
 // l'écran d'administration continuait de refuser de lui affecter des marchés.
@@ -39,6 +39,15 @@ usersRouter.put("/:id", async (req: Request, res: Response, next: NextFunction) 
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
     const data = userUpdateSchema.parse(req.body);
+    // Cohérence rôle ↔ entreprise sur l'état FUSIONNÉ : la requête est
+    // partielle, le couple à vérifier est (rôle final, rattachement final).
+    const avant = await prisma.user.findUnique({ where: { id: req.params.id }, select: { role: true, entrepriseId: true } });
+    if (!avant) throw new ApiError(404, "Utilisateur introuvable");
+    const erreurCoherence = verifierCoherenceUtilisateur(
+      data.role ?? avant.role,
+      data.entrepriseId !== undefined ? data.entrepriseId : avant.entrepriseId,
+    );
+    if (erreurCoherence) throw new ApiError(400, erreurCoherence);
     const updated = await prisma.user.update({ where: { id: req.params.id }, data });
     if (data.role !== undefined || data.actif === false) {
       await prisma.refreshToken.updateMany({ where: { userId: req.params.id }, data: { revoked: true } });
@@ -80,7 +89,23 @@ usersRouter.delete("/:id", async (req: Request, res: Response, next: NextFunctio
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
     if (req.params.id === req.user.id) throw new ApiError(400, "Vous ne pouvez pas supprimer votre propre compte");
-    await prisma.user.delete({ where: { id: req.params.id } });
+    // Garde FK (revue 27/08/2026) : délégations, actions de workflow et audits
+    // référencent l'utilisateur — la suppression physique échouait en 500
+    // opaque (P2003) dès qu'une trace existait. L'historique d'un agent fait
+    // partie de la piste d'audit : on ne le détache pas. Voie correcte :
+    // désactiver le compte (PUT /:id/actif), qui révoque aussi ses jetons.
+    const traces = await prisma.delegation.count({ where: { OR: [{ titulaireId: req.params.id }, { suppleantId: req.params.id }] } });
+    if (traces > 0) {
+      throw new ApiError(409, "Cet utilisateur porte des délégations — détachez-les d'abord, ou désactivez le compte (PUT /api/users/:id/actif) : son historique fait partie de la piste d'audit.");
+    }
+    try {
+      await prisma.user.delete({ where: { id: req.params.id } });
+    } catch (e) {
+      if ((e as { code?: string }).code === "P2003") {
+        throw new ApiError(409, "Cet utilisateur a des traces (validations, audits, actions) — désactivez le compte plutôt que le supprimer : son historique fait partie de la piste d'audit.");
+      }
+      throw e;
+    }
     await logAudit({ userId: req.user.id, action: "DELETE", entityType: "User", entityId: req.params.id });
     res.status(204).send();
   } catch (err) { next(err); }

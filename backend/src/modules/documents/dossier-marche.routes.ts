@@ -415,7 +415,7 @@ dossierMarcheRouter.get("/marche/:id/dossier/pdf", async (req: Request, res: Res
     doc.end();
 
     await logAudit({
-      userId: req.user.id, action: "UPDATE", entityType: "Marche", entityId: m.id,
+      userId: req.user.id, action: "EXPORT", entityType: "Marche", entityId: m.id,
       after: { document: "dossier-marche-pdf", sections: 14 },
     });
   } catch (err) { next(err); }

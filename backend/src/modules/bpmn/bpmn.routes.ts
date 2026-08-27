@@ -10,6 +10,7 @@ import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
+import { erreurJournalisable } from "../../lib/masquage";
 import { ApiError } from "../../middleware/error.middleware";
 import { notifyNextStep, notifyDecision, notifyApprouve } from "../../lib/mailer";
 import { rolesEffectifs } from "../../lib/delegations";
@@ -201,7 +202,7 @@ bpmnRouter.post("/soumettre/:moduleType/:entityId", ecritureBpmnRetiree, require
       PROJET: "EN_VALIDATION", MARCHE: "UNDER_REVIEW",
       ATTACHEMENT: "SOUMIS", DECOMPTE: "DEPOSE", CONFORMITE: "SUBMITTED",
     };
-    await updateEntityStatut(mt, entityId, statutInitial[mt] ?? "EN_VALIDATION").catch((e) => { console.error("[BPMN] updateEntityStatut:", e); });
+    await updateEntityStatut(mt, entityId, statutInitial[mt] ?? "EN_VALIDATION").catch((e) => { console.error("[BPMN] updateEntityStatut:", erreurJournalisable(e)); });
 
     await logAudit({ userId: req.user.id, action: "CREATE", entityType: `BpmnInstance_${mt}`, entityId: instance.id, after: { moduleType: mt, entityId, definitionId: def.id } });
 
@@ -328,7 +329,7 @@ bpmnRouter.post("/:instanceId/action", ecritureBpmnRetiree, async (req: Request,
     // Traitement selon la décision
     if (decision === "REJETE") {
       await prisma.$executeRaw`UPDATE bpmn_instances SET statut='REJETE', updated_at=NOW() WHERE id=${instance.id}`;
-      await updateEntityStatut(instance.module_type, instance.entity_id, "REJETE").catch((e) => { console.error("[BPMN] updateEntityStatut:", e); });
+      await updateEntityStatut(instance.module_type, instance.entity_id, "REJETE").catch((e) => { console.error("[BPMN] updateEntityStatut:", erreurJournalisable(e)); });
       // Notifier le soumetteur du rejet
       void notifyDecision({
         to: soumetteurEmail, moduleType: instance.module_type, entityRef,
@@ -339,7 +340,7 @@ bpmnRouter.post("/:instanceId/action", ecritureBpmnRetiree, async (req: Request,
     }
 
     if (decision === "DEMANDE_CORRECTION") {
-      await updateEntityStatut(instance.module_type, instance.entity_id, "DEMANDE_CORRECTION").catch((e) => { console.error("[BPMN] updateEntityStatut:", e); });
+      await updateEntityStatut(instance.module_type, instance.entity_id, "DEMANDE_CORRECTION").catch((e) => { console.error("[BPMN] updateEntityStatut:", erreurJournalisable(e)); });
       void notifyDecision({
         to: soumetteurEmail, moduleType: instance.module_type, entityRef,
         decision: "DEMANDE_CORRECTION", stepNom: etapeCourante.nom, decideurNom,
@@ -386,7 +387,7 @@ bpmnRouter.post("/:instanceId/action", ecritureBpmnRetiree, async (req: Request,
         DECOMPTE:    "VALIDE_DG",
         CONFORMITE:  "CONFORME",
       };
-      await updateEntityStatut(instance.module_type, instance.entity_id, statutFinal[instance.module_type] ?? "APPROUVE").catch((e) => { console.error("[BPMN] updateEntityStatut:", e); });
+      await updateEntityStatut(instance.module_type, instance.entity_id, statutFinal[instance.module_type] ?? "APPROUVE").catch((e) => { console.error("[BPMN] updateEntityStatut:", erreurJournalisable(e)); });
       await logAudit({ userId: req.user.id, action: "APPROVE", entityType: `Bpmn_${instance.module_type}`, entityId: instance.entity_id });
 
       // F4 — Décomptes : déclencher le circuit financier après validation DG

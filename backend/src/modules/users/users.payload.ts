@@ -46,7 +46,9 @@ const userChampsSchema = z.object({
   prenom: z.string().optional(),
   fonction: z.string().optional(),
   // Spécimen de signature déposé via /api/uploads — apposé sur les documents.
-  signatureUrl: z.string().optional(),
+  // Contraint (revue 27/08/2026) : c'était une chaîne libre affichée sur des
+  // pièces officielles — un chemin interne uniquement, pas d'URL externe.
+  signatureUrl: z.string().startsWith("/api/uploads/").max(300).optional(),
   // Entreprise rattachée. Ce champ n'existait pas : zod retirant les clés
   // inconnues, un compte ENTREPRISE créé par l'API se retrouvait sans
   // rattachement — et l'absence de rattachement vaut « aucune restriction »
@@ -55,8 +57,8 @@ const userChampsSchema = z.object({
   entrepriseId: z.string().uuid().nullish(),
 });
 
-/** Création : objet nu + cohérence entre le rôle et le rattachement. */
-export const userCreateSchema = userChampsSchema.superRefine((donnees, contexte) => {
+/** Cohérence rôle ↔ rattachement entreprise (bidirectionnelle). */
+function coherenceRoleEntreprise(donnees: { role?: string; entrepriseId?: string | null }, contexte: z.RefinementCtx) {
   // Fermeture par défaut : un compte ENTREPRISE sans entreprise n'est pas un
   // compte à privilèges, c'est un compte incohérent. On refuse de le créer
   // plutôt que de le laisser hériter d'un périmètre vide interprété comme total.
@@ -76,16 +78,43 @@ export const userCreateSchema = userChampsSchema.superRefine((donnees, contexte)
       message: "Seul un compte entreprise peut être rattaché à une entreprise",
     });
   }
-});
+}
+
+// Création ET mise à jour (revue 27/08/2026 : la voie update utilisait un
+// schéma dérivé sans la vérification — elle pouvait produire le couple
+// incohérent que la création refuse).
+export const userCreateSchema = userChampsSchema.superRefine(coherenceRoleEntreprise);
 
 /**
  * Modification : les champs sont facultatifs et le mot de passe est écarté.
  * Dérivée de l'objet NU, avant affinement — un schéma affiné n'expose plus
- * `.partial()`. La cohérence rôle/entreprise n'est donc pas revérifiée ici :
- * la modification d'un rattachement passe par l'écran d'administration, qui
- * envoie le couple complet.
+ * `.partial()`. La cohérence rôle/entreprise est revérifiée APRÈS partial
+ * (revue 27/08/2026 : la voie update pouvait produire le couple incohérent
+ * que la création refuse — fail-closed à l'usage, mais incohérent en base).
+ * Sur champs partiels, la vérification ne s'applique que si l'un des deux
+ * côtés du couple est fourni.
  */
 export const userUpdateSchema = userChampsSchema.partial().omit({ password: true });
+
+/**
+ * Cohérence rôle ↔ entreprise sur l'état FUSIONNÉ (revue 27/08/2026). Sur un
+ * schéma partiel, vérifier la seule requête serait faux : changer le rôle en
+ * ENTREPRISE sans renvoyer le rattachement — déjà présent en base — serait
+ * refusé. La route PUT fournit l'état existant ; la vérification porte sur le
+ * couple complet.
+ */
+export function verifierCoherenceUtilisateur(
+  role: string | undefined,
+  entrepriseId: string | null | undefined,
+): string | null {
+  if (role === "ENTREPRISE" && !entrepriseId) {
+    return "Un compte entreprise doit être rattaché à une entreprise";
+  }
+  if (role && role !== "ENTREPRISE" && entrepriseId) {
+    return "Seul un compte entreprise peut être rattaché à une entreprise";
+  }
+  return null;
+}
 
 export type UserCreateInput = z.infer<typeof userCreateSchema>;
 export type UserCreateColonnes = Omit<UserCreateInput, "password">;

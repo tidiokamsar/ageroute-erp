@@ -258,15 +258,22 @@ export const decomptesService = {
     // §CDC — Règle bloquante : conformité fiscale et administrative obligatoire
     await assertEntrepriseConforme(data.entrepriseId as string);
 
-    // §5 CDC — référence + numéro dossier auto
-    let reference = (data.reference as string | undefined)?.trim();
-    if (!reference) {
-      const count = await prisma.decompte.count({ where: { marcheId: marche.id } });
-      reference = `${marche.reference}/D-${String(count + 1).padStart(2, "0")}`;
-    }
+    // §5 CDC — référence + numéro dossier auto. Le count()+1 n'est pas atomique :
+    // deux dépôts simultanés calculent le même numéro, la contrainte unique
+    // refuse le second (P2002) — on RECALCULE et réessaie plutôt que d'échouer.
     const year = new Date().getFullYear();
-    const dossierCount = await prisma.decompte.count({ where: { numeroDossier: { startsWith: `ED-${year}-` } } });
-    const numeroDossier = `ED-${year}-${String(dossierCount + 1).padStart(4, "0")}`;
+    let reference = (data.reference as string | undefined)?.trim();
+    let numeroDossier = "";
+    for (let tentative = 0; tentative < 5; tentative++) {
+      if (!reference) {
+        const count = await prisma.decompte.count({ where: { marcheId: marche.id } });
+        reference = `${marche.reference}/D-${String(count + 1 + tentative).padStart(2, "0")}`;
+      }
+      const dossierCount = await prisma.decompte.count({ where: { numeroDossier: { startsWith: `ED-${year}-` } } });
+      numeroDossier = `ED-${year}-${String(dossierCount + 1 + tentative).padStart(4, "0")}`;
+      const dejaPris = await prisma.decompte.findFirst({ where: { OR: [{ reference }, { numeroDossier }] }, select: { id: true } });
+      if (!dejaPris) break;
+    }
 
     // §5 CDC — horodatage automatique
     const dateDepot = (data.dateDepot as Date | undefined) ?? new Date();
