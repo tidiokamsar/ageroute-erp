@@ -11,6 +11,7 @@ import { chargerRegles, nombreRegles } from "../../lib/regles";
 import { calcDecompteRegles } from "./decomptes.calc.regles";
 import { construireSnapshot, rejouerCalcul, lireSnapshot } from "./decomptes.regles.audit";
 import { z } from "zod";
+import { CLES_PIECES } from "../../lib/pieces-obligatoires";
 import type { StatutDecompte } from "@prisma/client";
 import { decompteDocumentsRouter } from "./decomptes.documents.routes";
 
@@ -139,14 +140,11 @@ decomptesRouter.put("/:id", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), a
 decomptesRouter.patch("/:id/pieces", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Non authentifié");
-    const pieces = z.object({
-      decompteSigné:     z.boolean().optional(),
-      attachements:      z.boolean().optional(),
-      facture:           z.boolean().optional(),
-      rapportAvancement: z.boolean().optional(),
-      photosChantier:    z.boolean().optional(),
-      pvContradictoire:  z.boolean().optional(),
-    }).parse(req.body);
+    // Schéma dérivé du RÉFÉRENTIEL UNIQUE (revue 27/08/2026) : l'énumération
+    // en dur rejetait silencieusement toute pièce ajoutée au référentiel.
+    const pieces = z.object(
+      Object.fromEntries(CLES_PIECES.map((cle) => [cle, z.boolean().optional()])) as unknown as Record<string, z.ZodTypeAny>,
+    ).parse(req.body);
     res.json(await decomptesService.updatePieces(req.params.id, pieces as Record<string,boolean>, req.user.id));
   } catch (err) { next(err); }
 });
