@@ -10,6 +10,8 @@ import { logAudit } from "../../lib/audit";
 import { ApiError } from "../../middleware/error.middleware";
 import { calculerAvancement, libelleBaseAvancement } from "../../lib/avancement";
 import { z } from "zod";
+import { getMarchesAffectes } from "../../lib/affectations";
+import { entrepriseDuCompte } from "../../lib/perimetre";
 
 export const projetsRouter = Router();
 projetsRouter.use(requireAuth);
@@ -155,23 +157,34 @@ projetsRouter.get("/:id", async (req: Request, res: Response, next: NextFunction
     });
     if (!projet) throw new ApiError(404, "Projet introuvable");
 
-    // Décomptes et attachements par la CHAÎNE marché : les relations directes
-    // ne sont jamais renseignées (voir filtreDecomptesDuProjet).
+    // Cloisonnement de la fiche (revue 27/08/2026) : la LISTE est bornée,
+    // la fiche ne l'était pas — un compte ENTREPRISE y lisait 30 décomptes
+    // (nets à payer) et un agent scopé ceux de marchés non affectés.
+    // La CHAÎNE (voir filtreDecomptesDuProjet) reçoit le même fragment de
+    // périmètre que les listes : entreprise propriétaire pour un compte
+    // externe, marchés affectés pour un rôle scopé.
+    const miennePr = await entrepriseDuCompte(req);
+    const affectesPr = await getMarchesAffectes(req.user!.id, req.user!.role);
+    const scope: Record<string, unknown> = miennePr
+      ? { entrepriseId: miennePr }
+      : affectesPr
+        ? { marcheId: { in: affectesPr } }
+        : {};
     const [decomptes, attachements, nbDecomptes, nbAttachements] = await Promise.all([
       prisma.decompte.findMany({
-        where: filtreDecomptesDuProjet(projet.id),
+        where: { ...filtreDecomptesDuProjet(projet.id), ...scope },
         select: { id: true, reference: true, statut: true, montantPeriodeHtGnf: true, montantTtcGnf: true, netAPayer: true, createdAt: true },
         orderBy: { createdAt: "desc" },
         take: 30,
       }),
       prisma.attachement.findMany({
-        where: filtreAttachementsDuProjet(projet.id),
+        where: { ...filtreAttachementsDuProjet(projet.id), ...(miennePr ? { decompte: { entrepriseId: miennePr } } : affectesPr ? { decompte: { marcheId: { in: affectesPr } } } : {}) },
         select: { id: true, code: true, statut: true, montantHtGnf: true, montantTtcGnf: true, natureTravaux: true, createdAt: true },
         orderBy: { createdAt: "desc" },
         take: 30,
       }),
-      prisma.decompte.count({ where: filtreDecomptesDuProjet(projet.id) }),
-      prisma.attachement.count({ where: filtreAttachementsDuProjet(projet.id) }),
+      prisma.decompte.count({ where: { ...filtreDecomptesDuProjet(projet.id), ...scope } }),
+      prisma.attachement.count({ where: { ...filtreAttachementsDuProjet(projet.id), ...(miennePr ? { decompte: { entrepriseId: miennePr } } : affectesPr ? { decompte: { marcheId: { in: affectesPr } } } : {}) } }),
     ]);
 
     res.json({

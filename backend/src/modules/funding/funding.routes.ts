@@ -50,7 +50,7 @@ async function logStatusChange(entityType: string, entityId: string, oldStatus: 
 
 // ─── Sources de financement ────────────────────────────────────────────────
 
-fundingRouter.get("/fundings", async (req: Request, res: Response, next: NextFunction) => {
+fundingRouter.get("/fundings", requireRole("ADMIN","DG","DAF","UGP","BUDGET","BAILLEUR","AUDITEUR","DSF"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { statut, search } = req.query;
     const where: any = {};
@@ -100,7 +100,7 @@ fundingRouter.post("/fundings", requireRole(...WRITE_ROLES), async (req: Request
   } catch (err) { next(err); }
 });
 
-fundingRouter.get("/fundings/:id", async (req: Request, res: Response, next: NextFunction) => {
+fundingRouter.get("/fundings/:id", requireRole("ADMIN","DG","DAF","UGP","BUDGET","BAILLEUR","AUDITEUR","DSF"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const source = await prisma.fundingSource.findUnique({
       where: { id: req.params.id },
@@ -214,7 +214,7 @@ fundingRouter.post("/fundings/:id/envelopes", requireRole(...WRITE_ROLES), async
   } catch (err) { next(err); }
 });
 
-fundingRouter.get("/funding-envelopes/:id", async (req: Request, res: Response, next: NextFunction) => {
+fundingRouter.get("/funding-envelopes/:id", requireRole("ADMIN","DG","DAF","UGP","BUDGET","BAILLEUR","AUDITEUR","DSF"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const envelope = await prisma.fundingEnvelope.findUnique({
       where: { id: req.params.id },
@@ -307,7 +307,7 @@ fundingRouter.post("/funding-envelopes/:id/allocations", requireRole(...WRITE_RO
   } catch (err) { next(err); }
 });
 
-fundingRouter.get("/funding-allocations/:id", async (req: Request, res: Response, next: NextFunction) => {
+fundingRouter.get("/funding-allocations/:id", requireRole("ADMIN","DG","DAF","UGP","BUDGET","BAILLEUR","AUDITEUR","DSF"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const allocation = await prisma.fundingAllocation.findUnique({
       where: { id: req.params.id },
@@ -409,7 +409,7 @@ export async function autoConsumeFromDecompte(decompteId: string, montantGnf: bi
 
 // ─── Audit trail ─────────────────────────────────────────────────────────────
 
-fundingRouter.get("/fundings/:id/audit-trail", async (req: Request, res: Response, next: NextFunction) => {
+fundingRouter.get("/fundings/:id/audit-trail", requireRole("ADMIN","DG","DAF","UGP","BUDGET","BAILLEUR","AUDITEUR","DSF"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const envelopes = await prisma.fundingEnvelope.findMany({ where: { fundingSourceId: req.params.id }, select: { id: true } });
     const envelopeIds = envelopes.map(e => e.id);
@@ -445,7 +445,7 @@ fundingRouter.get("/fundings/:id/audit-trail", async (req: Request, res: Respons
 
 // ─── Documents expirant bientôt (alerte conformité) ───────────────────────────
 
-fundingRouter.get("/fundings/alerts/expiring-documents", async (req: Request, res: Response, next: NextFunction) => {
+fundingRouter.get("/fundings/alerts/expiring-documents", requireRole("ADMIN","DG","DAF","UGP","BUDGET","BAILLEUR","AUDITEUR","DSF"), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const in30Days = new Date();
     in30Days.setDate(in30Days.getDate() + 30);

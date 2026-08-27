@@ -4,6 +4,7 @@
  */
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { entrepriseDuCompte } from "../../lib/perimetre";
 import { requireRole } from "../../middleware/rbac.middleware";
 import { prisma } from "../../lib/prisma";
 import { recalculerConformiteEntreprise, calculerScoreDetail } from "./conformite.service";
@@ -15,6 +16,10 @@ conformiteRouter.use(requireAuth);
 // Simuler le score sans persister (pré-calcul)
 conformiteRouter.get("/preview/:entrepriseId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Isolation ENTREPRISE (revue 27/08/2026) : score et motif de blocage
+    // d'une entreprise lisibles par son propriétaire et les rôles internes.
+    const mienneCf = await entrepriseDuCompte(req);
+    if (mienneCf && mienneCf !== req.params.entrepriseId) throw new ApiError(404, "Entreprise introuvable");
     const e = await prisma.entreprise.findFirst({ where: { id: req.params.entrepriseId, deletedAt: null } });
     if (!e) throw new ApiError(404, "Entreprise introuvable");
     const detail = calculerScoreDetail(e);
@@ -60,6 +65,8 @@ conformiteRouter.post("/debloquer/:entrepriseId", requireRole("ADMIN","DG","DAF"
 // Historique des vérifications
 conformiteRouter.get("/historique/:entrepriseId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const mienneHc = await entrepriseDuCompte(req);
+    if (mienneHc && mienneHc !== req.params.entrepriseId) throw new ApiError(404, "Entreprise introuvable");
     const historique = await prisma.conformiteVerification.findMany({
       where: { entrepriseId: req.params.entrepriseId },
       orderBy: { createdAt: "desc" },
