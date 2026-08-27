@@ -301,9 +301,19 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
         break;
       default: // APPROUVE
         if (dernierEtape) {
+          // Le message nommait la Direction Générale quelle que soit l'étape
+          // réellement franchie. Or la dernière étape est le Trésor pour les
+          // circuits FER et budget national, et le bailleur pour les onze
+          // circuits de financement extérieur — jamais la DG, qui est l'étape 5.
+          // La piste d'audit attribuait donc à la DG une validation prononcée
+          // par quelqu'un d'autre : sur un dossier contesté, l'ERP désignait le
+          // mauvais signataire.
           majInstance = { statut: "APPROUVE", etapeActuelle: prochainIndex };
           majDecompte = { statut: "VALIDE_DG" };
-          reponse = { statut: "VALIDE_DG", message: "Décompte validé par la Direction Générale — circuit financier déclenché" };
+          reponse = {
+            statut: "VALIDE_DG",
+            message: `Circuit de validation achevé — dernière étape « ${etapeCourante.nom} » (${etapeCourante.roleRequis}). Circuit financier déclenché.`,
+          };
         } else {
           // Table de correspondance UNIQUE (lib/moteur-validation.ts) — elle
           // vivait en deux exemplaires divergents avant l'unification.
@@ -354,10 +364,26 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
           const fin = dec.marche.financement;
           const typeCircuit = fin === "FER" ? "FER" : fin === "BUDGET_NATIONAL" ? "BUDGET" : "BAILLEUR";
           const etapesDefs = etapesCircuitFinancier(fin).map(e => ({ordre: e.ordre, nom: e.nom, roleOuService: e.roleOuService}));
-          await prisma.circuitFinancier.create({ data: { decompteId: dec.id, type: typeCircuit, bailleurNom: dec.marche.bailleur ?? undefined, etapes: { create: etapesDefs } } });
+          const circuit = await prisma.circuitFinancier.create({ data: { decompteId: dec.id, type: typeCircuit, bailleurNom: dec.marche.bailleur ?? undefined, etapes: { create: etapesDefs } } });
           await prisma.decompte.update({ where: { id: dec.id }, data: { statut: "EN_CIRCUIT_FINANCIER" } });
+          await logAudit({
+            userId: req.user!.id, action: "CREATE", entityType: "CircuitFinancier", entityId: circuit.id,
+            after: { decompteId: dec.id, reference: dec.reference, type: typeCircuit, etapes: etapesDefs.length },
+          });
         }
-      } catch (_) { /* non bloquant — relançable */ }
+      } catch (err) {
+        // L'échec reste NON BLOQUANT — la validation du circuit ne doit pas
+        // échouer pour un problème du circuit aval, et le décompte reste
+        // VALIDE_DG donc relançable. Mais il ne doit plus être MUET : sans
+        // trace, un décompte restait indéfiniment sans circuit financier, sans
+        // notification et sans ligne d'audit — un orphelin que personne ne
+        // voyait tant qu'un humain ne s'étonnait pas de son immobilité.
+        console.error("[CIRCUIT-FINANCIER] création échouée pour le décompte", instance.decompteId, (err as Error).message);
+        await logAudit({
+          userId: req.user!.id, action: "REJECT", entityType: "CircuitFinancier", entityId: instance.decompteId!,
+          after: { alerte: "CIRCUIT_FINANCIER_NON_CREE", motif: (err as Error).message, aRelancer: true },
+        }).catch(() => { /* l'audit ne doit pas masquer l'erreur d'origine */ });
+      }
     }
     if (decision === "APPROUVE" && prochaineEtape) {
       await notifyWorkflowStep(prochaineEtape, instance.decompte?.reference ?? "", instance.id).catch(() => {});
