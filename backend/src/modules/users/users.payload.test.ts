@@ -82,7 +82,13 @@ const ROLES_ATTENDUS = [
 
 test("les quinze roles de l'enumeration sont acceptes a la creation", () => {
   for (const role of ROLES_ATTENDUS) {
-    const { colonnes } = separerMotDePasse(userCreateSchema.parse({ ...CORPS_VALIDE, role }));
+    // ENTREPRISE exige désormais un rattachement : sans lui, le compte naîtrait
+    // sans entreprise, état que les modules de lecture prenaient pour
+    // « aucune restriction ». Les rôles internes, eux, n'en portent pas.
+    const rattachement = role === "ENTREPRISE"
+      ? { entrepriseId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301" }
+      : {};
+    const { colonnes } = separerMotDePasse(userCreateSchema.parse({ ...CORPS_VALIDE, role, ...rattachement }));
     assert.equal(colonnes.role, role, `le role ${role} doit etre accepte`);
   }
 });
@@ -110,4 +116,43 @@ test("un role inexistant reste refuse", () => {
 test("le role DSF est attribuable et n'est pas un role de circuit", () => {
   const { colonnes } = separerMotDePasse(userCreateSchema.parse({ ...CORPS_VALIDE, role: "DSF" }));
   assert.equal(colonnes.role, "DSF");
+});
+
+// ─── Rattachement d'entreprise (revue du 27/08/2026) ──────────────────────────
+// Le champ n'existait pas : zod retirant les clés inconnues, tout compte
+// ENTREPRISE créé par l'API naissait sans entreprise — et l'absence de
+// rattachement valait « aucune restriction » dans les modules de lecture.
+
+test("un compte entreprise sans rattachement est refusé", () => {
+  const r = userCreateSchema.safeParse({
+    email: "titulaire@exemple.gn", nomComplet: "Titulaire", password: "motdepasse123",
+    role: "ENTREPRISE",
+  });
+  assert.equal(r.success, false);
+});
+
+test("un compte entreprise rattaché est accepté, et le rattachement est conservé", () => {
+  const id = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+  const r = userCreateSchema.safeParse({
+    email: "titulaire@exemple.gn", nomComplet: "Titulaire", password: "motdepasse123",
+    role: "ENTREPRISE", entrepriseId: id,
+  });
+  assert.equal(r.success, true);
+  if (r.success) assert.equal(r.data.entrepriseId, id);
+});
+
+test("un compte interne rattaché à une entreprise est refusé", () => {
+  const r = userCreateSchema.safeParse({
+    email: "agent@ageroute.gov.gn", nomComplet: "Agent", password: "motdepasse123",
+    role: "MISSION", entrepriseId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+  });
+  assert.equal(r.success, false);
+});
+
+test("un compte interne sans rattachement reste accepté", () => {
+  const r = userCreateSchema.safeParse({
+    email: "agent@ageroute.gov.gn", nomComplet: "Agent", password: "motdepasse123",
+    role: "MISSION",
+  });
+  assert.equal(r.success, true);
 });

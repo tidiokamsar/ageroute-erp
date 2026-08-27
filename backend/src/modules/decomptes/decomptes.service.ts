@@ -283,7 +283,11 @@ export const decomptesService = {
       // Consommer le report absorbé : la créance reportable passe au
       // décompte courant (calculated.penalitesReporteesGnf).
       if (reportPrecedent) {
-        await tx.decompte.update({ where: { id: reportPrecedent.id }, data: { penalitesReporteesGnf: 0n } });
+        // Consommation ATOMIQUE : la condition `gt: 0` garantit qu'une seule
+        // écriture absorbe la créance. Sans elle, deux créations concurrentes
+        // lisaient le même report hors transaction et le déduisaient toutes
+        // deux — l'entreprise se voyait retenir deux fois la même pénalité.
+        await tx.decompte.updateMany({ where: { id: reportPrecedent.id, penalitesReporteesGnf: { gt: 0n } }, data: { penalitesReporteesGnf: 0n } });
       }
       return c;
     });
@@ -334,7 +338,23 @@ export const decomptesService = {
     // modifiable par son identifiant — constat C3 de la revue du 20/08/2026.
     const before = await prisma.decompte.findFirst({ where: { id, deletedAt: null }, include: { marche: true } });
     if (!before) throw new ApiError(404, "Décompte introuvable");
-    if (before.statut === "PAYE") throw new ApiError(400, "Décompte payé, modification impossible");
+
+    // Un dossier engagé dans le circuit n'est plus modifiable (revue du
+    // 27/08/2026). La seule garde était « pas encore payé » : un décompte
+    // DEPOSE, visé par la Mission, la Direction Technique, la DMC puis la DAF
+    // restait entièrement modifiable par son déposant — montants compris —
+    // sans changement de statut, sans invalider les visas et sans laisser de
+    // trace dans l'onglet Validations. Le rejeu d'audit concordait, puisque le
+    // snapshot était réécrit avec les nouveaux montants : la DG signait alors
+    // un net que personne n'avait contrôlé.
+    // Pour corriger un dossier engagé, la voie est la demande de correction,
+    // qui le renvoie au déposant en EN_CORRECTION et arrête le circuit.
+    const STATUTS_MODIFIABLES = ["BROUILLON", "EN_CORRECTION"];
+    if (!STATUTS_MODIFIABLES.includes(before.statut)) {
+      throw new ApiError(409,
+        `Ce décompte est engagé dans le circuit (statut « ${before.statut} ») et n'est plus modifiable. `
+        + "Pour le corriger, demandez une correction depuis l'étape en cours : le dossier repartira au déposant.");
+    }
     const { result: calculated, snapshot } = await calculerDecompte({
       ...before,
       ...(data as object),

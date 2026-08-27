@@ -1,3 +1,4 @@
+import { entrepriseDuCompte, assertMarcheAutorise } from "../../lib/perimetre";
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
@@ -55,7 +56,10 @@ decomptesRouter.use("/:id/documents", decompteDocumentsRouter);
 decomptesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Périmètres : isolation des comptes ENTREPRISE + affectations terrain
-    const entrepriseScope = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    // Refuse un compte entreprise sans rattachement plutôt que de renvoyer
+    // null — le repli `?? req.query.entrepriseId` ci-dessous laissait alors le
+    // CLIENT choisir le filtre, donc n'en appliquer aucun.
+    const entrepriseScope = await entrepriseDuCompte(req);
     const affectes = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
     res.json(await decomptesService.list({
       page: Number(req.query.page) || 1,
@@ -97,7 +101,15 @@ decomptesRouter.post("/", requireRole("ADMIN","DMC","MISSION","ENTREPRISE"), asy
     const body = decompteCreateSchema.parse(req.body);
     // Récupérer l'entreprise via le marché
     const { prisma } = await import("../../lib/prisma");
-    const marche = await prisma.marche.findFirst({ where: { id: (body as never as { marcheId: string }).marcheId, deletedAt: null } });
+    const marcheDeclare = (body as never as { marcheId: string }).marcheId;
+    // Périmètre d'affectation sur le marché DÉCLARÉ. La garde `router.param`
+    // ne couvre pas cette route, qui ne porte pas d'identifiant : un agent à
+    // périmètre (MISSION, TECHNIQUE, UGP, BAILLEUR) pouvait donc créer un
+    // décompte sur le marché d'autrui — dossier qu'il ne pourrait plus relire,
+    // mais qui existe, porte un numéro et entre dans les agrégats financiers
+    // de ce marché. `POST /api/attachements` faisait déjà ce contrôle.
+    await assertMarcheAutorise(req, marcheDeclare);
+    const marche = await prisma.marche.findFirst({ where: { id: marcheDeclare, deletedAt: null } });
     // Isolation entreprise : le marché (et l'entreprise déclarée) doivent être les siens
     if (req.user.role === "ENTREPRISE") {
       const mienne = await entrepriseIdOf(req.user.id);
@@ -308,7 +320,10 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
     // `penalites` porte le total imputé (saisies + report entrant) pour que le
     // rejeu d'audit concorde. Le report est borné aux pénalités imputées.
     const reportPrecedent = await prisma.decompte.findFirst({
-      where: { marcheId: decompte.marcheId, id: { not: req.params.id }, deletedAt: null, penalitesReporteesGnf: { gt: 0n } },
+      // Bornée aux décomptes ANTÉRIEURS : le filtre `id != courant` laissait
+      // un décompte ancien aspirer le report d'un décompte POSTÉRIEUR déjà en
+      // circuit, et le remettre à zéro sans que son net soit recalculé.
+      where: { marcheId: decompte.marcheId, deletedAt: null, penalitesReporteesGnf: { gt: 0n }, createdAt: { lt: decompte.createdAt } },
       orderBy: { createdAt: "desc" },
       select: { id: true, penalitesReporteesGnf: true },
     });
@@ -343,7 +358,11 @@ decomptesRouter.post("/:id/lignes", requireRole("ADMIN", "DMC", "MISSION", "ENTR
         },
       });
       if (reportPrecedent) {
-        await tx.decompte.update({ where: { id: reportPrecedent.id }, data: { penalitesReporteesGnf: 0n } });
+        // Consommation ATOMIQUE : la condition `gt: 0` garantit qu'une seule
+        // écriture absorbe la créance. Sans elle, deux créations concurrentes
+        // lisaient le même report hors transaction et le déduisaient toutes
+        // deux — l'entreprise se voyait retenir deux fois la même pénalité.
+        await tx.decompte.updateMany({ where: { id: reportPrecedent.id, penalitesReporteesGnf: { gt: 0n } }, data: { penalitesReporteesGnf: 0n } });
       }
     });
 

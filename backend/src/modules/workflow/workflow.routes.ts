@@ -29,6 +29,28 @@ import { piecesRequisesManquantes } from "../../lib/pieces-obligatoires";
 import { getMarchesAffectes } from "../../lib/affectations";
 
 export const workflowRouter = Router();
+
+/**
+ * Périmètre d'affectation sur une instance de circuit.
+ *
+ * Ce contrôle n'existait que sur l'ACTION : les lectures — instance par
+ * identifiant, circuit d'un décompte, piste d'audit — n'en avaient aucun. Un
+ * agent TECHNIQUE affecté au marché A obtenait donc l'instance complète d'un
+ * marché B : étape courante, montants, entreprise, et la totalité des actions
+ * avec le nom, le rôle et le courriel de chaque valideur. Le même dossier lui
+ * était invisible dans « Mes tâches » et son action y était refusée : la
+ * lecture contournait exactement ce que l'écriture bloquait.
+ *
+ * Rôles centraux non concernés — `getMarchesAffectes` leur renvoie null.
+ * Refus en 404 : un 403 confirmerait l'existence du dossier.
+ */
+async function assertInstanceDansPerimetre(req: Request, marcheId: string | null): Promise<void> {
+  if (!req.user) throw new ApiError(401, "Non authentifié");
+  const affectes = await getMarchesAffectes(req.user.id, req.user.role);
+  if (affectes !== null && (!marcheId || !affectes.includes(marcheId))) {
+    throw new ApiError(404, "Instance introuvable");
+  }
+}
 workflowRouter.use(requireAuth);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -173,10 +195,7 @@ workflowRouter.post("/:instanceId/action", async (req: Request, res: Response, n
     // d'un marché hors de son périmètre — exactement ce que « Mes tâches »
     // filtre et que l'action contournait. Rôles centraux non concernés
     // (getMarchesAffectes renvoie null pour eux). Refus en 404, comme partout.
-    const affectesAction = await getMarchesAffectes(req.user.id, req.user.role);
-    if (affectesAction !== null && (!instance.decompte || !affectesAction.includes(instance.decompte.marcheId))) {
-      throw new ApiError(404, "Instance introuvable");
-    }
+    await assertInstanceDansPerimetre(req, instance.decompte?.marcheId ?? null);
 
     const etapeCourante = instance.definition.etapes[instance.etapeActuelle];
     if (!etapeCourante) throw new ApiError(400, "Aucune étape courante trouvée");
@@ -501,6 +520,7 @@ workflowRouter.get("/instance/:id", async (req: Request, res: Response, next: Ne
       include: includeInstance,
     });
     if (!instance) throw new ApiError(404, "Instance introuvable");
+    await assertInstanceDansPerimetre(req, instance.decompte?.marcheId ?? null);
     res.json(instance);
   } catch (err) { next(err); }
 });
@@ -526,7 +546,10 @@ workflowRouter.get("/decompte/:decompteId", async (req: Request, res: Response, 
       include: includeInstance,
       orderBy: { createdAt: "desc" },
     });
-    if (instance) return res.json(instance);
+    if (instance) {
+      await assertInstanceDansPerimetre(req, instance.decompte?.marcheId ?? null);
+      return res.json(instance);
+    }
 
     const [nbValidations, decompte] = await Promise.all([
       prisma.decompteValidation.count({ where: { decompteId: req.params.decompteId } }),
@@ -565,6 +588,15 @@ workflowRouter.get("/definitions", async (_req: Request, res: Response, next: Ne
 // ─── Audit trail d'une instance ───────────────────────────────────────────────
 workflowRouter.get("/:instanceId/audit", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // La piste d'audit est nominative — elle nomme chaque valideur et cite ses
+    // commentaires. Elle se borne au périmètre comme le reste.
+    const instance = await prisma.workflowInstance.findUnique({
+      where: { id: req.params.instanceId },
+      select: { decompte: { select: { marcheId: true } } },
+    });
+    if (!instance) throw new ApiError(404, "Instance introuvable");
+    await assertInstanceDansPerimetre(req, instance.decompte?.marcheId ?? null);
+
     const actions = await prisma.workflowAction.findMany({
       where: { instanceId: req.params.instanceId },
       include: {

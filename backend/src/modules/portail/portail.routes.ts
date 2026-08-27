@@ -18,6 +18,7 @@ import { chargerRegles } from "../../lib/regles";
 import { calcDecompteRegles } from "../decomptes/decomptes.calc.regles";
 import { construireSnapshot } from "../decomptes/decomptes.regles.audit";
 import { bordereauDepuisTypes, clePourType } from "../../lib/pieces-obligatoires";
+import { formaterMontant } from "../../lib/montants";
 import { getStoredFilenameFromUploadUrl, portailDecompteRequestSchema } from "./portail.decompte.schema";
 import { calculerMontantLigneGnf } from "./portail.decompte.service";
 import { access } from "node:fs/promises";
@@ -275,7 +276,13 @@ portailRouter.get("/suivi/:decompteId", entrepriseOnly, wrap(async (req, res) =>
       ? "Ce décompte est un brouillon : il n'est pas encore entré dans le circuit. Envoyez-le pour démarrer la validation."
       : piecesRetournees.length > 0
         ? `${piecesRetournees.length} pièce(s) vous ont été retournée(s) : corrigez-les et redéposez-les.`
-        : null;
+        // Une correction demandée sur le FOND — un montant, un cumul — ne
+        // retourne aucune pièce : l'entreprise ne voyait alors ni consigne ni
+        // bouton, et son dossier restait immobile sans qu'elle sache pourquoi.
+        // Le motif est dans la dernière décision du circuit, affichée à côté.
+        : decompte.statut === "EN_CORRECTION"
+          ? "Une correction vous est demandée : reprenez le décompte selon le motif indiqué, puis renvoyez-le au circuit."
+          : null;
 
   res.json({
     decompte,
@@ -316,7 +323,13 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
     include: { marche: true },
   });
   if (!decompte) throw new ApiError(404, "Décompte introuvable");
-  if (decompte.statut !== "BROUILLON") {
+  // EN_CORRECTION est resoumissible par le déposant : c'est tout l'objet de la
+  // demande de correction, qui arrête le circuit et lui renvoie le dossier.
+  // Auparavant seul BROUILLON passait ici, et la route interne qui accepte
+  // EN_CORRECTION est fermée aux comptes entreprise : le dossier restait
+  // bloqué jusqu'à ce qu'un agent le resoumette à sa place — ce que la
+  // production montre déjà.
+  if (!["BROUILLON", "EN_CORRECTION"].includes(decompte.statut)) {
     throw new ApiError(400, `Ce décompte est déjà dans le circuit (statut « ${decompte.statut.replace(/_/g, " ")} »).`);
   }
 
@@ -325,9 +338,20 @@ portailRouter.post("/soumettre/:decompteId", entrepriseOnly, wrap(async (req, re
     checkEligibilite(entrepriseId),
     prisma.garantie.findMany({ where: { marcheId: decompte.marcheId }, select: { type: true, active: true, dateExpiration: true } }),
     prisma.attachement.count({ where: { decompte: { marcheId: decompte.marcheId, deletedAt: null } } }),
-    prisma.workflowInstance.findFirst({ where: { decompteId: decompte.id }, select: { id: true } }),
+    // Seul un circuit VIVANT interdit la resoumission. La recherche ne
+    // filtrait pas le statut : après une demande de correction, l'instance
+    // arrêtée (REJETE) du circuit précédent déclenchait un 409 et fermait la
+    // seule porte restante au déposant.
+    prisma.workflowInstance.findFirst({
+      where: { decompteId: decompte.id, statut: { in: ["EN_ATTENTE", "EN_COURS", "APPROUVE"] } },
+      select: { id: true, statut: true },
+    }),
   ]);
-  if (dejaOuvert) throw new ApiError(409, "Un circuit est déjà ouvert pour ce décompte.");
+  if (dejaOuvert) {
+    throw new ApiError(409, dejaOuvert.statut === "APPROUVE"
+      ? "Le circuit de ce décompte est déjà approuvé."
+      : "Un circuit est déjà ouvert pour ce décompte.");
+  }
 
   const controle = verifierEligibiliteDepot({
     blocagesEntreprise: raisons,
@@ -515,6 +539,21 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
   });
   const cumulPrecedentHtGnf = anterieurs._sum.montantPeriodeHtGnf ?? 0n;
   const penalitesImputees = reportPrecedent?.penalitesReporteesGnf ?? 0n;
+
+  // Plafond du marché. Le seul canal où l'entreprise saisit elle-même ses
+  // montants était aussi le seul à échapper au garde-fou anti-dépassement :
+  // les contrôles automatiques ne tournent que sur la saisie interne, et le
+  // contrôle d'éligibilité ne regarde ni cumul ni montant du contrat. Un dépôt
+  // pouvait donc porter le cumul bien au-delà du contrat et remonter jusqu'à
+  // l'ordonnancement sans qu'aucun écran ne le signale.
+  const plafondMarche = marche.montantActualiseGnf ?? marche.montantInitialGnf;
+  if (plafondMarche > 0n && cumulPrecedentHtGnf + htSaisi > plafondMarche) {
+    const depassement = cumulPrecedentHtGnf + htSaisi - plafondMarche;
+    throw new ApiError(400,
+      `Plafond du marché dépassé de ${formaterMontant(depassement)} GNF : `
+      + `cumul ${formaterMontant(cumulPrecedentHtGnf + htSaisi)} GNF pour un contrat de ${formaterMontant(plafondMarche)} GNF. `
+      + "Un avenant est nécessaire avant ce dépôt.");
+  }
 
   const regles = await chargerRegles({ marcheId, bailleur: marche.financement, typeMarche: marche.type });
   const calc = calcDecompteRegles({

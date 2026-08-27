@@ -91,8 +91,20 @@ export async function assertMarcheAutoriseEtPropre(
   if (!proprietaire || proprietaire !== mienne) throw new ApiError(404, "Marché introuvable");
 }
 
-/** Entreprise du compte ENTREPRISE, pour l'isolation des comptes externes. */
+/**
+ * Entreprise du compte ENTREPRISE, pour l'isolation des comptes externes.
+ *
+ * `null` signifie « compte interne, aucune isolation entreprise à appliquer ».
+ * Il ne doit JAMAIS signifier « compte entreprise dont on ignore l'entreprise » :
+ * les appelants font `if (!mienne) return;` — l'ambiguïté ouvrait donc tout
+ * l'ERP à un compte ENTREPRISE sans rattachement. Ce cas est une incohérence de
+ * données, pas un privilège : on refuse, sans révéler ce qui existe.
+ */
 export async function entrepriseDuCompte(req: Request): Promise<string | null> {
   if (req.user?.role !== "ENTREPRISE") return null;
-  return entrepriseIdOf(req.user.id);
+  const mienne = await entrepriseIdOf(req.user.id);
+  if (!mienne) {
+    throw new ApiError(403, "Ce compte entreprise n'est rattaché à aucune entreprise : accès refusé. Contactez l'administrateur.");
+  }
+  return mienne;
 }

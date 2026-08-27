@@ -27,8 +27,13 @@ export const envSchema = z.object({
   GEOPORTAIL_URL: z.string().default("https://carte.ageroute.gov.gn"),
   UPLOAD_DIR: z.string().default("/app/uploads"),
   // Proxys de confiance devant Express (voir app.ts). 2 en production —
-  // Traefik puis nginx — 0 en développement direct. Décrit par le déploiement.
-  TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(2),
+  // Traefik puis nginx — déclaré par le docker-compose.
+  // Le défaut est 0, c'est-à-dire FERMÉ : hors de la topologie de production,
+  // une valeur héritée trop haute ferait retenir une adresse tirée de
+  // l'en-tête transmis, donc choisie par l'appelant. Les plafonds de connexion
+  // et d'API se contourneraient en la faisant varier, et la piste d'audit
+  // enregistrerait des adresses inventées.
+  TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
 }).superRefine((value, ctx) => {
   if (value.JWT_SECRET === value.JWT_REFRESH_SECRET) {
     ctx.addIssue({

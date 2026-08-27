@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 // Schéma et découpage du payload : extraits pour être testables sans express ni
 // Prisma, selon la convention de tests du dépôt.
-import { userCreateSchema, separerMotDePasse } from "./users.payload";
+import { userCreateSchema, userUpdateSchema, separerMotDePasse } from "./users.payload";
 // Source unique des rôles à périmètre. La liste était recopiée en dur ici, si
 // bien qu'ajouter un rôle scopé dans lib/affectations.ts ne suffisait pas :
 // l'écran d'administration continuait de refuser de lui affecter des marchés.
@@ -38,7 +38,7 @@ usersRouter.post("/", async (req: Request, res: Response, next: NextFunction) =>
 usersRouter.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, "Authentification requise");
-    const data = userCreateSchema.partial().omit({ password: true }).parse(req.body);
+    const data = userUpdateSchema.parse(req.body);
     const updated = await prisma.user.update({ where: { id: req.params.id }, data });
     if (data.role !== undefined || data.actif === false) {
       await prisma.refreshToken.updateMany({ where: { userId: req.params.id }, data: { revoked: true } });

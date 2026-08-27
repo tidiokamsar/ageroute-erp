@@ -8,7 +8,7 @@ import { prisma } from "../../lib/prisma";
 import { logAudit } from "../../lib/audit";
 import { entrepriseIdOf } from "../../lib/scope";
 import { getMarchesAffectes } from "../../lib/affectations";
-import { assertMarcheAutoriseEtPropre } from "../../lib/perimetre";
+import { assertMarcheAutoriseEtPropre, entrepriseDuCompte } from "../../lib/perimetre";
 import { z } from "zod";
 import { StatutMarche } from "@prisma/client";
 
@@ -31,7 +31,10 @@ async function assertAccesMarche(req: Request, marcheId: string): Promise<void> 
 marchesRouter.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Périmètres : isolation des comptes ENTREPRISE + affectations terrain
-    const entrepriseScope = req.user?.role === "ENTREPRISE" ? await entrepriseIdOf(req.user.id) : null;
+    // Refuse un compte entreprise sans rattachement : le repli
+    // `?? req.query.entrepriseId` ci-dessous laisserait sinon le client choisir
+    // son propre filtre, c'est-à-dire n'en appliquer aucun.
+    const entrepriseScope = await entrepriseDuCompte(req);
     const affectes = req.user ? await getMarchesAffectes(req.user.id, req.user.role) : null;
     res.json(await marchesService.list({
       page: Number(req.query.page) || 1,

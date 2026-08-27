@@ -2,6 +2,7 @@
  * §21 CDC — Tableaux de bord adaptés par profil
  * §17 CDC — Suivi statut temps réel
  */
+import { entrepriseDuCompte } from "../../lib/perimetre";
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth } from "../../middleware/auth.middleware";
 import { requireRole } from "../../middleware/rbac.middleware";
@@ -21,7 +22,10 @@ async function generalDashboard(req: Request, res: Response, next: NextFunction)
     // Revue du 20/08/2026 : ce filtre était déclaré puis jamais alimenté — un
     // compte ENTREPRISE recevait les agrégats et montants payés de TOUTE
     // l'agence. Il borne désormais tous les compteurs et agrégats ci-dessous.
-    const mienne = role === "ENTREPRISE" && req.user ? await entrepriseIdOf(req.user.id) : null;
+    // `entrepriseDuCompte` refuse un compte ENTREPRISE sans rattachement, au
+    // lieu de renvoyer null — que la ligne suivante interpréterait comme
+    // « aucun filtre », donc comme un accès aux agrégats de toute l'agence.
+    const mienne = await entrepriseDuCompte(req);
     const entrepriseFilter: Record<string,unknown> = mienne ? { entrepriseId: mienne } : {};
     const marcheScope = affectes ? { marcheId: { in: affectes } } : {};
     const marcheScopeNonDeleted = affectes ? { deletedAt: null, ...marcheScope } : { deletedAt: null };

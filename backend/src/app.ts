@@ -4,6 +4,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
+import { createHash } from "node:crypto";
 import { env } from "./config/env";
 import { authRouter } from "./modules/auth/auth.routes";
 import { entreprisesRouter } from "./modules/entreprises/entreprises.routes";
@@ -63,13 +64,23 @@ export function createApp() {
   app.use(express.json({ limit: "10mb" }));
   app.use(morgan(env.NODE_ENV === "development" ? "dev" : "combined"));
 
-  // Garde-fou global — plafond d'appels API par adresse IP (anti-abus,
-  // anti-énumération). Le /api/auth/login conserve sa limite stricte dédiée.
+  // Garde-fou global contre l'abus et l'énumération. Compté par UTILISATEUR
+  // dès qu'un jeton est présent, par adresse seulement à défaut : toute
+  // l'agence sort par une adresse unique, et un plafond par adresse revenait à
+  // faire partager un seul compteur à tous les agents. Les écrans se
+  // rafraîchissant seuls (30 à 60 secondes), une dizaine de sessions ouvertes
+  // suffisaient à l'épuiser — et comme le rafraîchissement de jeton compte
+  // dedans, un 429 déconnectait réellement tout le monde.
+  // Le plafond anonyme reste bas : il ne couvre que la connexion et le public.
   app.use("/api", rateLimit({
     windowMs: 15 * 60 * 1000,
-    limit: 500,
+    limit: (req) => (req.headers.authorization ? 2000 : 300),
     standardHeaders: true,
     legacyHeaders: false,
+    keyGenerator: (req) => {
+      const jeton = req.headers.authorization;
+      return jeton ? `jeton:${createHash("sha256").update(jeton).digest("hex").slice(0, 32)}` : `ip:${req.ip}`;
+    },
     message: { error: "Trop de requêtes — réessayez plus tard" },
   }));
 

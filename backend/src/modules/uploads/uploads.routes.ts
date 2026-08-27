@@ -81,6 +81,33 @@ const uploadLimiter = rateLimit({
   message: { error: "Quota de téléversement atteint. Réessayez plus tard." },
 });
 
+/**
+ * Plafond en OCTETS par compte et par heure.
+ *
+ * Compter les fichiers ne suffit pas : 200 pièces de 20 Mo font 4 Go par heure
+ * et par compte, sur un volume qui n'a pas de quota et que partagent cinq bases
+ * de données de production du même serveur. Un compte externe compromis — ou
+ * simplement partagé chez un prestataire — pouvait saturer le disque et donc
+ * arrêter PostgreSQL de l'ERP ET des autres applications.
+ *
+ * Le compteur est en mémoire, comme celui des requêtes : il tombe au
+ * redémarrage, ce qui est acceptable pour un garde-fou anti-emballement.
+ */
+const PLAFOND_OCTETS_PAR_HEURE = 500 * 1024 * 1024;
+const octetsParCompte = new Map<string, { total: number; expire: number }>();
+
+function comptabiliserOctets(compte: string, octets: number): boolean {
+  const maintenant = Date.now();
+  const courant = octetsParCompte.get(compte);
+  if (!courant || courant.expire <= maintenant) {
+    octetsParCompte.set(compte, { total: octets, expire: maintenant + 60 * 60 * 1000 });
+    return true;
+  }
+  if (courant.total + octets > PLAFOND_OCTETS_PAR_HEURE) return false;
+  courant.total += octets;
+  return true;
+}
+
 // Signatures magiques — le contenu doit correspondre au type déclaré
 // (un « PDF » renommé contenant un exécutable doit être refusé).
 const MAGIC_BYTES: Record<string, number[]> = {
@@ -134,6 +161,13 @@ uploadsRouter.post("/", requireAuth, requireDocumentModule, uploadLimiter, (req:
     if (!signatureConforme(file.path, file.mimetype)) {
       try { fs.unlinkSync(file.path); } catch { /* ignore */ }
       return next(new ApiError(400, "Le contenu du fichier ne correspond pas à son type déclaré"));
+    }
+    // Volume horaire par compte — le plafond en nombre de fichiers laissait
+    // passer 4 Go par heure sur un volume sans quota, partagé avec les bases
+    // de données des autres applications du serveur.
+    if (!comptabiliserOctets(req.user?.id ?? "anonyme", file.size)) {
+      try { fs.unlinkSync(file.path); } catch { /* ignore */ }
+      return next(new ApiError(429, "Volume de téléversement horaire atteint pour ce compte. Réessayez plus tard."));
     }
     try {
       await logAudit({

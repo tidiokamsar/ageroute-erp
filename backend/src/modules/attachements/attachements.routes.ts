@@ -38,6 +38,42 @@ async function assertAccesAttachement(req: Request, decompteId: string): Promise
   if (mienne && decompte.entrepriseId !== mienne) throw new ApiError(404, "Décompte introuvable");
 }
 
+/**
+ * Garde de périmètre sur TOUTE route désignant un attachement.
+ *
+ * La garde ci-dessus existait mais n'était appelée que sur deux routes : la
+ * création et la modification. Les vingt autres — détail, lignes, mesures,
+ * points GPS, médias, commentaires, audit, validations — ne vérifiaient que
+ * l'isolation entreprise. Un chef de Mission affecté au marché A lisait donc
+ * l'attachement du marché B par son identifiant, prix unitaires et photos de
+ * chantier compris, et pouvait y ajouter des mesures de preuve. Le même dossier
+ * lui était pourtant refusé dans la liste : le cloisonnement affiché se
+ * contournait par un appel direct.
+ *
+ * Posée en `router.param`, la garde couvre aussi les routes ajoutées plus tard.
+ */
+attachementsRouter.param("id", async (req: Request, _res: Response, next: NextFunction, id: string) => {
+  try {
+    const att = await prisma.attachement.findUnique({ where: { id }, select: { decompteId: true } });
+    if (!att) throw new ApiError(404, "Attachement introuvable");
+    await assertAccesAttachement(req, att.decompteId);
+    next();
+  } catch (err) { next(err); }
+});
+
+/** Même garde pour les routes qui désignent une LIGNE, hors de /:id. */
+attachementsRouter.param("ligneId", async (req: Request, _res: Response, next: NextFunction, ligneId: string) => {
+  try {
+    const ligne = await prisma.attachementLigne.findUnique({
+      where: { id: ligneId },
+      select: { attachement: { select: { decompteId: true } } },
+    });
+    if (!ligne) throw new ApiError(404, "Ligne introuvable");
+    await assertAccesAttachement(req, ligne.attachement.decompteId);
+    next();
+  } catch (err) { next(err); }
+});
+
 function genCode(seq: number): string {
   const year = new Date().getFullYear();
   return `ATT-${year}-${String(seq).padStart(4, "0")}`;
