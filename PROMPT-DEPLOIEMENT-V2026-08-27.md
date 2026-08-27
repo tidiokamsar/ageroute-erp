@@ -74,8 +74,12 @@ ls -l ~/erp-deploy/staging-v2026.08.27/docs/runbooks/recuperation-volume-uploads
 # Purge des refresh tokens stockés en clair — la nouvelle version n'écrit
 # et ne lit plus que des empreintes SHA-256. Effet : reconnexion unique de
 # toutes les sessions ouvertes (assumé, doctrine « la rotation invalide »).
-docker exec -i erp-db psql -U erpuser -d erp_ageroute \
-  < ~/erp-deploy/staging-v2026.08.27/backend/prisma/sql/2026-08-27-refresh-tokens-haches.sql
+# Puis enum AuditAction + EXPORT : la génération de PDF ne se journalise
+# plus « UPDATE » (sans réécriture rétroactive de l'historique).
+for SQLFILE in 2026-08-27-refresh-tokens-haches.sql 2026-08-27-audit-action-export.sql; do
+  docker exec -i erp-db psql -U erpuser -d erp_ageroute \
+    < ~/erp-deploy/staging-v2026.08.27/backend/prisma/sql/$SQLFILE
+done
 
 # Contrôle :
 docker exec erp-db psql -U erpuser -d erp_ageroute -tAc \
@@ -137,5 +141,5 @@ docker exec -i erp-db pg_restore -U erpuser -d erp_ageroute --clean \
 | Branche | `master` (`50082ff` — merges des 3 lots de la session 3) |
 | Tests | 268 au total — **265 pass / 0 échec / 3 ignorés** (PG_TEST=1) |
 | Builds | backend `tsc` OK, frontend `vite` OK |
-| Migration | `backend/prisma/sql/2026-08-27-refresh-tokens-haches.sql` — **psql uniquement**, avec le déploiement |
+| Migrations | `2026-08-27-refresh-tokens-haches.sql` (purge jetons) + `2026-08-27-audit-action-export.sql` (enum EXPORT) — **psql uniquement**, avec le déploiement |
 | Dépendances | montées semver-compatibles uniquement (audit fix) |
