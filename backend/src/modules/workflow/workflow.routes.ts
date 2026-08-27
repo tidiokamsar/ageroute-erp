@@ -541,6 +541,16 @@ workflowRouter.get("/instance/:id", async (req: Request, res: Response, next: Ne
  */
 workflowRouter.get("/decompte/:decompteId", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Périmètre jugé sur le DÉCOMPTE, pas sur l'instance : les dossiers
+    // antérieurs à l'unification des circuits n'en ont aucune et tombaient
+    // dans la branche de repli ci-dessous, qui répondait sans aucun contrôle.
+    const cible = await prisma.decompte.findUnique({
+      where: { id: req.params.decompteId },
+      select: { marcheId: true },
+    });
+    if (!cible) throw new ApiError(404, "Décompte introuvable");
+    await assertInstanceDansPerimetre(req, cible.marcheId);
+
     const instance = await prisma.workflowInstance.findFirst({
       where: { decompteId: req.params.decompteId },
       include: includeInstance,
