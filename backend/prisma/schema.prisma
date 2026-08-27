@@ -1297,7 +1297,14 @@ model Paiement {
 model AuditLog {
   id         String      @id @default(uuid())
   userId     String?
-  user       User?       @relation(fields: [userId], references: [id])
+  // Revue 27/08/2026 — la relation etait en SET NULL implicite : supprimer un
+  // compte VIDAIT l auteur de ses entrees d audit, sans erreur ni trace. Un
+  // agent ayant vise des decomptes pouvait donc etre efface de la piste
+  // d audit par une seule requete DELETE /api/users/:id. En RESTRICT, la
+  // suppression est refusee des qu une entree existe (409 cote route) : la
+  // voie correcte reste la desactivation du compte.
+  // userId reste nullable : LOGIN_FAILED n a legitimement pas d auteur connu.
+  user       User?       @relation(fields: [userId], references: [id], onDelete: Restrict)
   action     AuditAction
   entityType String
   entityId   String?
