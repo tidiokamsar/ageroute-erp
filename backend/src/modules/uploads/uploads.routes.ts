@@ -170,6 +170,17 @@ uploadsRouter.post("/", requireAuth, requireDocumentModule, uploadLimiter, (req:
       return next(new ApiError(429, "Volume de téléversement horaire atteint pour ce compte. Réessayez plus tard."));
     }
     try {
+      // Propriété en table dédiée (revue 27/08/2026) — le journal d'audit
+      // reste la TRACE, la table Upload est l'INDEX d'autorisation.
+      await prisma.upload.create({
+        data: {
+          userId: req.user!.id,
+          storedFilename: file.filename,
+          originalName: file.originalname,
+          mimeType: file.mimetype,
+          sizeOctets: file.size,
+        },
+      });
       await logAudit({
         userId: req.user!.id,
         action: "CREATE",

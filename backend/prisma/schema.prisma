@@ -174,6 +174,7 @@ enum TypeAttachement {
 // ===================== UTILISATEURS =====================
 
 model User {
+  uploads         Upload[]
   id               String    @id @default(uuid())
   email            String    @unique
   nomComplet       String
@@ -1131,6 +1132,24 @@ model DecomptePaymentTrace {
 }
 
 // ===================== §18 CDC — GED (Gestion Électronique de Documents) =====================
+
+// Pièces téléversées — la PROPRIÉTÉ d'un fichier avant rattachement.
+// Revue 27/08/2026 (relais Claude) : elle était déduite du JOURNAL d'audit
+// (comptage des CREATE Upload) — une piste d'audit n'est pas un index
+// d'autorisation : rétention, purge ou simple volume du journal changeaient
+// la décision. Table dédiée, écrite au dépôt, lue au rattachement.
+model Upload {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  storedFilename String   @unique
+  originalName   String
+  mimeType       String?
+  sizeOctets     Int?
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+}
 
 model Document {
   id          String   @id @default(uuid())

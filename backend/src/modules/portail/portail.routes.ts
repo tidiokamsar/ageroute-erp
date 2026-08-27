@@ -532,8 +532,11 @@ portailRouter.post("/deposer-decompte", entrepriseOnly, wrap(async (req, res) =>
     Promise.all(fichiersPieces.map(async (f) => {
       try { await access(path.resolve(env.UPLOAD_DIR, f)); return true; } catch { return false; }
     })),
-    prisma.auditLog.count({
-      where: { userId: req.user!.id, action: "CREATE", entityType: "Upload", entityId: { in: fichiersPieces } },
+    // Propriété par la table dédiée (revue 27/08/2026) — le comptage du
+    // journal d'audit adossait une décision d'autorisation à une table de
+    // trace : rétention ou purge du journal changeaient la décision.
+    prisma.upload.count({
+      where: { userId: req.user!.id, storedFilename: { in: fichiersPieces } },
     }),
     prisma.document.findFirst({
       where: { cheminFichier: { in: pieces.map((p) => p.cheminFichier) } },

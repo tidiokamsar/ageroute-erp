@@ -62,6 +62,47 @@ delegationsRouter.post("/", async (req: Request, res: Response, next: NextFuncti
     }
     if (new Date(body.dateFin) <= new Date(body.dateDebut)) throw new ApiError(400, "La date de fin doit être postérieure au début");
 
+    // Revue 27/08/2026 (relais Claude) — deux garde-fous manquaient :
+    //
+    // 1. DURÉE MAXIMALE : une délégation sans limite de temps permettait un
+    //    intérim perpétuité — même une année entière passait. Un intérim est
+    //    un arrangement temporaire : 90 jours glissants, renouvelable.
+    const DUREE_MAX_MS = 90 * 24 * 3600 * 1000;
+    if (new Date(body.dateFin).getTime() - new Date(body.dateDebut).getTime() > DUREE_MAX_MS) {
+      throw new ApiError(400, "Une délégation est limitée à 90 jours — renouvelez-la si l'absence se prolonge");
+    }
+    // Une délégation ne peut pas commencer dans un passé lointain (rétrodatage
+    // d'un pouvoir déjà utilisé).
+    if (new Date(body.dateDebut).getTime() < Date.now() - DUREE_MAX_MS) {
+      throw new ApiError(400, "Une délégation ne peut pas commencer plus de 90 jours dans le passé");
+    }
+
+    // 2. CIRCULARITÉ : A délègue à B, B délègue à A — chaque porte faire
+    //    suivre à l'autre un pouvoir que personne ne détient à la source.
+    //    On remonte la chaîne des délégations actives : si le futur titulaire
+    //    apparaît déjà comme suppléant en aval, la chaîne se mord la queue.
+    const delegationActives = await prisma.delegation.findMany({
+      where: { actif: true, dateFin: { gte: new Date() } },
+      select: { titulaireId: true, suppleantId: true },
+    });
+    // Graphe titulaire → suppléants ; parcours en profondeur depuis le
+    // suppléant proposé : si on retombe sur le titulaire, c'est un cycle.
+    const parTitulaire = new Map<string, string[]>();
+    for (const d of delegationActives) {
+      parTitulaire.set(d.titulaireId, [...(parTitulaire.get(d.titulaireId) ?? []), d.suppleantId]);
+    }
+    const visites = new Set<string>([body.suppleantId]);
+    const pile = [body.suppleantId];
+    while (pile.length > 0) {
+      const courant = pile.pop()!;
+      for (const suivant of parTitulaire.get(courant) ?? []) {
+        if (suivant === body.titulaireId) {
+          throw new ApiError(400, "Circularité détectée : cette délégation fermerait une boucle (le titulaire est déjà suppléant dans la chaîne)");
+        }
+        if (!visites.has(suivant)) { visites.add(suivant); pile.push(suivant); }
+      }
+    }
+
     const created = await prisma.delegation.create({
       data: {
         titulaireId: body.titulaireId,
